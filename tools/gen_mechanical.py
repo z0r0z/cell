@@ -18,6 +18,20 @@ OBJ = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'models' / 'instrument.
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / 'diagrams' / 'mechanical.svg'
 
 # ---- parse -------------------------------------------------------------
+if not OBJ.exists():
+    raise SystemExit(f"{OBJ} not found.")
+
+# The model is tracked with Git LFS. A checkout without LFS leaves a ~130-byte
+# pointer file here, and parsing it yields no vertices — which surfaces much
+# later as an unhelpful "zero-size array" from numpy. Say what is actually
+# wrong instead.
+_head = OBJ.open('rb').read(64)
+if _head.startswith(b'version https://git-lfs'):
+    raise SystemExit(
+        f"{OBJ} is a Git LFS pointer, not the mesh.\n"
+        f"  git lfs install && git lfs pull\n"
+        f"In CI, set 'lfs: true' on actions/checkout.")
+
 objs = OrderedDict(); cur = None; V = []
 for line in open(OBJ):
     if line.startswith('v '):
@@ -35,6 +49,8 @@ def group(pfx):
     idx = [i for k, (_, ii) in objs.items() if k.startswith(pfx) for i in ii]
     P = V[idx]; return P.min(0), P.max(0), P
 
+if len(V) == 0:
+    raise SystemExit(f"{OBJ} contains no vertices — is it a complete OBJ export?")
 lo, hi = V.min(0), V.max(0)
 L, HT, D = hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]
 

@@ -4,6 +4,18 @@ A hardware wallet that requires a live pulse, or a drop of fresh blood, to autho
 
 Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, about $90 in parts. Public domain.
 
+<img src="diagrams/model-view.png" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
+
+<sup>116.2 × 73.2 × 28.3 mm. The knurled ring is the sensor port — a fingertip on it, or a cartridge under it. It is a bezel, not a control; nothing rotates.</sup>
+
+**Spin it yourself.** The enclosure is a parametric three.js model, not a static render:
+
+```bash
+python3 -m http.server -d viewer 8000     # then open localhost:8000/instrument.html
+```
+
+Orbit, and export OBJ or glTF from the viewer. `models/README.md` explains the pipeline and the one open mechanical item.
+
 ## Status
 
 The design is complete and the gate logic self-tests, but **nothing has been validated on hardware.** Every sensing threshold is a first-principles starting point that must be calibrated against real samples before the device is trusted with anything.
@@ -15,6 +27,8 @@ There is also one **blocking mechanical fault**: the cartridge slot and the opti
 The most useful thing anyone can do for this project is run the Phase 1 spoof panel and publish the result — including, especially, a negative one. See `CONTRIBUTING.md`.
 
 ## What it does
+
+<img src="diagrams/how-it-works.svg" alt="How the two liveness tiers gate the signing key" width="100%">
 
 Transactions arrive as a QR code read by the camera and leave as a QR code on the display. There is no wifi, no bluetooth and no USB data path.
 
@@ -151,6 +165,8 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `CONTRIBUTING.md` | What this project actually needs |
 
 ## Building one
+
+<img src="diagrams/build-sheet.svg" alt="Build sheet: parts, optical head, cartridge" width="100%">
 
 `BUILD.md` §2 splits the build in two. Phase 1 is the blood reader alone at about $60: a Pi, a spectrometer, a laser, a camera, a printed chamber and cartridges. It has no security requirements because it signs nothing, and it answers the only question that determines whether the rest is worth building. Phase 2 adds the wallet for a further $30.
 

@@ -26,6 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The model is tracked with Git LFS. Without this the checkout is a
+          # 130-byte pointer file, the parser finds no vertices, and the job
+          # fails on an empty array rather than on a real drift.
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
