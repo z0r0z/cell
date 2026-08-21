@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 880" width="1000" height="880" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="d1" markerWidth="8" markerHeight="8" refX="7" refY="2.6" orient="auto"><path d="M0,0 L7,2.6 L0,5.2 z" fill="#8A8B8F"/></marker>
+    <marker id="d2" markerWidth="8" markerHeight="8" refX="1" refY="2.6" orient="auto"><path d="M7,0 L0,2.6 L7,5.2 z" fill="#8A8B8F"/></marker>
+    <marker id="ry" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#C9A227"/></marker>
+    <marker id="rb" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#6F9FC9"/></marker>
+    <pattern id="hx" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="0" y2="6" stroke="#3A3A38" stroke-width="1.4"/></pattern>
+  </defs>
+  <rect width="1000" height="880" fill="#0C0C0B"/>
+
+  <text x="48" y="52" font-size="22" font-weight="200" letter-spacing="9" fill="#D8D2C8">CELL — BUILD SHEET</text>
+  <rect x="49" y="63" width="26" height="2" fill="#8E1A26"/>
+  <text x="952" y="52" text-anchor="end" font-size="10.5" letter-spacing="2.4" fill="#6F7178">REV 0.5 · ~US$90 · mm</text>
+
+  <!-- ===== OPTICAL HEAD ===== -->
+  <text x="48" y="104" font-size="10.5" letter-spacing="3" fill="#6F7178">OPTICAL HEAD — CHEMISTRY (45°/0°) + LIVENESS (SPECKLE)</text>
+
+  <path d="M120,124 L560,124 L560,290 L452,290 L452,254 L228,254 L228,290 L120,290 Z" fill="url(#hx)" stroke="#4A4A46" stroke-width="1.6"/>
+  <rect x="228" y="254" width="224" height="36" fill="#0C0C0B"/>
+
+  <rect x="312" y="136" width="56" height="22" rx="2" fill="#D8D2C8"/>
+  <text x="340" y="152" font-size="10" font-weight="600" text-anchor="middle" fill="#0C0C0B">AS7341</text>
+
+  <path d="M328,158 L328,214 L316,214 L316,158 Z" fill="#2A2926" stroke="#4A4A46"/>
+  <path d="M352,158 L352,214 L364,214 L364,158 Z" fill="#2A2926" stroke="#4A4A46"/>
+  <text x="374" y="172" font-size="9.5" fill="#8A8B8F">aperture Ø3.0 × 6.0</text>
+  <text x="374" y="185" font-size="9.5" fill="#8A8B8F">matte black</text>
+
+  <line x1="340" y1="254" x2="340" y2="162" stroke="#6F9FC9" stroke-width="2" marker-end="url(#rb)"/>
+  <text x="348" y="232" font-size="10" font-weight="600" fill="#6F9FC9">0° observe</text>
+
+  <rect x="216" y="182" width="40" height="18" rx="2" fill="#C9A227" transform="rotate(45 236 191)"/>
+  <text x="140" y="180" font-size="10" font-weight="600" fill="#C9A227">LED #1 white</text>
+  <text x="140" y="193" font-size="9.5" fill="#8A7A3A">+ IR940 co-sited</text>
+  <line x1="250" y1="206" x2="332" y2="250" stroke="#C9A227" stroke-width="2" marker-end="url(#ry)"/>
+
+  <rect x="424" y="182" width="40" height="18" rx="2" fill="#C9A227" transform="rotate(-45 444 191)"/>
+  <rect x="196" y="140" width="34" height="14" rx="2" fill="#B23A48" transform="rotate(30 213 147)"/>
+  <text x="132" y="140" font-size="10" font-weight="600" fill="#B23A48">650 nm laser</text>
+  <line x1="228" y1="158" x2="322" y2="252" stroke="#B23A48" stroke-width="1.8" stroke-dasharray="5 3"/>
+  <rect x="398" y="136" width="40" height="16" rx="2" fill="#4A4E57"/>
+  <text x="446" y="146" font-size="10" font-weight="600" fill="#9FA3A8">camera, no lens</text>
+  <line x1="418" y1="152" x2="356" y2="252" stroke="#9FA3A8" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text x="492" y="172" font-size="10" font-weight="600" fill="#C9A227">LED #2 white</text>
+  <line x1="430" y1="206" x2="348" y2="250" stroke="#C9A227" stroke-width="2" marker-end="url(#ry)"/>
+
+  <path d="M340,232 A28,28 0 0,0 320,212" fill="none" stroke="#C9A227" stroke-width="1.2"/>
+  <text x="298" y="230" font-size="10" font-weight="600" fill="#C9A227">45°</text>
+  <path d="M340,232 A28,28 0 0,1 360,212" fill="none" stroke="#C9A227" stroke-width="1.2"/>
+  <text x="368" y="230" font-size="10" font-weight="600" fill="#C9A227">45°</text>
+
+  <line x1="430" y1="206" x2="348" y2="250" stroke="none"/>
+  <line x1="348" y1="250" x2="430" y2="206" stroke="#3A3A38" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="462" y="238" font-size="9.5" fill="#5A5A56">specular exits at 45°</text>
+
+  <rect x="228" y="254" width="224" height="6" fill="#2E3A42" stroke="#4E6270"/>
+  <text x="220" y="259" font-size="9.5" text-anchor="end" fill="#4E6270">PET 0.10</text>
+  <rect x="228" y="260" width="224" height="30" fill="#E8E4DE" stroke="#8A8B8F"/>
+  <path d="M310,260 L310,276 L370,276 L370,260" fill="#6E1420" stroke="#4A0E14"/>
+  <text x="340" y="272" font-size="9" font-weight="700" text-anchor="middle" fill="#E8E4DE">BLOOD</text>
+  <rect x="248" y="256" width="26" height="5" fill="#fff" stroke="#8A8B8F"/>
+  <text x="261" y="303" font-size="9" text-anchor="middle" fill="#8A8B8F">white ref</text>
+  <text x="466" y="284" font-size="10" fill="#8A8B8F">cartridge, white PETG</text>
+
+  <line x1="288" y1="158" x2="288" y2="254" stroke="#8A8B8F" stroke-width="1" marker-start="url(#d2)" marker-end="url(#d1)"/>
+  <text x="280" y="210" font-size="10.5" font-weight="600" text-anchor="end" fill="#D8D2C8">9.0</text>
+  <line x1="236" y1="322" x2="340" y2="322" stroke="#8A8B8F" stroke-width="1" marker-start="url(#d2)" marker-end="url(#d1)"/>
+  <text x="288" y="316" font-size="10.5" font-weight="600" text-anchor="middle" fill="#D8D2C8">12.0</text>
+
+  <rect x="592" y="118" width="360" height="330" rx="5" fill="#101010" stroke="#2A2926"/>
+  <text x="610" y="142" font-size="11.5" fill="#D8D2C8">Why this geometry</text>
+  <text x="610" y="166" font-size="10.5" fill="#8A8B8F">Wet blood is glossy. A normal-incidence lamp would swamp</text>
+  <text x="610" y="182" font-size="10.5" fill="#8A8B8F">the sensor with surface reflection carrying zero chemical</text>
+  <text x="610" y="198" font-size="10.5" fill="#8A8B8F">information. At 45° the specular lobe exits at 45° and misses.</text>
+  <text x="610" y="222" font-size="10.5" fill="#8A8B8F">Two opposed LEDs cancel shading from droplet asymmetry.</text>
+  <text x="610" y="246" font-size="10.5" fill="#C9707A">The well is optically semi-infinite (≥0.4 deep): reflectance is</text>
+  <text x="610" y="262" font-size="10.5" fill="#C9707A">independent of fill volume and of the backing. That is why</text>
+  <text x="610" y="278" font-size="10.5" fill="#C9707A">8–15 µL is fine and FDM roughness doesn't matter.</text>
+  <text x="610" y="300" font-size="10.5" fill="#D8D2C8">Do not "improve" it by making the well thinner.</text>
+  <line x1="610" y1="312" x2="940" y2="312" stroke="#2A2926"/>
+  <text x="610" y="330" font-size="11.5" fill="#C9707A">Second path: speckle</text>
+  <text x="610" y="350" font-size="10.5" fill="#8A8B8F">650 nm laser at ~30°, camera at ~20 mm with the</text>
+  <text x="610" y="366" font-size="10.5" fill="#8A8B8F"><tspan fill="#D8D2C8">lens removed</tspan>, off the specular axis. Fixed exposure,</text>
+  <text x="610" y="382" font-size="10.5" fill="#8A8B8F">gain and AWB — auto adjustment destroys the</text>
+  <text x="610" y="398" font-size="10.5" fill="#8A8B8F">correlation measurement.</text>
+  <text x="610" y="418" font-size="10.5" fill="#C9707A">The two paths never run at once: the laser</text>
+  <text x="610" y="434" font-size="10.5" fill="#C9707A">contaminates 630 nm, the LEDs wash out speckle.</text>
+
+  <!-- ===== CARTRIDGE ===== -->
+  <text x="48" y="486.0" font-size="10.5" letter-spacing="3" fill="#6F7178">CARTRIDGE — 32 × 14 × 2.4, WHITE PETG, 0.15 LAYERS, IRONING ON  ·  600 s CAPTURE</text>
+
+  <g transform="translate(48 502.0) scale(5.0)">
+    <rect x="0" y="0" width="32" height="14" rx="0.8" fill="#151513" stroke="#4A4A46" stroke-width="0.14"/>
+    <circle cx="8" cy="7" r="3.5" fill="none" stroke="#4A4A46" stroke-width="0.12"/>
+    <circle cx="8" cy="7" r="2" fill="#6E1420"/>
+    <rect x="14" y="2" width="4" height="4" fill="#E8E4DE" stroke="#8A8B8F" stroke-width="0.1"/>
+    <rect x="24" y="0" width="8" height="14" fill="#0F0F0E" stroke="#4A4A46" stroke-width="0.12"/>
+  </g>
+  <text x="48" y="594.0" font-size="10" fill="#8A8B8F">well Ø4.0 × 0.55 deep  ·  moat Ø7.0  ·  ≈7 µL</text>
+  <text x="48" y="609.0" font-size="10" fill="#8A8B8F">white ref printed on · dark = LEDs off</text>
+  <text x="48" y="624.0" font-size="10" fill="#8A8B8F">PET film lid, taped edge = the hinge</text>
+
+  <rect x="270" y="504.0" width="322" height="130" rx="5" fill="#101010" stroke="#2A2926"/>
+  <text x="288" y="528.0" font-size="11.5" fill="#D8D2C8">Per-cartridge references</text>
+  <text x="288" y="552.0" font-size="10.5" fill="#8A8B8F">LED aging, sensor drift and print variation are</text>
+  <text x="288" y="568.0" font-size="10.5" fill="#8A8B8F">first-order effects. Left alone they walk your</text>
+  <text x="288" y="584.0" font-size="10.5" fill="#8A8B8F">thresholds out of spec in weeks, silently.</text>
+  <text x="288" y="604.0" font-size="10.5" fill="#8A8B8F">Normalising against a patch printed in the same</text>
+  <text x="288" y="620.0" font-size="10.5" fill="#8A8B8F">layer, same filament, cancels nearly all of it.</text>
+
+  <rect x="612" y="504.0" width="340" height="130" rx="5" fill="#141010" stroke="#4A1219"/>
+  <text x="630" y="528.0" font-size="11.5" fill="#C9707A">Biosafety</text>
+  <text x="630" y="552.0" font-size="10.5" fill="#8A8B8F">One cartridge, one use, then a <tspan fill="#D8D2C8">sharps container</tspan>.</text>
+  <text x="630" y="570.0" font-size="10.5" fill="#8A8B8F">Commercial sterile single-use lancets only. Never reuse,</text>
+  <text x="630" y="586.0" font-size="10.5" fill="#8A8B8F">never substitute a blade or needle.</text>
+  <text x="630" y="608.0" font-size="10.5" fill="#D8D2C8">One device, one person. Never share.</text>
+  <text x="630" y="624.0" font-size="10.5" fill="#8A8B8F">HBV survives on dry surfaces up to 7 days.</text>
+
+  <!-- ===== WIRING ===== -->
+  <text x="48" y="678.0" font-size="10.5" letter-spacing="3" fill="#6F7178">WIRING — BCM NUMBERING, I²C1 @ 400 kHz</text>
+
+  <g font-size="10.5">
+    <rect x="48" y="694.0" width="440" height="158" rx="5" fill="#101010" stroke="#2A2926"/>
+    <text x="66" y="718.0" fill="#6F9FC9" font-weight="600">GPIO2 / 3</text><text x="180" y="718.0" fill="#8A8B8F">AS7341 0x39 · ATECC608B 0x60</text>
+    <text x="66" y="738.0" fill="#D8D2C8" font-weight="600">GPIO5 / 13 / 19</text><text x="180" y="738.0" fill="#8A8B8F">UP · DOWN · BACK</text>
+    <text x="66" y="758.0" fill="#C9707A" font-weight="600">GPIO26</text><text x="180" y="758.0" fill="#C9707A">CONFIRM — own pin, RC debounced, shares no bus</text>
+    <text x="66" y="778.0" fill="#6F9FC9" font-weight="600">GPIO8–11</text><text x="180" y="778.0" fill="#8A8B8F">SPI0 → ST7789 display</text>
+    <text x="66" y="798.0" fill="#D8D2C8" font-weight="600">GPIO25/27/24</text><text x="180" y="798.0" fill="#8A8B8F">display D/C · RESET · backlight</text>
+    <text x="66" y="818.0" fill="#C9A227" font-weight="600">GPIO12 / 23</text><text x="180" y="818.0" fill="#8A8B8F">white LED #2 · IR940 (2N7002, 68R / 47R)</text>
+    <text x="66" y="838.0" fill="#B23A48" font-weight="600">GPIO6</text><text x="180" y="838.0" fill="#B23A48">650 nm laser — interlocked to the cartridge switch</text>
+    <text x="66" y="858.0" fill="#D8D2C8" font-weight="600">GPIO22 · CSI</text><text x="180" y="858.0" fill="#8A8B8F">cartridge switch · speckle camera</text>
+  </g>
+
+  <rect x="512" y="694.0" width="440" height="158" rx="5" fill="#141010" stroke="#4A1219"/>
+  <text x="530" y="718.0" font-size="11.5" fill="#C9707A">Two things that will bite you</text>
+  <text x="530" y="744.0" font-size="10.5" fill="#8A8B8F"><tspan fill="#D8D2C8">1.</tspan> Both I²C breakouts ship with pull-ups fitted. Remove one</text>
+  <text x="530" y="760.0" font-size="10.5" fill="#8A8B8F">2.2 kΩ pair or the bus may not enumerate. This is the number</text>
+  <text x="530" y="776.0" font-size="10.5" fill="#8A8B8F">one first-build failure.</text>
+  <text x="530" y="802.0" font-size="10.5" fill="#8A8B8F"><tspan fill="#D8D2C8">2.</tspan> Disable the radios in config.txt <tspan fill="#D8D2C8">and cut the antenna</tspan></text>
+  <text x="530" y="818.0" font-size="10.5" fill="#8A8B8F"><tspan fill="#D8D2C8">feed trace.</tspan> Firmware-only disabling is reversible by anyone</text>
+  <text x="530" y="834.0" font-size="10.5" fill="#8A8B8F">who touches the SD card. Verify with <tspan font-family="monospace" fill="#D8D2C8">iw dev</tspan> returning nothing.</text>
+</svg>

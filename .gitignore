@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# calibration output — device- and person-specific, never commit
+captures/
+thresholds.json
+
+.DS_Store
+
+# transfer artefacts
+*.zip

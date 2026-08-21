@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 860" width="1000" height="860" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#8A8B8F"/></marker>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#B23A48"/></marker>
+  </defs>
+  <rect width="1000" height="860" fill="#0C0C0B"/>
+
+  <text x="48" y="58" font-size="26" font-weight="200" letter-spacing="11" fill="#D8D2C8">CELL</text>
+  <rect x="49" y="70" width="30" height="2" fill="#B23A48"/>
+  <text x="48" y="96" font-size="13" fill="#D8D2C8">A hardware wallet that takes your pulse. Or your blood.</text>
+  <text x="48" y="116" font-size="11.5" fill="#8A8B8F" font-style="italic">Proof of human, at the point of signature.</text>
+
+  <!-- TIERS -->
+  <text x="48" y="162" font-size="10.5" letter-spacing="3" fill="#6F7178">TWO TIERS</text>
+  <rect x="48" y="178" width="440" height="150" rx="5" fill="#101010" stroke="#2A2926"/>
+  <text x="66" y="204" font-size="13" fill="#D8D2C8">TOUCH</text>
+  <text x="66" y="228" font-size="11" fill="#8A8B8F">Fingertip on the ring. <tspan fill="#D8D2C8">15 seconds.</tspan> No consumable.</text>
+  <text x="66" y="250" font-size="11" fill="#8A8B8F">Reads your pulse — the light your fingertip absorbs</text>
+  <text x="66" y="266" font-size="11" fill="#8A8B8F">flickers with every heartbeat.</text>
+  <text x="66" y="292" font-size="11" fill="#8A8B8F">Proves a living body <tspan fill="#D8D2C8">is</tspan> here.</text>
+  <text x="66" y="314" font-size="10.5" fill="#6F7178">The everyday default.</text>
+
+  <rect x="512" y="178" width="440" height="150" rx="5" fill="#141010" stroke="#4A1219"/>
+  <text x="530" y="204" font-size="13" fill="#C9707A">BLOOD</text>
+  <text x="530" y="228" font-size="11" fill="#8A8B8F">A drop in a cartridge. <tspan fill="#D8D2C8">10 minutes.</tspan></text>
+  <text x="530" y="250" font-size="11" fill="#8A8B8F">A laser watches the sample until it stops moving.</text>
+  <text x="530" y="272" font-size="11" fill="#8A8B8F">Proves a living body <tspan fill="#D8D2C8">bled</tspan> here, just now.</text>
+  <text x="530" y="298" font-size="10.5" fill="#8A8B8F">A mode you enter. You can always escalate;</text>
+  <text x="530" y="314" font-size="10.5" fill="#8A8B8F">you can never de-escalate.</text>
+
+  <!-- FLOW -->
+  <text x="48" y="372" font-size="10.5" letter-spacing="3" fill="#6F7178">THE FLOW</text>
+  <g font-size="11.5">
+    <rect x="48" y="388" width="150" height="56" rx="4" fill="#151513" stroke="#2A2926"/>
+    <text x="62" y="412" fill="#D8D2C8">Unsigned tx</text>
+    <text x="62" y="430" fill="#6F7178" font-size="10.5">shown as a QR</text>
+    <path d="M204,416 L236,416" stroke="#8A8B8F" stroke-width="1.4" marker-end="url(#a)"/>
+
+    <rect x="242" y="388" width="150" height="56" rx="4" fill="#151513" stroke="#2A2926"/>
+    <text x="256" y="412" fill="#D8D2C8">Device reads it</text>
+    <text x="256" y="430" fill="#6F7178" font-size="10.5">camera · no radios</text>
+    <path d="M398,416 L430,416" stroke="#8A8B8F" stroke-width="1.4" marker-end="url(#a)"/>
+
+    <rect x="436" y="388" width="150" height="56" rx="4" fill="#151513" stroke="#2A2926"/>
+    <text x="450" y="412" fill="#D8D2C8">You verify</text>
+    <text x="450" y="430" fill="#6F7178" font-size="10.5">on its own screen</text>
+    <path d="M592,416 L624,416" stroke="#B23A48" stroke-width="1.8" marker-end="url(#ar)"/>
+
+    <rect x="630" y="388" width="150" height="56" rx="4" fill="#1A1013" stroke="#B23A48" stroke-width="1.6"/>
+    <text x="644" y="412" fill="#C9707A">PIN + PULSE</text>
+    <text x="644" y="430" fill="#8E5F65" font-size="10.5">or BLOOD</text>
+    <path d="M786,416 L818,416" stroke="#8A8B8F" stroke-width="1.4" marker-end="url(#a)"/>
+
+    <rect x="824" y="388" width="128" height="56" rx="4" fill="#151513" stroke="#2A2926"/>
+    <text x="838" y="412" fill="#D8D2C8">Signed tx</text>
+    <text x="838" y="430" fill="#6F7178" font-size="10.5">back out as a QR</text>
+  </g>
+
+  <!-- PROVES / DOESN'T -->
+  <text x="48" y="492" font-size="10.5" letter-spacing="3" fill="#6F7178">WHAT IT PROVES — AND WHAT IT DOESN'T</text>
+  <rect x="48" y="508" width="440" height="126" rx="5" fill="#101010" stroke="#2A2926"/>
+  <text x="66" y="534" font-size="12.5" fill="#D8D2C8">A living human is here, now, deliberately.</text>
+  <text x="66" y="560" font-size="11" fill="#8A8B8F">Your laptop can be fully owned. It cannot bleed.</text>
+  <text x="66" y="580" font-size="11" fill="#8A8B8F">No script drains this wallet — no script has a bloodstream.</text>
+  <text x="66" y="600" font-size="11" fill="#8A8B8F">Nothing signs at 3am while you sleep.</text>
+  <text x="66" y="622" font-size="11" fill="#8A8B8F">One drop is one signature, rate-limited by your body.</text>
+
+  <rect x="512" y="508" width="440" height="126" rx="5" fill="#141010" stroke="#4A1219"/>
+  <text x="530" y="534" font-size="12.5" fill="#C9707A">It does not prove which human.</text>
+  <text x="530" y="560" font-size="11" fill="#8A8B8F">A thief could prick their own finger and pass every gate.</text>
+  <text x="530" y="580" font-size="11" fill="#8A8B8F">So there is still a PIN. It is the boring factor, and it stays.</text>
+  <text x="530" y="606" font-size="11" fill="#D8D2C8">Blood proves someone alive is here and means it.</text>
+  <text x="530" y="624" font-size="11" fill="#D8D2C8">The PIN proves it is you.</text>
+
+  <!-- HOW IT KNOWS -->
+  <text x="48" y="682" font-size="10.5" letter-spacing="3" fill="#6F7178">HOW IT KNOWS</text>
+  <rect x="48" y="698" width="440" height="92" rx="5" fill="#101010" stroke="#2A2926"/>
+  <text x="66" y="722" font-size="12" fill="#D8D2C8">Is it blood?</text>
+  <text x="66" y="744" font-size="11" fill="#8A8B8F">Haemoglobin absorbs hard at 415 nm — the Soret band, from</text>
+  <text x="66" y="762" font-size="11" fill="#8A8B8F">the iron ring at its centre. Ketchup, dye, beet juice, stage</text>
+  <text x="66" y="778" font-size="11" fill="#8A8B8F">blood: none of them have one. A $16 sensor sees it instantly.</text>
+
+  <rect x="512" y="698" width="440" height="92" rx="5" fill="#141010" stroke="#4A1219"/>
+  <text x="530" y="722" font-size="12" fill="#C9707A">Is it alive?</text>
+  <text x="530" y="744" font-size="11" fill="#8A8B8F">A laser makes the cells throw a speckle pattern. Liquid blood</text>
+  <text x="530" y="762" font-size="11" fill="#8A8B8F">makes it <tspan fill="#D8D2C8">boil</tspan>. A clot <tspan fill="#D8D2C8">freezes</tspan> it. A camera watches for ten</text>
+  <text x="530" y="778" font-size="11" fill="#8A8B8F">minutes and measures how much the pattern changed.</text>
+
+  <rect x="48" y="812" width="904" height="34" rx="5" fill="#1A1013" stroke="#B23A48" stroke-width="1.6"/>
+  <text x="70" y="834" font-size="12.5" fill="#D8D2C8">Fresh blood is the only sample that <tspan fill="#C9707A">starts moving</tspan> and then <tspan fill="#C9707A">stops</tspan>. Anticoagulated blood never stops. Syrup never started.</text>
+</svg>

@@ -1,0 +1,26 @@
+Category,Item,Part / Spec,Qty,Unit USD,Ext USD,Notes
+Compute,Single board computer,Raspberry Pi Zero 2 W,1,15.00,15.00,PHASE 1. Disable radios in config.txt AND cut the antenna feed trace. Firmware-only disabling is reversible.
+Security,Gate chip,ATECC608B breakout (Adafruit 4314 / SparkFun),1,6.00,6.00,Phase 2. PIN attempt counter + AES key storage + KDF. Counter increments before verify.
+Sensing,Spectrometer,AMS AS7341 breakout (Adafruit 4698),1,16.00,16.00,PHASE 1. 8 colour channels 415-680nm + Clear + NIR. Onboard LDR pin drives LED #1 directly.
+I/O,Display,ST7789 1.3in 240x240 SPI,1,8.00,8.00,Phase 2. SPI0 CE0
+I/O,Camera (speckle),Pi Camera + mini-CSI cable,1,10.00,10.00,PHASE 1. LENS REMOVED. Fixed exposure/gain/AWB - auto adjustment destroys the correlation measurement.
+I/O,Buttons,12mm tactile switch + cap,4,0.75,3.00,Phase 2. CONFIRM gets its own pin (GPIO26) + RC debounce 10k/100nF
+Optics,White LED,5mm white 5000K,2,0.40,0.80,PHASE 1. Mounted at 45 deg opposed
+Optics,IR LED,940nm 5mm,1,0.50,0.50,PHASE 1. Co-sited with LED #1
+Sensing,Laser,"650nm diode module, <=5mW",1,2.00,2.00,PHASE 1. Liveness gate. Coherent source is MANDATORY - an LED has microns of coherence length and produces no speckle. Interlock to the cartridge switch.
+Optics,MOSFET,2N7002 SOT-23,2,0.15,0.30,PHASE 1. LED gating
+Optics,Passives,68R / 47R / 10k / 2.2k / 100nF assortment,1,1.00,1.00,PHASE 1. ONE 2.2k pull-up pair on the whole I2C bus - remove from the other breakouts
+Power,USB-C power input,"USB-C breakout, power only",1,2.00,2.00,Phase 2. NO BATTERY. A LiPo left at partial charge for a year swells or worse. Desolder D+/D- or use a data blocker.
+Compute,Prototyping,Small breadboard + jumper wires,1,5.00,5.00,PHASE 1. No PCB needed to prove the sensing.
+Storage,microSD,16GB A2,1,6.00,6.00,PHASE 1. Read-only rootfs via overlayfs
+Enclosure,Filament black,PETG black ~90g,1,2.00,2.00,PHASE 1. Optical chamber. NOT PLA - creeps under screw preload.
+Enclosure,Filament white,PETG white ~30g,1,1.50,1.50,PHASE 1. Cartridges. Ironing ON - the well floor is a photometric reference.
+Enclosure,Fasteners,M2.5x8 screw + heat-set insert,8,0.30,2.40,Phase 2. 
+Optics,Ring window,10mm dia x 0.5mm clear acrylic or glass disc,1,1.00,1.00,Phase 2. Seals the optical chamber and gives touch mode a defined contact surface. No AR coating needed - specular exits at 45 deg.
+Consumable,Safety lancets,Contact-activated sterile 28G / 1.8mm,100,0.06,6.00,COMMERCIAL ONLY. Never fabricate or reuse. Any pharmacy.
+Consumable,Alcohol prep pads,70% IPA individually wrapped,100,0.02,2.00,
+Consumable,PET window film,0.10mm laser transparency or laminate pouch,100,0.08,8.00,~1600 windows per 100 sheets
+Consumable,Adhesive,3M 300LSE double-sided 0.05mm,1,9.00,9.00,Window attachment
+Consumable,Sharps container,1 litre,1,6.00,6.00,"MANDATORY. Used cartridges and lancets are biohazard, not household trash."
+Enclosure,Test cartridges,"REFERENCE + NULL, printed once and sealed",2,0.00,0.00,Phase 2. Pre-flight drift check. REFERENCE must pass spectral gates and fail Gate 5 (it cannot move). NULL must fail Gate 1 on the bright side.
+I/O,Camera (QR),Cheap USB webcam,1,8.00,8.00,Phase 2. The Pi Zero has one CSI port and speckle has it. QR decoding tolerates auto-exposure.

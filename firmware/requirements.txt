@@ -1,0 +1,9 @@
+# Gate logic and calibration. Runs anywhere — no hardware needed.
+numpy>=1.24
+scipy>=1.10
+
+# Device only, Raspberry Pi. Uncomment when building hardware.py.
+# adafruit-blinka
+# adafruit-circuitpython-as7341
+# picamera2
+# cryptoauthlib

@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r firmware/requirements.txt
+      - run: python firmware/run_tests.py
+
+  drawings:
+    # The mechanical drawing is generated from the model. If a commit changes
+    # one without regenerating the other they have drifted, which is exactly
+    # what BUILD.md 10 promises cannot happen.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy
+      - run: python tools/gen_mechanical.py
+      - run: |
+          if ! git diff --quiet diagrams/mechanical.svg; then
+            echo "::error::diagrams/mechanical.svg is out of date."
+            echo "Run: python tools/gen_mechanical.py"
+            git diff --stat diagrams/mechanical.svg
+            exit 1
+          fi
