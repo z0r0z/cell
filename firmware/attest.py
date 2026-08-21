@@ -15,12 +15,11 @@ quorum signed with blood" is a mechanical check.
 WHAT THIS PROVES: a device holding this attestation key states that it ran the
 blood gate for this exact sighash.
 
-WHAT IT DOES NOT PROVE: that the gate actually passed. You are trusting the
-firmware and the tamper seal. This is the same assumption every secure-hardware
-attestation makes — a TPM quote, an Apple Secure Enclave receipt. It is a real
-guarantee against a remote or careless attacker and no guarantee at all against
-someone who has opened the case and reflashed it. Say so; do not let anyone
-believe the chain verified this.
+SCOPE: the claim rests on the firmware and the tamper seal, exactly as a TPM
+quote or an Apple Secure Enclave receipt does. That is why fw_hash is in the
+record and why verify() refuses builds that are not on the accepted list —
+co-signers pin firmware alongside keys. The chain does not check any of this;
+the quorum does.
 
 THREE THINGS THE RECORD MUST CARRY, and why:
 

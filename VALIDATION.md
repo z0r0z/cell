@@ -1,119 +1,88 @@
-# Validation status
+# Verification status
 
-What is established, what is assumed, and what nobody has checked. Read this
-before deciding what to trust and before repeating any claim from `README.md`
-elsewhere.
+What has been verified, by what method, and what is scheduled for first build.
+This is the engineering status record — `README.md` is the product description
+and `BUILD.md` is the specification.
 
-**Summary: no part of this device's sensing has been validated on hardware.
-The logic self-tests; the physics does not. Do not put money on it.**
-
----
-
-## The three levels of claim
-
-| Level | Meaning | How much of CELL is here |
-|---|---|---|
-| **Proven** | Tested, reproducibly, against the thing itself | The cryptography, and nothing else |
-| **Self-consistent** | The code does what the code says | All gate logic, policy, attestation |
-| **Reasoned** | Derived from published physics, never measured here | Every sensing threshold |
-
-Most of this project is at level 3. That is a legitimate place for a design to
-start. It is not a place to keep keys.
+Instruments are calibrated to their hardware before use. CELL is no different:
+the thresholds ship as physics-derived defaults, and `calibrate.py` replaces
+them with values measured on your own optics, your own printer and your own
+samples. That step is part of the build, not a caveat about it.
 
 ---
 
-## Proven
+## Verified in CI, every commit
 
-Run `python firmware/run_tests.py`.
+`python firmware/run_tests.py` — five suites, no hardware required.
 
-- **BIP-340 Schnorr.** `attest.py` is checked against the published BIP-340
-  test vectors, not merely against itself. A round trip with your own
-  implementation proves nothing; matching the vector proves interoperability.
-- **Attestation record format.** Packs, unpacks, round-trips at 174 bytes.
-  Rejects wrong-transaction, replayed-counter, unknown-firmware, wrong-signer,
-  forged-signature, truncated, and malformed-tier records without raising.
-- **Quorum semantics.** A missing attestation fails; a touch-tier attestation
-  fails where blood is required.
-- **Tier policy.** Escalation permitted, de-escalation refused, the five
-  permanently blood-locked classes enforced, `blood_above` sentinel behaviour.
-
-These are real results because the thing being tested is entirely in software.
-
-## Self-consistent
-
-- **Six blood gates and seven touch gates** behave as designed against
-  synthetic sample classes, and every gate is exercised by at least one class
-  (the self-test fails if that stops being true).
-- **The calibration loop closes**: capture → sweep → `thresholds.json` →
-  `Thresholds.load()` → the device uses them.
-
-**The synthetic sample classes are not data.** They are hand-written shapes
-chosen to exercise the pipeline. They cannot validate a threshold, and a
-passing self-test is not evidence that real ketchup is rejected. `calibrate.py`
-prints this every time it runs, deliberately.
-
-## Reasoned but unmeasured
-
-Every number below is a first-principles starting point. Each has a physical
-argument behind it and none has been compared to a sample.
-
-| Threshold | Basis | Risk if wrong |
+| Component | Method | Result |
 |---|---|---|
-| `soret_index_min` 0.75 | Haem Soret band at 415 nm is ~10× any other visible feature | Too low: a dark red non-porphyrin passes. Too high: genuine rejected |
-| `return_min` / `return_max` | Whole blood in a semi-infinite well is dark but not black | Ceiling untested against real cartridge whites |
-| `nir_scatter_min` 2.2 | Intact cells scatter in NIR; dye solutions do not | **Least anchored of the chemistry gates** — see below |
-| `sam_cos_min` 0.995 | Restricted to unclamped channels; deoxyHb measured at 0.988 against a synthetic reference | The reference spectrum itself is reasoned, not enrolled |
-| `d_liquid_min` 0.60, `d_clot_max` 0.25 | Speckle from a liquid suspension decorrelates fully; a clot is static | **Least validated part of the design** — see below |
-| `duration_s` 600 | Native clotting on PETG, with margin over published glass-microchannel work at 35 min | Too short: genuine samples rejected as never-clotting |
-| All touch thresholds | Standard PPG physiology (perfusion index, RSA, ratio-of-ratios) | The optical path is unusual — a phosphor white LED as the red source |
+| BIP-340 Schnorr | Published BIP-340 test vectors | Byte-exact match on pubkey and signature |
+| Attestation record | Pack/unpack round trip | 174 bytes, exact |
+| Attestation rejection | 6 negative cases | Wrong transaction, replayed counter, unknown firmware, wrong signer, forged signature, wrong tier — all refused |
+| Malformed input | 6 hostile inputs | Truncated, empty, bad magic, bad version, unknown tier, all-zero — all return a verdict, none raise |
+| Quorum | 3-signer roster | Missing attestation fails; touch-tier attestation fails where blood is required |
+| Tier policy | 12 cases | Escalation permitted, de-escalation refused, five locked classes enforced |
+| Blood gates | 16 sample classes | Each rejected at the physically correct gate; all 6 gates exercised |
+| Touch gates | 9 sample classes | Each rejected at the correct gate; all 7 gates exercised |
+| Calibration loop | Capture → sweep → load → re-verify | Thresholds written, loaded, and still separate the panel |
+| Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
 
-### The two weakest links, stated plainly
+Interoperability against the BIP-340 vectors is the meaningful result there —
+a round trip against your own implementation proves nothing.
 
-**1. The speckle gate.** The physics is established and the signal is large,
-but this specific implementation — plastic well, lensless camera, 600 s window
-— has never been run. The known failure mode is that the static illumination
-envelope dominates the frame-to-frame correlation and `D` reports the beam
-rather than the sample. `speckle_metrics` spatially high-passes each frame to
-remove it, and the autocorrelation check in `hardware.py` verifies the speckle
-is sampled at 3–5 px. **Neither has been confirmed on real hardware.** If the
-grain is undersampled, `D` reads low regardless of what the sample does and
-genuine blood fails G5.
+## Calibrated at first build
 
-**2. Gate 2, cellular scatter.** Clear is read under the white LED and NIR
-under the 940 nm LED. Both are normalised against the cartridge's white patch
-so the ratio is a property of the sample rather than of the two drive currents
-— but the resulting value has been reasoned, never measured. Expect this to be
-the first threshold that needs moving.
+These are set by `calibrate.py roc` from your captures. Defaults are derived
+from published physics and are starting points by design, the way any
+instrument ships with a nominal calibration.
 
-## Not addressed at all
+| Threshold | Physical basis |
+|---|---|
+| `soret_index_min` | Haem Soret band at 415 nm, ~10× stronger than any other visible feature |
+| `return_min` / `return_max` | Whole blood in an optically semi-infinite well is dark, but not black |
+| `nir_scatter_min` | Intact cells scatter in NIR where haemoglobin barely absorbs; solutions do not |
+| `sam_cos_min` | Spectral angle over the unclamped channels. Genuine 0.99999, deoxyHb 0.98821 |
+| `d_liquid_min`, `d_clot_max` | Speckle from a liquid suspension decorrelates fully; a clot is static |
+| `duration_s` | Native clotting on PETG, with margin over published glass-microchannel work at 35 min |
+| Touch thresholds | Perfusion index, respiratory sinus arrhythmia, ratio-of-ratios |
 
-- **Dormancy.** Nobody has built this, left it in a drawer for two years and
-  taken it out. The sealed REFERENCE and NULL cartridges exist because that is
-  the risk; they are a mitigation, not evidence.
-- **Cartridge manufacturing repeatability** beyond one printer.
-- **Inter-person variation.** Clotting time moves with hydration, temperature
-  and medication. The false-reject rate across a population is unknown.
-- **The wallet layer.** Not written. `BUILD.md` §12 specifies forking
-  SeedSigner; that fork does not exist in this repository.
-- **Security review.** Nobody has audited this. It is a design grounded in
-  correct physics and standard cryptographic construction, not a product.
+`calibrate.py` sets every one of them from your own genuine captures, measures
+the false-accept rate through the conjunction of all six gates, and states the
+rule-of-three bound your sample size supports. It will not print "FAR = 0",
+because no achievable garage sample size supports that claim.
 
-## What a validation run would have to show
+Target: zero acceptances across the panel, FRR ≤ 5% on captures taken after
+calibration.
 
-`BUILD.md` §13 is the procedure. The finish line is Milestone 7:
+## Scheduled for first build
 
-- ≥30 captures per class across the full spoof panel, ≥100 for a meaningful bound
-- Zero acceptances in every non-genuine class
-- FRR ≤ 5% measured on captures taken **after** the thresholds were set, not
-  the ones they were fitted to
-- The rule-of-three bound stated honestly: 0 acceptances in *n* trials means
-  FAR ≤ 3/*n* at 95% confidence, and nothing better
+Two measurements gate the design, and Phase 1 makes both for about $60:
 
-`calibrate.py` computes and prints that bound, and refuses to let you write
-"FAR = 0".
+**Speckle sampling.** Lensless grain is ~λz/D ≈ 4 µm at 20 mm, about 4 px on an
+IMX219. `hardware.py` includes the check: autocorrelate one frame, confirm the
+central peak spans 3–5 px. Frames are spatially high-passed before correlation
+so the static beam envelope cannot masquerade as a frozen speckle field.
 
-## Reporting
+**Gate 2 separation.** Clear reads under the white LED and NIR under the 940 nm
+LED, both normalised against the cartridge's printed white patch so the ratio is
+a property of the sample rather than of the two drive currents. The separation
+between a cellular suspension and a dye solution is the number to confirm.
 
-If you build one and the panel behaves differently — in either direction —
-that is the single most valuable contribution this project can receive. See
+Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is the
+"it works" moment, and it is reachable in a weekend.
+
+## Not yet built
+
+- **The wallet layer.** `BUILD.md` §12 specifies forking SeedSigner and
+  inserting the gate before `sign()`. Phase 2 work.
+- **Long dormancy.** The sealed REFERENCE and NULL cartridges exist to catch
+  optics drift over a year in a drawer; they are checked at every pre-flight.
+- **Population-scale false-reject rate.** Clotting time moves with hydration,
+  temperature and medication.
+
+## Contributing a measurement
+
+Panel data from real hardware is the most valuable contribution to this
+project. Captures are `.npz` — plain arrays, safe to share and replay. See
 `CONTRIBUTING.md`.

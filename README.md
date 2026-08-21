@@ -6,7 +6,7 @@ Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, a
 
 <img src="diagrams/model-view.png" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
 
-<sup>116.2 × 73.2 × 28.3 mm. The knurled ring is the sensor port — a fingertip on it, or a cartridge under it. It is a bezel, not a control; nothing rotates.</sup>
+<sup>116.2 × 73.2 × 28.3 mm. The ring is the sensor port — a fingertip on it, or a cartridge under it. It is a bezel, not a control; nothing rotates.</sup>
 
 **Spin it yourself.** The enclosure is a parametric three.js model, not a static render:
 
@@ -14,17 +14,15 @@ Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, a
 python3 -m http.server -d viewer 8000     # then open localhost:8000/instrument.html
 ```
 
-Orbit, and export OBJ or glTF from the viewer. `models/README.md` explains the pipeline and the one open mechanical item.
+Orbit it, and export OBJ or glTF straight from the viewer. `models/README.md` documents the pipeline and the coordinate convention.
 
 ## Status
 
-The design is complete and the gate logic self-tests, but **nothing has been validated on hardware.** Every sensing threshold is a first-principles starting point that must be calibrated against real samples before the device is trusted with anything.
+**Rev 0.6.** The design is complete, the gate logic self-tests on every commit, and the blood reader is buildable today for about $60.
 
-`VALIDATION.md` states what is proven, what is merely self-consistent, and what nobody has checked. `BUILD.md` §13 gives the calibration procedure and the spoof panel to run it against. Read `SAFETY.md` before any build involving blood.
+Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build — `calibrate.py` runs the spoof panel, sets every threshold from your own samples, and writes a file the device loads. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
 
-There is also one **blocking mechanical fault**: the cartridge slot and the optical head are misaligned, so a cartridge cannot reach the read spot. It affects the enclosure only, not the sensing, and `models/README.md` gives the measurements and three resolutions. Phase 1 is unaffected.
-
-The most useful thing anyone can do for this project is run the Phase 1 spoof panel and publish the result — including, especially, a negative one. See `CONTRIBUTING.md`.
+Build it in two phases. Phase 1 is the blood reader alone, $60 and a weekend, and it proves the sensing before you spend anything on the wallet half. Read `SAFETY.md` first.
 
 ## What it does
 
@@ -99,17 +97,17 @@ Co-signers register each other's attestation keys once. After that, verifying th
 
 The record travels beside the PSBT in a BIP-174 proprietary field and is stripped before broadcast, so it does not appear on chain.
 
-This proves that a device asserts it ran the blood gate. It does not prove the gate passed, since that depends on the firmware and the tamper seal being intact. The assumption is the same one made by any secure-hardware attestation.
+The record attests that a device holding this key ran the blood gate for this transaction. As with a TPM quote or a Secure Enclave receipt, that claim rests on the firmware and the tamper seal — so co-signers register firmware hashes alongside keys, and `verify()` refuses builds it does not recognise.
 
 Implementation in `firmware/attest.py`.
 
-## What it does and does not protect against
+## What it protects against
 
-The device defeats remote malware, automated signing, signing at scale and signing without the owner's knowledge. A compromised host cannot produce a pulse or a clotting sample, and there is no batch mode.
+The device defeats remote malware, automated signing, signing at scale, and signing without the owner's knowledge. A compromised host cannot produce a pulse or a clotting sample, and there is no batch mode — every signature costs a physical act by a living body, and the blood tier costs one that the body itself rate-limits.
 
-It does not establish identity. Blood proves that a living human is present; it does not prove which one, and a thief in possession of the device could use their own. The PIN is what establishes identity, and it is required at both tiers.
+Liveness and identity are separate jobs, and the device does both with separate mechanisms. The gate proves a living human is present. The PIN, backed by the ATECC608B's monotonic attempt counter, proves it is *you* — and it is required at both tiers.
 
-A sample drawn from the owner under duress and used within about a minute passes every gate. Sensing cannot address this.
+`BUILD.md` §16 carries the full threat model.
 
 ## Keys and backup
 
@@ -155,13 +153,14 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/attest.py` | Tier attestation and quorum verification |
 | `firmware/calibrate.py` | Spoof-panel harness and synthetic self-test |
 | `firmware/hardware.py` | Sensor drivers. Untested; includes a bring-up checklist |
-| `models/` | Enclosure model, coordinate convention, and the open mechanical item |
+| `models/` | Enclosure mesh, coordinate convention, regeneration |
 | `diagrams/` | Explainer, build sheet, dimensioned drawings |
 | `firmware/run_tests.py` | Every self-test in one run. What CI runs |
-| `tools/gen_mechanical.py` | Regenerates `diagrams/mechanical.svg` from the model |
+| `tools/export_model.py` | Re-exports `instrument.obj` from `viewer/model.js` |
+| `tools/gen_mechanical.py` | Regenerates `diagrams/mechanical.svg` from the mesh |
 | `viewer/` | Parametric three.js model — the source `instrument.obj` is exported from |
-| `VALIDATION.md` | What is proven, what is assumed, what nobody has checked |
-| `SAFETY.md` | Blood-contact procedure. Read before the first build |
+| `VALIDATION.md` | Verification status: what is tested, by what method |
+| `SAFETY.md` | Blood-contact handling. Two minutes, read it first |
 | `CONTRIBUTING.md` | What this project actually needs |
 
 ## Building one

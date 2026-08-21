@@ -8,11 +8,10 @@ points. They are NOT validated on your hardware. This tool fixes that.
     python calibrate.py roc                            # sweep + operating point
     python calibrate.py selftest                       # synthetic, no hardware
 
-Honesty requirement, enforced in report(): by the rule of three, zero spoof
-acceptances in n trials bounds the false-accept rate at 3/n with 95%
-confidence. n=100 gives you "FAR <= 3%", not "FAR = 0". You will not
-demonstrate FAR <= 0.1% in a garage; that needs ~3000 trials. Claim what you
-measured. A spec sheet that overstates its validation is worse than none.
+report() states the bound your sample size supports. By the rule of three,
+zero spoof acceptances in n trials bounds the false-accept rate at 3/n with 95%
+confidence: n=100 gives FAR <= 3%, n=300 gives <= 1%. A 0.1% claim needs ~3000
+trials. The number it prints is the number you can publish.
 """
 
 from __future__ import annotations

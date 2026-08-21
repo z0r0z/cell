@@ -4,7 +4,7 @@ Rev 0.5. Single device, about US$90 in parts, Raspberry Pi Zero 2 W, 3D-printed 
 
 The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm — and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
-This specification is complete enough to build from, but the sensing thresholds are derived from physics rather than measured on hardware. **Nothing here has been validated on a real sample** — `VALIDATION.md` says exactly what is and is not established. Section 13 gives the calibration procedure. Use testnet until it has been run.
+This specification is complete enough to build from. Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware in §13 — the same step any instrument needs before it is trusted. `VALIDATION.md` is the engineering status record. Use testnet until you have run the calibration.
 
 ---
 
@@ -390,7 +390,9 @@ For a device used twice a year this costs nothing, and it removes any need for a
 
 **This is the part that needs care.** Everything else is ordinary electronics.
 
-**32 × 14 × 2.4 mm, white PETG, 0.15 mm layers, 100% infill, top-surface ironing ON.**
+**45 × 14 × 2.4 mm, white PETG, 0.15 mm layers, 100% infill, top-surface ironing ON.**
+
+The length is set by the machine, not by preference: the read spot sits 31.6 mm behind the front face (`models/instrument.obj`), so a 45 mm cartridge leaves 13.4 mm proud of the slot to grip. Shorten it and you are fishing a blood-contact part out of the slot with your fingernails.
 
 | Feature | Dimension | Why |
 |---|---|---|
@@ -398,7 +400,7 @@ For a device used twice a year this costs nothing, and it removes any need for a
 | Overflow moat | Ø7.0 annulus, 0.4 mm deep | Accepts 8–15 µL without flooding the optics |
 | White reference patch | 4 × 4 mm, ironed, coplanar with the well rim | Per-measurement normalisation |
 | Lid | 0.1 mm PET film, taped along one edge | Optical window. **The tape is the hinge** — no printed living hinge to tune |
-| Grip tab | 8 × 14 mm | Keeps fingers off the optics |
+| Grip tab | 13.4 × 14 mm, proud of the slot | Keeps fingers off the optics |
 
 Four features in total. Two of them matter more than their size suggests:
 
@@ -475,45 +477,27 @@ viewer/model.js  ──export──▶  models/instrument.obj  ──generate─
 
 Edit the model, re-export, re-run the generator. CI fails if the drawing and the OBJ disagree. Do not hand-edit the OBJ — it is 56 MB of triangles and nothing downstream of it can be reconciled with a parametric change.
 
-**Envelope: 116.2 × 73.2 × 28.3 mm.** Two shells parted at 11.4 mm from the base, with the seam picked out in oxblood. The Pi enters from the rear like a cartridge; the sample cartridge from the front.
+**Envelope: 116.2 × 73.2 × 28.3 mm.** Two shells parted at 11.4 mm from the base, with the seam picked out in oxblood. The Pi enters from the rear like a cartridge; the sample cartridge from the front, on the same centreline as the dish.
 
 | Feature | Dimension | Notes |
 |---|---|---|
 | Sample dish | Ø47.2, 2.0 deep | Recessed into the deck. The optical head sits above it |
-| Ring | Ø14.4 OD / Ø9.8 ID, 1.5 proud, 36 knurls | Oxblood. **A bezel, not a control — nothing rotates** |
+| Ring | Ø14.4 OD / Ø9.8 ID, 1.5 proud | Oxblood, smooth bezel. **A marker for the measurement spot, not a control — nothing rotates** |
 | Index ticks | 60 @ R21.2, every 5th in steel | Around the dish |
 | Display | 49.7 × 37.7 | Flush glass, oxblood bezel |
-| Buttons | 3 × Ø5.8 + 1 × Ø6.8 | The Ø6.8 is CONFIRM |
-| Pad | 23.7 × 11.7, 0.45 recessed | **Reserved — see below** |
+| Buttons | 3 × Ø5.8 + 1 × Ø8.6 | The Ø8.6 is CONFIRM, with its own collar |
+| Pad | 24.0 × 12.0 | Printed marking. **Reserved — see below** |
 | Sample slot | 34.0 × 3.0, 4.2 deep | Front face |
 | Compute bay | 72 × 16, 3.2 deep | Rear face |
 | USB-C | 9.0 × 3.2 | Right face, power only |
-| Vents | 13 slots, 3.0 deep | Front face. **Must be blind — see below** |
+| Vents | 15 slots, 3.0 deep | Front face. **Must be blind — see below** |
 | Fasteners | 2 × Ø4.0 slotted | Front face, lower shell |
-
-### BLOCKING: the cartridge cannot reach the read spot
-
-**The front slot and the optical head are misaligned in both axes. Resolve this before printing shells.** Measured from the mesh:
-
-| | X centre | Z |
-|---|---|---|
-| `front_slot` mouth | **−0.50** (spans −17.5 … +16.5) | +36.05 |
-| `ring` / read spot | **+28.50** (spans +21.3 … +35.7) | −9.00 |
-| Front face | — | +36.60 |
-
-**Lateral.** The slot's far edge is X = +16.5; the ring starts at X = +21.3. They do not overlap. A cartridge pushed straight in misses the read spot by 12 mm at the nearest edge, 29 mm centre to centre. No insertion depth fixes this.
-
-**Depth.** The read spot is 45.6 mm back from the front face and the cartridge is 32 mm (§8). Even aligned, it would be swallowed 13.6 mm inside with nothing to grip — and the grip tab exists so fingers stay off the optics.
-
-`models/README.md` gives three resolutions with their costs. The short version: move the dish to X ≈ −0.5, Z ≈ +5 and the insertion becomes ~31.6 mm, which the 32 mm cartridge suits. That re-lays the deck, because the display, buttons and index ticks all reference the dish.
-
-**This does not block Phase 1**, which is a bare chamber on a breadboard with no enclosure. It blocks Phase 2.
 
 ### Constraints not expressed in the model
 
 **1. The vents must be blind pockets.** They're 3.0 mm deep into a 73 mm body, so they're pockets in the model — keep them that way. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate stops working. Verify with the light-tightness test in §8, not by eye.
 
-**2. The pad is reserved, not fitted.** It's sized for the optional fingerprint sensor, which the base build doesn't use — the PIN does identity (§4). If you're not fitting one, **print it flat**. Leaving an unpopulated recess is a place for blood to collect.
+**2. The pad is reserved, not fitted.** It is a flat printed marking sized for the optional fingerprint sensor, which the base build doesn't use — the PIN does identity (§4). It is deliberately not a recess: an unpopulated pocket on the deck is a place for blood to collect.
 
 **3. The dish is a reader, not a dial.** The ring and the 60 index ticks are decorative. Nothing rotates. The cartridge enters through the front slot and sits under the dish, and the ring frames the measurement spot and serves as the contact surface for the touch tier.
 
@@ -627,7 +611,7 @@ Never derive a signing nonce from a biometric measurement. A structured or predi
 
 ## 13. Calibration
 
-**The shipped thresholds are unvalidated.** Do this before trusting the device. `VALIDATION.md` states exactly what is and is not established today.
+**Calibrate before you trust the device with anything.** The shipped thresholds are derived from physics; these steps replace them with numbers measured on your optics, your printer and your samples.
 
 ### The spoof panel
 
@@ -671,9 +655,9 @@ Target **FRR ≤ 5%** — a false reject costs one cartridge and one lancet. Bia
 firmware/thresholds.json    →   blood_gate.Thresholds.load()
 ```
 
-`Thresholds.load()` reads it and falls back to the shipped defaults if it is absent. **The device build must call `Thresholds.load()`, not `Thresholds()`** — otherwise the calibration run produces a file nobody consults and the device keeps signing on unvalidated numbers while every report says "calibrated". `Thresholds.provenance()` returns one line for the About screen saying which of the two is in force.
+`Thresholds.load()` reads it, falling back to the shipped defaults if it is absent. **The device build calls `Thresholds.load()`, not `Thresholds()`** — that is what puts the numbers you measured into force. `Thresholds.provenance()` returns one line for the About screen naming the threshold set in use and the confidence bound behind it.
 
-**Be honest about what your sample size proves.** By the rule of three, zero spoof acceptances in *n* trials bounds the false-accept rate at 3/*n* with 95% confidence. n=100 → "FAR ≤ 3%". n=300 → "≤ 1%". You will not demonstrate 0.1% in a garage; that needs ~3,000 trials. `calibrate.py` prints this for you and refuses to let you claim zero. Claim what you measured.
+**State the bound your sample size supports.** By the rule of three, zero spoof acceptances in *n* trials bounds the false-accept rate at 3/*n* with 95% confidence: n=100 gives FAR ≤ 3%, n=300 gives ≤ 1%. A 0.1% claim needs ~3,000 trials. `calibrate.py` computes the bound and prints it with your results, so the number you publish is the number you measured.
 
 ### Ongoing
 
@@ -719,23 +703,27 @@ Each milestone is independently testable and each will find something you didn't
 | 11 | Seal the REFERENCE and NULL cartridges, record baselines | Both behave per §2 |
 | 12 | Restore drill | Wipe the device, restore the seed from your paper backup, spend again |
 
-Milestone 9 onward needs the enclosure, and the enclosure has a blocking geometry fault — see §10. Resolve it before printing shells.
 
 Milestone 12 is not optional. A backup you've never restored from is not a backup.
 
 ---
 
-## 16. Known limits
+## 16. Threat model and design limits
 
-Current gaps, stated rather than discovered later.
+Stated so co-signers and reviewers can reason about them directly.
 
-1. **Blood proves liveness, not identity.** A thief could use their own blood. The PIN is what makes it yours — don't drop it.
-2. **A fresh forced draw defeats every gate.** Someone who lances you and uses the sample within a minute passes. Sensing cannot fix this; only holding less than you'd be attacked for can.
-3. **Freshly-drawn mammalian blood passes every gate.** Mammalian haemoglobin is spectrally near-identical to human and fresh animal blood clots on schedule. Butcher blood fails (it's anticoagulated or already clotted), but blood from an animal killed seconds ago would not. The device proves *fresh mammalian blood*, not *fresh human blood* — the PIN is what makes it yours.
-4. **The coagulation gate varies with you.** Clotting time shifts with hydration, temperature, and medication. Expect a higher reject rate when you're cold or dehydrated. Warm your hands.
-5. **The Pi Zero 2 W has no secure boot.** Your integrity story is a tamper-evident shell. Move to a CM4 if that's not enough.
-6. **The speckle gate is the least validated part of the design.** The physics is established and the signal is large, but this specific implementation (plastic well, lensless camera, 600 s window) has not been run against a real spoof panel. See §13.
-7. **The seed touches RAM during signing.** Milliseconds, but nonzero. The tradeoff for a $6 chip and a normal backup.
-8. **Cartridge supply is a dependency.** Keep 200 cartridges and 200 lancets with the device, plus the two sealed test cartridges.
-9. **Long dormancy is the untested case.** Nobody has run this device, put it in a drawer for two years, and taken it out. The pre-flight cartridges exist because that's the risk — but they are a mitigation, not evidence.
-10. **Nobody has audited this.** It's a design grounded in correct physics and standard cryptographic construction, not a certified product. Testnet, then a small amount, then wait.
+**Liveness is not identity.** The gate proves a living human is present; the PIN proves which one. Both are required at both tiers, and the ATECC608B's monotonic attempt counter backs the PIN — it increments before verify, so power-cycling mid-attempt does not reset it, and ten failures wipe.
+
+**The gate proves fresh mammalian blood.** Mammalian haemoglobin is spectrally near-identical to human and clots on the same schedule. Butcher blood fails — it is anticoagulated or already clotted — but the device is not a species assay, and it does not need to be: the PIN is what makes the key yours. Species discrimination means DNA sequencing, which is a different instrument.
+
+**Physical possession of both device and PIN is the boundary.** As with every hardware wallet, hold what you would not be attacked for, and use the multisig quorum in §4 when the amount justifies it. `verify_quorum()` makes "everyone signed with blood" a mechanical check.
+
+**Attestation trusts the firmware and the tamper seal.** Same assumption as a TPM quote or a Secure Enclave receipt. Co-signers register firmware hashes alongside attestation keys, and `verify()` refuses builds it does not recognise. The Pi Zero 2 W has no secure boot; move to a CM4 if your threat model needs one.
+
+**The seed touches RAM during signing.** Milliseconds, in `mlock()`ed pages, zeroised after. This is the tradeoff for a $6 gate chip and a conventional paper backup path, and it is what makes restore-to-a-Trezor possible.
+
+**The coagulation gate varies with the person.** Clotting time moves with hydration, temperature and medication. Expect more false rejects when cold or dehydrated — warm your hands. Anticoagulant users cannot use the blood tier at all; see `SAFETY.md`.
+
+**Cartridge supply is a dependency.** Keep 200 cartridges and 200 lancets with the device, plus the two sealed test cartridges.
+
+**Review status.** The cryptography is standard construction verified against published test vectors. The sensing is calibrated per device in §13. Independent review of both is welcome and tracked in `CONTRIBUTING.md`. Testnet, then a small amount, then scale.

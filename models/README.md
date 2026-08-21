@@ -42,42 +42,30 @@ silent 58 mm error that will not look wrong on screen.
 
 ---
 
-## BLOCKING OPEN ITEM — the cartridge cannot reach the read spot
+## Regenerating
 
-**A cartridge inserted through the front slot cannot arrive under the optical
-head. The slot and the read spot are misaligned in both axes.** Measured from
-the mesh, not estimated:
+`tools/export_model.py` drives headless Chrome against the real viewer, so the
+mesh comes out of the same three.js code path a person gets when they open the
+page — not a reimplementation that could drift.
+
+```bash
+python tools/export_model.py        # model.js  -> instrument.obj + .mtl
+python tools/gen_mechanical.py      # instrument.obj -> diagrams/mechanical.svg
+```
+
+Run both after any model change, in the same commit. CI checks the second link.
+
+## Geometry check
+
+The cartridge enters the front slot and must land under the optical head, so
+the slot and the ring share a centreline:
 
 | | X centre | Z |
 |---|---|---|
-| `front_slot` mouth | **−0.50** (spans −17.5 … +16.5) | +36.05 |
-| `ring` / read spot | **+28.50** (spans +21.3 … +35.7) | −9.00 |
+| `front_slot` | +28.50 (spans +11.5 … +45.5) | +36.05 |
+| `ring` / read spot | +28.50 | +5.00 |
 | Front face | — | +36.60 |
 
-Two independent faults:
-
-**1. Lateral — the harder one.** The slot is centred at X = −0.5 and its far
-edge is X = +16.5. The ring spans X = +21.3 … +35.7. **They do not overlap.**
-A cartridge pushed straight in travels along the slot's centreline and misses
-the read spot by 12 mm at the nearest edge; 29 mm centre to centre. No
-insertion depth fixes this.
-
-**2. Depth.** The read spot is 45.6 mm back from the front face. The cartridge
-is 32 mm (`BUILD.md` §8). Even if the axes lined up, the cartridge would be
-swallowed 13.6 mm inside the shell with nothing left to grip — and the 8 × 14
-mm grip tab exists precisely so fingers stay off the optics.
-
-### Resolution — pick one, then re-export and regenerate
-
-| Option | Change | Cost |
-|---|---|---|
-| **A. Move the dish** (preferred) | Set dish/ring centre to X ≈ −0.5, Z ≈ +5. Insertion becomes ~31.6 mm, so the 32 mm cartridge sits with a few mm proud | Re-lays the deck: display, buttons and index ticks all reference the dish |
-| **B. Move the slot** | Re-cut `front_slot` to X centre +28.5, and lengthen the cartridge to ~64 mm so it still protrudes | Cheapest model edit, but a 64 mm cartridge doubles consumable print time and PETG use |
-| **C. Side-load** | Move the slot to the right face and keep the dish where it is | Frees the front face, but collides with the USB-C cutout at X = +58 |
-
-Option A is the right answer for a device where the dish is the visual centre
-of the product. Option B is the fastest to prove Phase 2 with.
-
-**This does not block Phase 1.** Phase 1 is a bare optical chamber on a
-breadboard with no enclosure — the shell is Phase 2 work. Resolve it before
-printing shells, not before proving the sensing.
+Cartridge travel front face to read spot is **31.6 mm**, which is what sets the
+45 mm cartridge length in `BUILD.md` §8 — it leaves 13.4 mm proud of the slot to
+grip. If you move the dish, re-derive the cartridge length from this number.

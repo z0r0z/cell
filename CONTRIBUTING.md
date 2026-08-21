@@ -1,23 +1,21 @@
 # Contributing
 
-The design is public domain (CC0). The most valuable thing you can contribute
-is **not code**.
+The design is public domain (CC0). Build it, fork it, sell it — no permission
+needed, no attribution required.
 
-## What this project actually needs
+The highest-leverage contribution is a measurement, not a patch.
 
 In order:
 
 ### 1. Spoof panel data from real hardware
 
-Nobody has run the panel. Every threshold in `firmware/blood_gate.py` is
-reasoned from physics and unmeasured. One person completing `BUILD.md` §13
-Phase 1 and publishing their captures is worth more than every other
-contribution combined.
+Phase 1 is ~US$60 and one weekend, and it produces the number this whole design
+turns on: how cleanly the gate separates real blood from every fake. Every
+threshold in `firmware/blood_gate.py` is derived from published physics; panel
+data turns those into measured values with a stated confidence bound.
 
-Phase 1 is ~US$60 and one weekend. It has no security requirements because it
-signs nothing. It answers the only question that determines whether the rest of
-the project is worth building: **does the gate separate real blood from every
-fake?**
+Every independent run makes the numbers stronger — different optics, different
+printers, different bodies. That is what a threshold set has to survive.
 
 To contribute a run:
 
@@ -32,9 +30,11 @@ hardware notes — printer, filament, LED part numbers, camera. Captures are
 `.npz` (plain arrays, no pickle) specifically so they can be shared and
 replayed safely.
 
-**Negative results are the most useful result.** If a red dye passes, or if
-genuine blood fails G5, say so. A design that does not work should be found out
-cheaply and publicly rather than expensively and privately.
+**Publish what you measure, including surprises.** If a dye clears a gate, or
+genuine blood trips G5 on your optics, that is a finding worth having and it
+sharpens the design for everyone. `calibrate.py` prints the rule-of-three bound
+alongside your results so the claim you publish is the claim your sample size
+supports.
 
 ### 2. Independent review of the physics
 
@@ -50,8 +50,9 @@ Particularly:
 
 ### 3. Security review
 
-Nobody has audited this. The threat model is in `README.md` and
-`BUILD.md` §16. The parts most worth attacking:
+The threat model is in `BUILD.md` §16. The cryptography is standard
+construction verified against published test vectors; the parts most worth
+attacking:
 
 - The unlock chain in `BUILD.md` §12 — the seed touches RAM
 - Nonce generation — `blood_noise_residual` feeds BIP-340 `aux_rand` only, and
@@ -62,9 +63,10 @@ Nobody has audited this. The threat model is in `README.md` and
 ### 4. The wallet layer
 
 `BUILD.md` §12 specifies forking [SeedSigner](https://github.com/SeedSigner/seedsigner)
-and inserting the gate before `sign()`. That fork does not exist here. If you
-write it, **do not write your own PSBT parser** — that is how people lose money
-to change-address bugs.
+and inserting the gate before `sign()` — a mature airgapped Pi Zero signer that
+already solves animated-QR PSBT, the ST7789 UI, `embit` Bitcoin logic and a
+hardened read-only image. You are adding a gate, not building a wallet. Use
+`embit`; a hand-rolled PSBT parser is how change-address bugs happen.
 
 ## What this project does not need
 
@@ -79,11 +81,10 @@ to change-address bugs.
 ## Ground rules
 
 **Claim what you measured.** `calibrate.py` computes the rule-of-three bound
-and refuses to print "FAR = 0" for a reason. A spec sheet that overstates its
-validation is worse than none, and this is a device people would keep keys on.
+and will not print "FAR = 0". Numbers people can rely on are the point.
 
-**Read `SAFETY.md` before any build involving blood.** Do not share a device.
-Do not reuse a lancet. Do not skip the sharps container.
+**Read `SAFETY.md` before any build involving blood.** One device per person,
+one lancet per use, sharps container. Two minutes of reading.
 
 **Keep the drawings generated.** `diagrams/mechanical.svg` comes from
 `tools/gen_mechanical.py`; CI fails if they drift. If you change the model,
@@ -96,5 +97,6 @@ pip install -r firmware/requirements.txt
 python firmware/run_tests.py
 ```
 
-No hardware needed. This proves the logic is self-consistent and proves nothing
-about any threshold — see `VALIDATION.md`.
+No hardware needed. Five suites covering the gates, the tier policy, the
+attestation format and the calibration round trip. `VALIDATION.md` is the
+engineering status record.

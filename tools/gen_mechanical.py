@@ -43,8 +43,14 @@ for line in open(OBJ):
         objs[cur][0] = line.split()[1]
 V = np.array(V)
 
-def ext(name):
-    P = V[objs[name][1]]; return P.min(0), P.max(0)
+def ext(name, *alts):
+    """Extent of a named object, trying alternates so a renamed part in the
+    model does not silently drop a dimension off the drawing."""
+    for n in (name, *alts):
+        if n in objs:
+            P = V[objs[n][1]]; return P.min(0), P.max(0)
+    raise SystemExit(f"{OBJ}: no object named {' / '.join((name, *alts))}. "
+                     f"The model was renamed — update tools/gen_mechanical.py.")
 def group(pfx):
     idx = [i for k, (_, ii) in objs.items() if k.startswith(pfx) for i in ii]
     P = V[idx]; return P.min(0), P.max(0), P
@@ -71,7 +77,7 @@ N_TICK = sum(1 for k in objs if k.startswith('index_'))
 N_KNURL = sum(1 for k in objs if k.startswith('knurl_'))
 
 gl, gh = ext('display_glass')
-pl, ph = ext('pad')
+pl, ph = ext('pad', 'pad_print')
 sl, sh = ext('front_slot')
 bl, bh = ext('rear_bay')
 ul, uh = ext('usb_c')
@@ -79,10 +85,17 @@ sel, seh = ext('parting_seam')
 vl, vh, _ = group('vent_')
 N_VENT = sum(1 for k in objs if k.startswith('vent_'))
 
+# Discovered from the model, not hardcoded — button positions are named after
+# their X coordinate in the source, so pinning the names here means any nudge
+# to the layout breaks the drawing instead of updating it. Sorted by X, so the
+# CONFIRM button (the large one) stays last where the legend expects it.
 BTN = []
-for k in ('button_13','button_24','button_35','button_49'):
+for k in sorted((k for k in objs if k.startswith('button_')),
+                key=lambda k: ext(k)[0][0]):
     a, b = ext(k)
     BTN.append(((a[0]+b[0])/2, (a[2]+b[2])/2, b[0]-a[0]))
+if not BTN:
+    raise SystemExit(f"{OBJ}: no button_* objects found.")
 
 FAST = [ext(k) for k in objs if k.startswith('fastener_') and 'slot' not in k]
 
@@ -217,7 +230,7 @@ A(f'<text x="46" y="{NY:.0f}" font-size="10" letter-spacing="3" fill="{MUT}">THR
 notes = [
     ('Vents must be blind pockets.', f'{N_VENT} slots on the front face, {vh[2]-vl[2]:.1f} deep. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate fails. Print them blind and verify with the light-tightness test.'),
     ('The pad is reserved, not fitted.', f'{ph[0]-pl[0]:.1f} × {ph[2]-pl[2]:.1f} recess for the optional fingerprint sensor. The base build leaves it blank — the PIN does identity. Print it flat if you are not fitting one.'),
-    ('The dish is the reader, not a dial.', 'The knurled ring is a bezel, not a control. Nothing rotates. The cartridge enters through the front slot and sits under the dish.'),
+    ('The dish is the reader, not a dial.', 'The ring is a bezel, not a control. Nothing rotates. The cartridge enters through the front slot and sits under the dish.'),
 ]
 for i, (h, b) in enumerate(notes):
     y = NY + 24 + i*44
@@ -235,7 +248,8 @@ print(f'wrote {OUT}  ({len(objs)} objects, {len(V):,} verts)')
 print(f"wrote {OUT}")
 print(f"  envelope        {L:.2f} × {D:.2f} × {HT:.2f}")
 print(f"  dish            Ø{DISH_R*2:.2f}, {DECK_Y-RECESS_Y:.2f} deep")
-print(f"  ring            Ø{RING_OD:.2f} OD / Ø{RING_ID:.2f} ID, {RING_H:.2f} proud, {N_KNURL} knurls")
+print(f"  ring            Ø{RING_OD:.2f} OD / Ø{RING_ID:.2f} ID, {RING_H:.2f} proud"
+      + (f", {N_KNURL} knurls" if N_KNURL else " (smooth bezel)"))
 print(f"  ticks           {N_TICK} @ R{TICK_R:.2f}")
 print(f"  display         {gh[0]-gl[0]:.2f} × {gh[2]-gl[2]:.2f}")
 print(f"  pad             {ph[0]-pl[0]:.2f} × {ph[2]-pl[2]:.2f}")

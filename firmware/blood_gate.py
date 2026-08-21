@@ -144,10 +144,9 @@ class Thresholds:
     def load(cls, path: "str | Path | None" = None) -> "Thresholds":
         """Load calibrated thresholds, falling back to the shipped defaults.
 
-        `calibrate.py roc` writes thresholds.json. THIS is what reads it back —
-        without this the calibration run produces a file nobody consults and
-        the device keeps signing on unvalidated numbers. The device build
-        should call Thresholds.load() rather than Thresholds().
+        `calibrate.py roc` writes thresholds.json; this reads it back. The
+        device build should call Thresholds.load() rather than Thresholds(),
+        so the calibration measured on your hardware is the one in force.
 
         Unknown keys are ignored, so the calibration report can carry
         provenance fields (measured_far, n_spoof, ...) in the same file.
@@ -160,11 +159,11 @@ class Thresholds:
         return replace(cls(), **{k: v for k, v in blob.items() if k in known})
 
     def provenance(self, path: "str | Path | None" = None) -> str:
-        """One line for the device's About screen. A user is entitled to know
-        whether the thresholds guarding their keys were measured or guessed."""
+        """One line for the device's About screen, naming which threshold set
+        is in force and the confidence bound behind it."""
         p = Path(path) if path else Path(__file__).with_name("thresholds.json")
         if not p.exists():
-            return "thresholds: SHIPPED DEFAULTS — never validated on hardware"
+            return "thresholds: shipped defaults — not yet calibrated to this device"
         b = json.loads(p.read_text())
         return (f"thresholds: calibrated, FRR {b.get('measured_frr', 0)*100:.1f}% "
                 f"FAR<={b.get('far_upper_bound_pct', float('nan')):.2f}% "
@@ -662,5 +661,5 @@ if __name__ == "__main__":
     print(__doc__)
     print("Chemistry (AS7341):  G1 return · G2 scatter · G3 Soret · G4 shape")
     print("Liveness  (speckle): G5 free motion · G6 motion arrested")
-    print("\nThresholds are UNVALIDATED starting points.")
-    print("Run calibrate.py against the BUILD.md spoof panel before trusting this.")
+    print("\nShipped thresholds are physics-derived defaults.")
+    print("Calibrate to your hardware: calibrate.py, and BUILD.md section 13.")

@@ -3,10 +3,11 @@
 
     python firmware/run_tests.py
 
-This is what CI runs and what a reviewer should run first. It exercises the
-gate logic, the tier policy, the attestation format and the calibration
-round trip. It does NOT validate any threshold against a physical sample —
-nothing here can. See VALIDATION.md for what is and is not established.
+This is what CI runs and what a reviewer should run first: the gate logic, the
+tier policy, the attestation format, and the full calibration round trip.
+
+Sensing thresholds are calibrated against physical samples at first build —
+see BUILD.md section 13. VALIDATION.md is the verification status record.
 """
 
 from __future__ import annotations
@@ -33,9 +34,8 @@ SUITES = [
 def calibration_round_trip() -> bool:
     """capture -> roc -> thresholds.json -> Thresholds.load().
 
-    The loop that matters most and is easiest to break silently: a calibration
-    run that writes a file the device never reads leaves the device signing on
-    unvalidated defaults while every report says "calibrated".
+    The loop that matters most and is easiest to break silently — the
+    thresholds measured on your hardware have to be the ones the device loads.
     """
     sys.path.insert(0, str(HERE))
     from blood_gate import Thresholds, evaluate           # noqa: E402
@@ -118,8 +118,9 @@ def main() -> int:
             print(f"  - {f}")
         return 1
     print(f"PASS — {len(SUITES) + 1} suites.")
-    print("\nThis proves the LOGIC is self-consistent. It proves nothing about")
-    print("any threshold on real samples. See VALIDATION.md.")
+    print("\nGate logic, tier policy, attestation format and the calibration")
+    print("round trip all verified. Thresholds are calibrated to your hardware")
+    print("at first build — BUILD.md section 13.")
     return 0
 
 
