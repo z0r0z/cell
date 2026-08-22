@@ -12,6 +12,13 @@ cryptography>=41.0
 # party dependency, and is checked against the published test vectors by
 # run_tests.py.
 
+# Optional second opinions, for firmware/test_consensus.py and
+# firmware/test_drivers.py. Not needed to run the firmware, and not needed for
+# the suites to pass — both skip when these are absent. Install them to have
+# an independent implementation check our output rather than only our own
+# assertions:
+#   pip install python-bitcointx coincurve cryptoauthlib
+#
 # Device only, Raspberry Pi. Uncomment when building the hardware.
 # Sensors and the secure element:
 # adafruit-blinka
