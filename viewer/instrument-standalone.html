@@ -4,7 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cell — instrument, 3D study</title>
+<meta name="description" content="Airgapped signer for Bitcoin and Ethereum. A live pulse, or a drop of blood that has to clot while the device watches. Open source, 3D printable, about $95 in parts.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%20role%3D%22img%22%20aria-label%3D%22CELL%22%3E%0A%20%20%3C%21--%0A%20%20%20%20The%20sensor%20port%2C%20straight%20off%20the%20enclosure%3A%20the%20fingertip%20lands%20here%20and%0A%20%20%20%20the%20cartridge%20reads%20through%20it.%20The%20glowing%20band%20is%20the%20bezel%20and%20the%20dark%0A%20%20%20%20middle%20is%20the%20read%20spot%2C%20which%20on%20the%20real%20instrument%20is%20matte%20black%20so%20it%0A%20%20%20%20returns%20nothing.%20Oxblood%20is%20the%20model%27s%20own%20accent%20colour.%0A%0A%20%20%20%20Drawn%20for%2016px%20first.%20Nothing%20here%20is%20thinner%20than%20the%20bezel%20band%2C%20because%0A%20%20%20%20nothing%20thinner%20survives%20at%20that%20size.%20The%20recess%27s%20index%20ring%20is%20not%20here%0A%20%20%20%20for%20the%20same%20reason%3A%20at%2016px%20it%20fell%20inside%20the%20bezel%27s%20own%20halo.%20The%0A%20%20%20%20centre%20stays%20dark%20on%20purpose%2C%20since%20filling%20it%20makes%20a%20generic%20red%20dot.%0A%20%20--%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3CradialGradient%20id%3D%22tile%22%20cx%3D%2250%25%22%20cy%3D%2240%25%22%20r%3D%2265%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%2326241f%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%221%22%20stop-color%3D%22%230e0d0c%22%2F%3E%0A%20%20%20%20%3C%2FradialGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%0A%20%20%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227.5%22%20fill%3D%22url%28%23tile%29%22%2F%3E%0A%0A%20%20%3C%21--%20bezel%3A%20a%20wide%20soft%20halo%20under%20a%20hard%20band%2C%20which%20is%20what%20reads%20as%20glow%20--%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%228.4%22%20fill%3D%22none%22%20stroke%3D%22%23e0424f%22%20stroke-width%3D%227%22%20opacity%3D%220.16%22%2F%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%228.4%22%20fill%3D%22none%22%20stroke%3D%22%23b62a38%22%20stroke-width%3D%224.2%22%2F%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%228.4%22%20fill%3D%22none%22%20stroke%3D%22%23e85561%22%20stroke-width%3D%221.3%22%20opacity%3D%220.85%22%2F%3E%0A%0A%20%20%3C%21--%20read%20spot%20--%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%226.3%22%20fill%3D%22%230b0a0a%22%2F%3E%0A%3C%2Fsvg%3E%0A">
+<!-- Link preview. Without these a shared URL renders as a bare blue link, and
+     for a page whose entire content is a WebGL canvas there is nothing for a
+     crawler to fall back on -- no heading, no paragraph, no image. The card
+     image has to be an absolute URL because crawlers fetch it out of band;
+     a data: URI will not do. -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://cell.wei.is">
+<meta property="og:title" content="CELL — a hardware wallet that takes your pulse, or your blood">
+<meta property="og:description" content="Airgapped signer for Bitcoin and Ethereum. A live pulse, or a drop of blood that has to clot while the device watches. Open source, 3D printable, about $95 in parts.">
+<meta property="og:image" content="https://raw.githubusercontent.com/z0r0z/cell/main/diagrams/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="CELL — a hardware wallet that takes your pulse, or your blood">
+<meta name="twitter:description" content="Airgapped signer for Bitcoin and Ethereum. A live pulse, or a drop of blood that has to clot while the device watches. Open source, 3D printable, about $95 in parts.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/z0r0z/cell/main/diagrams/social-card.png">
 <!--
   Self-contained build of viewer/instrument.html -- three.js r184 inlined,
   zero network requests. Drag to orbit, scroll to zoom, and use the toolbar to
@@ -41,6 +58,23 @@
   <div class="vignette"></div>
   <a class="repo" href="https://github.com/z0r0z/cell" target="_blank" rel="noopener">github.com/z0r0z/cell</a>
 </div>
+<noscript>
+  <!-- The page is a WebGL canvas and nothing else, so without scripting it is
+       a black rectangle with no explanation. Say what it was and where to go. -->
+  <div style="position:fixed;inset:0;display:flex;align-items:center;
+              justify-content:center;background:#0c0c0b;color:#D8D2C8;
+              font:14px/1.7 Helvetica Neue,Helvetica,Arial,sans-serif;
+              text-align:center;padding:2rem">
+    <div>
+      <p style="letter-spacing:3px;margin:0 0 .6rem">CELL</p>
+      <p style="color:#8A8B8F;margin:0 0 1.2rem">
+        This page is an interactive 3D model of the instrument.<br>
+        It needs JavaScript and WebGL.
+      </p>
+      <a href="https://github.com/z0r0z/cell" style="color:#B23A48">github.com/z0r0z/cell</a>
+    </div>
+  </div>
+</noscript>
 
 <script type="text/plain" id="p-core">/**
  * @license

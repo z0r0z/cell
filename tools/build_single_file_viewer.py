@@ -80,7 +80,24 @@ TEMPLATE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>%(title)s</title>
+<meta name="description" content="%(description)s">
 <link rel="icon" href="%(favicon)s">
+<!-- Link preview. Without these a shared URL renders as a bare blue link, and
+     for a page whose entire content is a WebGL canvas there is nothing for a
+     crawler to fall back on -- no heading, no paragraph, no image. The card
+     image has to be an absolute URL because crawlers fetch it out of band;
+     a data: URI will not do. -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="%(url)s">
+<meta property="og:title" content="%(card_title)s">
+<meta property="og:description" content="%(description)s">
+<meta property="og:image" content="%(image)s">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="%(card_title)s">
+<meta name="twitter:description" content="%(description)s">
+<meta name="twitter:image" content="%(image)s">
 <!--
   Self-contained build of viewer/instrument.html -- three.js r184 inlined,
   zero network requests. Drag to orbit, scroll to zoom, and use the toolbar to
@@ -96,6 +113,23 @@ TEMPLATE = """<!DOCTYPE html>
   <div class="vignette"></div>
   <a class="repo" href="https://github.com/z0r0z/cell" target="_blank" rel="noopener">github.com/z0r0z/cell</a>
 </div>
+<noscript>
+  <!-- The page is a WebGL canvas and nothing else, so without scripting it is
+       a black rectangle with no explanation. Say what it was and where to go. -->
+  <div style="position:fixed;inset:0;display:flex;align-items:center;
+              justify-content:center;background:#0c0c0b;color:#D8D2C8;
+              font:14px/1.7 Helvetica Neue,Helvetica,Arial,sans-serif;
+              text-align:center;padding:2rem">
+    <div>
+      <p style="letter-spacing:3px;margin:0 0 .6rem">CELL</p>
+      <p style="color:#8A8B8F;margin:0 0 1.2rem">
+        This page is an interactive 3D model of the instrument.<br>
+        It needs JavaScript and WebGL.
+      </p>
+      <a href="https://github.com/z0r0z/cell" style="color:#B23A48">github.com/z0r0z/cell</a>
+    </div>
+  </div>
+</noscript>
 
 %(payloads)s
 
@@ -141,6 +175,21 @@ def main():
     ap.add_argument("-o", "--out", default=str(VIEWER / "instrument-standalone.html"))
     ap.add_argument("--version", default="0.184.0", help="three.js version to inline")
     ap.add_argument("--title", default="Cell — instrument, 3D study")
+    # The tab title and the link-preview title do different jobs. The tab says
+    # what the page is; the card is competing in a timeline and has to say what
+    # the product is.
+    ap.add_argument("--card-title",
+                    default="CELL — a hardware wallet that takes your pulse, or your blood")
+    ap.add_argument("--description",
+                    default="Airgapped signer for Bitcoin and Ethereum. A live pulse, or a "
+                            "drop of blood that has to clot while the device watches. Open "
+                            "source, 3D printable, about $95 in parts.")
+    ap.add_argument("--url", default="https://cell.wei.is",
+                    help="canonical URL of the deployed page")
+    ap.add_argument("--image",
+                    default="https://raw.githubusercontent.com/z0r0z/cell/main/diagrams/social-card.png",
+                    help="absolute URL of the 1200x630 link-preview image. Point it at "
+                         "your own host if you would rather not depend on GitHub raw.")
     args = ap.parse_args()
 
     page = SOURCE.read_text(encoding="utf-8")
@@ -174,7 +223,9 @@ def main():
         for k, v in payloads.items()
     )
 
-    html = TEMPLATE % {"title": args.title, "style": style.group(1),
+    html = TEMPLATE % {"title": args.title, "card_title": args.card_title,
+                       "description": args.description, "url": args.url,
+                       "image": args.image, "style": style.group(1),
                        "payloads": blocks, "boot": BOOT,
                        "favicon": favicon_data_uri()}
     out = Path(args.out)

@@ -24,11 +24,11 @@
 
   <path d="M328,158 L328,214 L316,214 L316,158 Z" fill="#2A2926" stroke="#4A4A46"/>
   <path d="M352,158 L352,214 L364,214 L364,158 Z" fill="#2A2926" stroke="#4A4A46"/>
-  <text x="374" y="172" font-size="9.5" fill="#8A8B8F">aperture Ø3.0 × 6.0</text>
-  <text x="374" y="185" font-size="9.5" fill="#8A8B8F">matte black</text>
+  <text x="176" y="232" font-size="9.5" fill="#8A8B8F">aperture Ø3.0 × 6.0</text>
+  <text x="176" y="245" font-size="9.5" fill="#8A8B8F">matte black</text>
 
   <line x1="340" y1="254" x2="340" y2="162" stroke="#6F9FC9" stroke-width="2" marker-end="url(#rb)"/>
-  <text x="348" y="232" font-size="10" font-weight="600" fill="#6F9FC9">0° observe</text>
+  <text x="352" y="206" font-size="10" font-weight="600" fill="#6F9FC9">0° observe</text>
 
   <rect x="216" y="182" width="40" height="18" rx="2" fill="#C9A227" transform="rotate(45 236 191)"/>
   <text x="140" y="180" font-size="10" font-weight="600" fill="#C9A227">LED #1 white</text>
@@ -40,9 +40,9 @@
   <text x="132" y="140" font-size="10" font-weight="600" fill="#B23A48">650 nm laser</text>
   <line x1="228" y1="158" x2="322" y2="252" stroke="#B23A48" stroke-width="1.8" stroke-dasharray="5 3"/>
   <rect x="398" y="136" width="40" height="16" rx="2" fill="#4A4E57"/>
-  <text x="446" y="146" font-size="10" font-weight="600" fill="#9FA3A8">camera, no lens</text>
+  <text x="452" y="138" font-size="10" font-weight="600" fill="#9FA3A8">camera, no lens</text>
   <line x1="418" y1="152" x2="356" y2="252" stroke="#9FA3A8" stroke-width="1.4" stroke-dasharray="4 3"/>
-  <text x="492" y="172" font-size="10" font-weight="600" fill="#C9A227">LED #2 white</text>
+  <text x="466" y="158" font-size="10" font-weight="600" fill="#C9A227">LED #2 white</text>
   <line x1="430" y1="206" x2="348" y2="250" stroke="#C9A227" stroke-width="2" marker-end="url(#ry)"/>
 
   <path d="M340,232 A28,28 0 0,0 320,212" fill="none" stroke="#C9A227" stroke-width="1.2"/>
@@ -88,7 +88,7 @@
   <text x="610" y="434" font-size="10.5" fill="#C9707A">contaminates 630 nm, the LEDs wash out speckle.</text>
 
   <!-- ===== CARTRIDGE ===== -->
-  <text x="48" y="486.0" font-size="10.5" letter-spacing="3" fill="#6F7178">CARTRIDGE — 32 × 14 × 2.4, WHITE PETG, 0.15 LAYERS, IRONING ON  ·  600 s CAPTURE</text>
+  <text x="48" y="486.0" font-size="10.5" letter-spacing="3" fill="#6F7178">CARTRIDGE — 45 × 14 × 2.4, WHITE PETG, 0.15 LAYERS, IRONING ON  ·  600 s CAPTURE</text>
 
   <g transform="translate(48 502.0) scale(5.0)">
     <rect x="0" y="0" width="32" height="14" rx="0.8" fill="#151513" stroke="#4A4A46" stroke-width="0.14"/>
