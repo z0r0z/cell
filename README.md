@@ -6,7 +6,7 @@ Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, $
 
 <img src="diagrams/turntable.gif" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
 
-<sup>116.2 × 73.2 × 28.3 mm. The ring is the sensor port — a fingertip on it, or a cartridge under it. It is a bezel, not a control; nothing rotates.</sup>
+<sup>The ring is the sensor port — a fingertip on it, or a cartridge under it. It is a bezel, not a control; nothing rotates.</sup>
 
 **Spin it yourself.** The enclosure is a parametric three.js model, not a static render:
 
@@ -20,9 +20,9 @@ Orbit it, and export OBJ or glTF straight from the viewer. The turntable above i
 
 The design is complete and the firmware self-tests on every commit: 33 suites covering the signing stack against published test vectors, both liveness gates, and the whole device loop. Bitcoin Core accepts and mines what it signs.
 
-Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written and unverified against hardware — `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half.
+Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written but unverified against hardware — `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half.
 
-Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build — `calibrate.py` runs the spoof panel for both tiers, sets every threshold from your own samples, and writes a file the device loads. The touch panel is 15-second sessions, so that half is minutes of work. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
+Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build. `calibrate.py` runs the spoof panel for both tiers, sets every threshold from your own samples, and writes a file the device loads. Touch sessions are 15 seconds each, so that half of the calibration is minutes of work. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
 
 Read `SAFETY.md` before the first build.
 
@@ -61,7 +61,7 @@ Three further gates confirm that the sample returns light at all, that it scatte
 
 ### Motion: is it alive
 
-A stored sample fails on an asymmetry in how blood can be kept. Blood that can be stored has been anticoagulated and does not clot in the chamber. Blood that was not anticoagulated has already clotted and cannot be poured into a well. `BUILD.md` §16 gives the exception and the scope.
+A stored sample fails on an asymmetry in how blood can be kept. Blood that can be stored has been anticoagulated and does not clot in the chamber. Blood that was not anticoagulated has already clotted and cannot be poured into a well. `BUILD.md` §16 gives the one exception to that asymmetry, and how far it reaches.
 
 The device tests for this by measuring motion rather than colour. Under laser illumination, a liquid suspension of red cells produces a speckle pattern that changes continuously as the cells move. As fibrin forms it locks the cells in place and the pattern becomes static. A camera samples the pattern for ten minutes and measures the frame-to-frame correlation.
 
@@ -99,11 +99,11 @@ Co-signers register each other's attestation keys once, alongside the firmware a
 
 The record travels beside the PSBT in a BIP-174 proprietary field and is stripped before broadcast, so it does not appear on chain.
 
-The record attests that a device holding this key ran the blood gate for this transaction, and commits to the measurements it got. As with a TPM quote or a Secure Enclave receipt, that claim rests on the firmware and the tamper seal — so co-signers register firmware hashes alongside keys, and `verify()` refuses builds it does not recognise.
+The record attests that a device holding this key ran the blood gate for this transaction, and commits to the measurements it got.
 
 ### Putting it on chain
 
-By default the record never reaches the chain. It is stripped before broadcast, because publishing it says "this address is a CELL device, and this spend was authorised with blood." For a treasury that is a leak.
+Stripping it is the default because publishing it says "this address is a CELL device, and this spend was authorised with blood." For a treasury that is a leak.
 
 For an allowlist it is the whole point, so the option is there.
 
@@ -115,13 +115,13 @@ The digest the device signs commits to the chain, the contract and the claimant,
 
 What that buys is a signature nobody can farm. A script can produce a million of them. A body produces about two a day, and each one costs a lancet and ten minutes. For allowlists, mints, quorum votes and anything else where one-human-one-action matters, that is a rate limit denominated in something an attacker cannot buy more of.
 
-The limit is the same one every hardware attestation has. The record proves a device holding that key said it ran the blood gate. Someone who opens the case and extracts the key can sign claims without bleeding. So treat it as raising the cost of faking a human, not as proof of a unique one, and register firmware hashes so an unrecognised build is refused.
+The limit is the one every hardware attestation has. As with a TPM quote or a Secure Enclave receipt, the claim rests on the firmware and the tamper seal: someone who opens the case and extracts the key can sign records without bleeding. So treat it as raising the cost of faking a human, not as proof of a unique one. Co-signers register firmware hashes alongside keys, and `verify()` refuses builds it does not recognise.
 
 Implementation in `firmware/attest.py`.
 
 ## What it protects against
 
-The device defeats remote malware, automated signing, signing at scale, and signing without the owner's knowledge. A compromised host cannot produce a pulse or a clotting sample, and there is no batch mode. Every signature costs a physical act. At blood tier your body sets the rate, so one drop is one signature and no amount of capital compresses that.
+The device defeats remote malware, automated signing, signing at scale, and signing without the owner's knowledge. A compromised host cannot produce a pulse or a clotting sample, and there is no batch mode. Every signature costs a physical act, and at blood tier the rate is set by your body rather than by the attacker's budget.
 
 The gate asks whether someone alive is here. The PIN asks who. It is required at both tiers, and the secure element's attempt counter increments before it checks, so cutting power mid-guess costs an attempt rather than refunding one. Ten wrong and the device wipes.
 
@@ -220,27 +220,27 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/test_curve.py` | The fast scalar multiplies against the definition they replaced |
 | `firmware/test_drivers.py` | Do we call the hardware libraries correctly |
 | `firmware/test_consensus.py` | An independent interpreter runs our scripts |
-| `tools/provision.py` | Choose a seed, wrap it, record the watch-only accounts |
-| `tools/cell.service` | The systemd unit that starts the loop at boot |
-| `tools/bench.py` | The checks only the built device can answer |
-| `tools/regtest_e2e.py` | Sign with the firmware, make Bitcoin Core accept it |
 | `firmware/signer.py` | The unlock chain: policy, confirm, PIN, gate, sign, attest |
 | `firmware/se.py` | Secure element interface and a software stub for tests |
 | `firmware/policy.py` | Tier selection and escalation rules |
 | `firmware/attest.py` | Tier attestation and quorum verification |
 | `firmware/calibrate.py` | Spoof-panel harness for both tiers, and the synthetic self-test |
 | `firmware/hardware.py` | Sensor drivers. Untested; includes a bring-up checklist |
-| `contracts/` | On-chain verification of the attestation record, and the registry |
-| `models/` | Enclosure mesh, coordinate convention, regeneration |
-| `models/print/` | The ten printable STLs and their generated manifest |
-| `diagrams/` | Explainer, build sheet, dimensioned drawings |
 | `firmware/run_tests.py` | Every self-test in one run. What CI runs |
+| `tools/provision.py` | Choose a seed, wrap it, record the watch-only accounts |
+| `tools/cell.service` | The systemd unit that starts the loop at boot |
+| `tools/bench.py` | The checks only the built device can answer |
+| `tools/regtest_e2e.py` | Sign with the firmware, make Bitcoin Core accept it |
 | `tools/export_model.py` | Re-exports `instrument.obj` from `viewer/model.js` |
 | `tools/render_turntable.py` | Renders the turntable GIF/MP4 from the same model |
 | `tools/gen_wiring.py` | Draws the Phase 1 wiring sheet from BUILD.md §11 |
 | `tools/gen_mechanical.py` | Regenerates `diagrams/mechanical.svg` from the mesh |
 | `tools/gen_printables.py` | Generates every printable part, checks it, writes the manifest |
 | `tools/gen_enclosure.py` | The inside of the two shells, and the fit checks |
+| `contracts/` | On-chain verification of the attestation record, and the registry |
+| `models/` | Enclosure mesh, coordinate convention, regeneration |
+| `models/print/` | The ten printable STLs and their generated manifest |
+| `diagrams/` | Explainer, build sheet, dimensioned drawings |
 | `viewer/` | Parametric three.js model — the source `instrument.obj` is exported from |
 | `VALIDATION.md` | Verification status: what is tested, by what method |
 | `SAFETY.md` | Blood-contact handling. Two minutes, read it first |
