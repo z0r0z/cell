@@ -659,7 +659,8 @@ Minimum 30 trials per class. Anything not `genuine` must reject.
 | commercial_fx | Theatrical blood, 2 brands |
 | aged_10m / 30m / 60m | Your blood, room temp |
 | rewarmed | Aged blood warmed to 37 °C before application |
-| **edta** | **Anticoagulated tube blood — the most important negative class** |
+| **edta** | **EDTA anticoagulated tube blood — the most important negative class** |
+| citrate | Citrate tube blood, loaded as drawn (not recalcified — see §16) |
 | animal | Pig or beef from a butcher |
 | hemolyzed | Your blood, frozen and thawed |
 | empty | No sample |
@@ -747,6 +748,8 @@ Stated so co-signers and reviewers can reason about them directly.
 **Liveness is not identity.** The gate proves a living human is present; the PIN proves which one. Both are required at both tiers, and the ATECC608B's monotonic attempt counter backs the PIN — it increments before verify, so power-cycling mid-attempt does not reset it, and ten failures wipe.
 
 **The gate proves fresh mammalian blood.** Mammalian haemoglobin is spectrally near-identical to human and clots on the same schedule. Butcher blood fails — it is anticoagulated or already clotted — but the device is not a species assay, and it does not need to be: the PIN is what makes the key yours. Species discrimination means DNA sequencing, which is a different instrument.
+
+**Citrate is reversible, and G6 does not catch a recalcified sample.** Citrate anticoagulates by chelating calcium; adding calcium back restores clotting, which is exactly how a recalcified PT/aPTT assay works. A citrated sample recalcified immediately before loading starts liquid and arrests, so it passes the motion gates as well as the chemistry ones. EDTA chelates far more avidly and is not practically reversible outside a lab, so EDTA tube blood remains rejected — and it is EDTA that a stolen tube of clinical blood is most likely to contain. What G6 defeats is the opportunistic replay of a stored sample. It does not defeat a prepared attacker who holds the owner's blood, the device and the PIN together; nothing optical at this price does, and the quorum in §4 is the answer to that threat rather than a better gate.
 
 **Physical possession of both device and PIN is the boundary.** As with every hardware wallet, hold what you would not be attacked for, and use the multisig quorum in §4 when the amount justifies it. `verify_quorum()` makes "everyone signed with blood" a mechanical check.
 

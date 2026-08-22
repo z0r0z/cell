@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from blood_gate import (
-    IDX, REFERENCE_OXYHB, TUNABLE, SensorHead, Thresholds,
+    A_MAX, IDX, REFERENCE_OXYHB, TUNABLE, SensorHead, Thresholds,
     absorbance, evaluate, metrics, speckle_metrics,
 )
 
@@ -44,7 +44,12 @@ PANEL = {
     "aged_30m":       "Own blood, 30 min, room temp",
     "aged_60m":       "Own blood, 60 min, room temp",
     "rewarmed":       "Aged blood warmed to 37 C before application",
-    "edta":           "EDTA/citrate tube blood -- MOST IMPORTANT NEGATIVE",
+    "edta":           "EDTA tube blood -- MOST IMPORTANT NEGATIVE",
+    # Citrate as drawn behaves like EDTA here. Citrate RECALCIFIED before
+    # loading is not in the panel because the gate does not reject it and a
+    # panel class that must fail would be a lie -- BUILD.md 16 states the limit
+    # in prose instead.
+    "citrate":        "Citrate tube blood, loaded as drawn",
     "animal":         "Pig or beef blood from a butcher",
     "hemolyzed":      "Own blood, frozen and thawed",
     "deoxygenated":   "Venous or oxygen-depleted blood -- the G4 shape negative",
@@ -108,7 +113,7 @@ class SyntheticHead(SensorHead):
         "empty":    np.array([0.900, 0.905, 0.910, 0.912, 0.915, 0.918, 0.920, 0.922]),
     }
     _BLOODY = ("genuine", "aged_10m", "aged_30m", "aged_60m",
-               "rewarmed", "edta", "animal", "hemolyzed", "reference")
+               "rewarmed", "edta", "citrate", "animal", "hemolyzed", "reference")
 
     _CELLULAR_NONBLOOD = ("deoxygenated",)
 
@@ -139,7 +144,7 @@ class SyntheticHead(SensorHead):
         """Fraction of the static field present. 0 = freely moving, 1 = frozen.
 
         genuine   : starts liquid, clots -> the only start-high-end-low case
-        edta/animal: anticoagulated, never clots -> stays liquid
+        edta/citrate/animal: anticoagulated, never clots -> stays liquid
         aged/rewarmed: already clotted before it got here -> starts frozen
         syrups/gels : too viscous to move -> starts frozen
         dye/empty   : no coherent scatterers at all
@@ -148,7 +153,7 @@ class SyntheticHead(SensorHead):
             # deoxygenated blood still clots normally — it must reach G4 to be
             # rejected, not be caught early by a motion gate.
             return float(0.05 + 0.90 / (1 + np.exp(-0.014 * (self.t - 300))))
-        if self.label in ("edta", "animal"):
+        if self.label in ("edta", "citrate", "animal"):
             return 0.05                       # never sets
         if self.label in ("aged_10m", "aged_30m", "aged_60m", "rewarmed",
                           "hemolyzed", "ketchup", "stage_blood", "commercial_fx",
@@ -285,26 +290,35 @@ def cmd_enroll_reference(args):
     if len(caps) < MIN_PER_CLASS:
         sys.exit(f"Need >={MIN_PER_CLASS} genuine captures, have {len(caps)}.")
 
-    vecs = []
-    for c in caps:
-        a = absorbance(c["chem"][0], c["white"][0], c["dark"][0])
-        vecs.append(a / np.linalg.norm(a))
-    # NOTE the enrolled vector keeps all 8 channels, including any at the
-    # absorbance clamp. gate4 masks the clamped ones itself via SHAPE_CHANNELS,
-    # which is recomputed from whatever reference you paste in — so a reference
-    # whose 415 nm entry is below the clamp will bring that channel back into
-    # the shape comparison. That is correct, and it is why the mask is derived
-    # rather than hardcoded.
+    # Emit the reference in ABSORBANCE units, unnormalised. This is not
+    # cosmetic. blood_gate derives SHAPE_CHANNELS by comparing the reference
+    # against A_MAX, so a reference scaled to unit length has every entry below
+    # the clamp, the mask comes back all-True, and the 415 nm channel — pinned
+    # at the clamp for every dark sample — re-enters the shape comparison. That
+    # is the exact failure the SHAPE_CHANNELS comment warns about: measured on
+    # synthetic panel data it lifts deoxygenated blood from 0.988 to 0.991
+    # against a genuine 0.99996, collapsing the margin G4 exists to hold.
+    # gate4 normalises internally, so magnitude here costs nothing.
+    vecs = [absorbance(c["chem"][0], c["white"][0], c["dark"][0]) for c in caps]
 
     ref = np.mean(vecs, axis=0)
-    ref /= np.linalg.norm(ref)
-    spread = float(np.mean([np.linalg.norm(v - ref) for v in vecs]))
+    # Spread is measured on unit-normalised copies, because it is a question
+    # about spectral SHAPE consistency, not about overall sample darkness.
+    unit = [v / np.linalg.norm(v) for v in vecs]
+    ref_unit = ref / np.linalg.norm(ref)
+    spread = float(np.mean([np.linalg.norm(v - ref_unit) for v in unit]))
 
     print("Replace REFERENCE_OXYHB in blood_gate.py with:\n")
     print("REFERENCE_OXYHB = np.array([")
     print("    " + ", ".join(f"{x:.4f}" for x in ref))
     print("], dtype=float)\n")
     print(f"n={len(vecs)}  mean intra-class spread={spread:.4f}")
+    n_clamped = int(np.sum(ref >= A_MAX - 1e-9))
+    print(f"channels at the absorbance clamp: {n_clamped} "
+          f"(excluded from G4 by SHAPE_CHANNELS)")
+    if n_clamped == 0:
+        print("WARNING: no channel reached the clamp. Genuine whole blood should "
+              "pin 415 nm. Check fill depth and that the well is optically deep.")
     if spread > 0.05:
         print("WARNING: spread >0.05. Check optics fouling, LED aging, cartridge print quality.")
 
@@ -444,7 +458,15 @@ def cmd_roc(args):
         "n_genuine": n_gen,
         "n_spoof": n_spoof,
         "classes": sorted(data),
-        "not_separating": [d[0] for d in diag if d[5] == "OVERLAP"],
+        # Same quantity as the printed `margin` column, same sign convention:
+        # the distance from the chosen threshold to the nearest spoof that
+        # STILL PASSES that gate, so it is <=0 whenever any spoof gets through
+        # and null when the gate rejects the whole panel alone. Most gates read
+        # negative and that is not a fault — the gates are an AND, and dye is
+        # not supposed to be caught by the clotting threshold. It is recorded
+        # so a margin that moves between calibrations can be seen.
+        "margins": {d[0]: (None if d[4] == float("inf") else round(d[4], 6))
+                    for d in diag},
     })
     Path("thresholds.json").write_text(json.dumps(out, indent=2, sort_keys=True))
     print("\nwrote thresholds.json")

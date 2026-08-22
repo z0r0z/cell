@@ -20,7 +20,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 SUITES = [
-    ("blood tier — 6 gates, 16 sample classes",
+    ("blood tier — 6 gates, 17 sample classes",
      [sys.executable, "calibrate.py", "selftest", "--n", "8"]),
     ("touch tier — 7 gates, 9 sample classes",
      [sys.executable, "touch_gate.py"]),

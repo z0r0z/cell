@@ -28,7 +28,7 @@ samples. That step is part of the build, not a caveat about it.
 | Operation set | 5 hostile payloads | Unknown type, bare hash, unknown field, missing field, non-object — all refused |
 | Display safety | Width and height limits | Destinations shown in full; anything that does not fit is refused, never truncated |
 | Secure element | 12 checks | Attempt debited before compare, wipe at 10, KDF context-bound and per-device |
-| Blood gates | 16 sample classes | Each rejected at the physically correct gate; all 6 gates exercised |
+| Blood gates | 17 sample classes | Each rejected at the physically correct gate; all 6 gates exercised |
 | Touch gates | 9 sample classes | Each rejected at the correct gate; all 7 gates exercised |
 | Calibration loop | Capture → sweep → load → re-verify | Thresholds written, loaded, and still separate the panel |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
@@ -90,6 +90,11 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
   optics drift over a year in a drawer; they are checked at every pre-flight.
 - **Population-scale false-reject rate.** Clotting time moves with hydration,
   temperature and medication.
+- **Recalcified citrate.** Not a gap in the measurement, a stated limit of the
+  method: citrate anticoagulation is reversed by adding calcium, so a citrated
+  sample recalcified before loading starts liquid, arrests, and passes G5 and
+  G6. EDTA is not practically reversible and stays rejected. `BUILD.md` §16
+  carries the reasoning and the scope this leaves the blood tier.
 
 ## Contributing a measurement
 

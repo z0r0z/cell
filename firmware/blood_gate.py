@@ -165,8 +165,16 @@ class Thresholds:
         if not p.exists():
             return "thresholds: shipped defaults — not yet calibrated to this device"
         b = json.loads(p.read_text())
+        # `roc` writes far_upper_bound_pct: null whenever a spoof was accepted,
+        # so .get(key, default) returns None rather than the default — the key
+        # is present. Formatting None raises, and it would raise precisely on
+        # the devices whose calibration FAILED, which is when this line most
+        # needs to render. Coerce explicitly.
+        far = b.get("far_upper_bound_pct")
+        far_txt = ("unbounded (a spoof was accepted)" if far is None
+                   else f"<={far:.2f}%")
         return (f"thresholds: calibrated, FRR {b.get('measured_frr', 0)*100:.1f}% "
-                f"FAR<={b.get('far_upper_bound_pct', float('nan')):.2f}% "
+                f"FAR {far_txt} "
                 f"(n={b.get('n_spoof', 0)} spoof, {b.get('n_genuine', 0)} genuine)")
 
 
@@ -314,8 +322,11 @@ def speckle_metrics(burst: np.ndarray,
         incoherently lit frame has almost none. K is a validity check that we
         are looking at speckle at all, not a discriminator.
 
-    Both are computed after the illumination envelope is removed. On real
-    hardware that step is not cosmetic — see Thresholds.envelope_px.
+    D is computed after the illumination envelope is removed; on real hardware
+    that step is not cosmetic — see Thresholds.envelope_px. K is deliberately
+    measured on the RAW frames, because contrast is a property of the speckle
+    field as the sensor sees it and high-passing would manufacture contrast
+    where there is none. The local window is what keeps the envelope out of K.
     """
     th = th or Thresholds()
     b = np.asarray(burst, dtype=np.float64)
@@ -450,11 +461,20 @@ def gate5_free_motion(t: np.ndarray, D: np.ndarray, K: np.ndarray,
 def gate6_motion_arrested(t: np.ndarray, D: np.ndarray, th: Thresholds) -> GateResult:
     """The sample clotted while we watched. This is the anti-replay gate.
 
-    It works because of a fact an attacker cannot engineer around:
+    It works because of an asymmetry in how blood can be kept:
 
-        Blood you can store has been anticoagulated, and never clots.
-        Blood that was not anticoagulated has already clotted, and cannot be
-        poured into a well.
+        Blood you can store has been anticoagulated, and does not clot in the
+        chamber. Blood that was not anticoagulated has already clotted, and
+        cannot be poured into a well.
+
+    KNOWN LIMIT — citrate is reversible. Citrate anticoagulates by chelating
+    calcium, and adding calcium back restores clotting; that is the basis of
+    every recalcified PT/aPTT assay. A citrated sample recalcified immediately
+    before loading starts liquid and arrests, and this gate passes it. EDTA
+    chelates far more avidly and is not practically reversible outside a lab,
+    so EDTA tube blood stays rejected. What G6 defeats is opportunistic replay
+    of a stored sample, not a prepared attack by someone who already holds the
+    owner's blood, the device and the PIN. BUILD.md section 16.
 
     No curve shape is assumed. Three conditions: the end state is arrested, the
     drop is large enough to be real, and the trend runs in the right direction.
@@ -645,7 +665,10 @@ def metrics(capture: dict, th: Thresholds = Thresholds()) -> dict:
         g5_d_early=d_early,
         g6_d_late=d_late,
         g6_drop=d_early - d_late,
-        g6_rho=float(spearmanr(t, D).statistic) if len(t) >= 3 else 1.0,
+        # Same minimum gate6 enforces. A rho fitted to three points is noise,
+        # and a sweep that set monotone_rho_max from captures the gate would
+        # refuse outright would be calibrating against samples it never judges.
+        g6_rho=float(spearmanr(t, D).statistic) if len(t) >= 5 else 1.0,
     )
     return m
 
