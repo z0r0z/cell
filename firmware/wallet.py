@@ -7,15 +7,17 @@ signer.EXPECTED_ORDER still governs, the gate still runs before the unwrap,
 and the seed still exists as a mutable buffer that is zeroised on every path
 out — including the ones that raise.
 
-Two entry points, one per chain:
+Three entry points:
 
-    sign_psbt   Bitcoin. The PSBT is analysed BEFORE anything is unlocked, so
-                what the owner confirms is computed from their own seed's
-                public keys, and the seed itself is only unwrapped after they
-                have confirmed and the gate has passed.
-    sign_eth    Ethereum. The transaction is built on the device from
-                displayed fields, and the digest is computed from what was
-                built rather than accepted from the host.
+    sign_psbt       Bitcoin. The PSBT is analysed BEFORE anything is unlocked, so
+                    what the owner confirms is computed from their own seed's
+                    public keys, and the seed itself is only unwrapped after they
+                    have confirmed and the gate has passed.
+    sign_eth        Ethereum. The transaction is built on the device from
+                    displayed fields, and the digest is computed from what was
+                    built rather than accepted from the host.
+    sign_challenge  Coordinator nonce. Digest from displayed purpose and nonce.
+                    No coins move.
 
 WATCH-ONLY FIRST. Both entry points need the account's public keys to decide
 what to display — which change is ours, which address is ours. Those come from
@@ -34,6 +36,7 @@ import bip39
 import eth
 import ops
 import psbt as psbtmod
+import secp256k1 as ec
 import seedstore
 import signer
 from bip32 import ExtendedKey
@@ -336,3 +339,66 @@ def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
     return SignedEth(raw=out["raw"], txid=out["txid"], sender=out["sender"],
                      attestation=result.attestation.pack(), tier=result.tier,
                      display=result.display)
+
+
+# --------------------------------------------------------------------------
+# Coordinator challenge
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class SignedChallenge:
+    digest: bytes
+    signature: bytes
+    attestation: bytes
+    pubkey: bytes
+    tier: Tier
+    display: list[str]
+
+
+def sign_challenge(op: ops.Challenge, prov: Provisioning, se: SecureElement,
+                   pol: Policy, fw_hash: bytes, cal_hash: bytes,
+                   confirm, run_gate, pin: str, index: int = 0,
+                   requested_tier: Tier | None = None) -> SignedChallenge:
+    """Run the unlock chain over a coordinator nonce.
+
+    The digest is computed from the displayed purpose and nonce, never taken
+    from the host. The spend key Schnorr-signs that digest so a coordinator
+    can bind the same pubkey that holds funds; the attestation key signs the
+    same digest so they can check the gate without the spend pubkey.
+    """
+    if not isinstance(op, ops.Challenge):
+        raise WalletError("sign_challenge only accepts ops.Challenge")
+    digest = op.digest()
+    account = prov.account_for("eth", "ethereum")
+    watch = account.key().derive([0, index])
+    out: dict = {}
+
+    def sign_digest(seed: bytearray, bound: bytes) -> bytes:
+        if bound != digest:
+            raise WalletError("the digest changed between display and signing")
+        root = _root_from(seed)
+        node = root.derive(eth_path(0, index))
+        if node.pubkey != watch.pubkey:
+            raise WalletError(
+                "the unwrapped seed derives a different key than the one "
+                "this device recorded; refusing to sign")
+        assert node.seckey is not None
+        sig = ec.schnorr_sign(digest, node.seckey)
+        out["signature"] = sig
+        out["pubkey"] = node.pubkey[1:] if len(node.pubkey) == 33 else node.pubkey
+        return sig
+
+    def unwrap_seed(key: bytes) -> bytearray:
+        return seedstore.unwrap(prov.seed_blob, key)
+
+    s = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
+                      confirm=confirm, run_gate=run_gate,
+                      unwrap_seed=unwrap_seed, sign_digest=sign_digest)
+    result = s.authorize_and_sign(
+        signer.SignRequest(operation=op, sighash=digest,
+                           requested_tier=requested_tier), pin)
+    return SignedChallenge(digest=digest, signature=out["signature"],
+                           attestation=result.attestation.pack(),
+                           pubkey=out["pubkey"], tier=result.tier,
+                           display=result.display)

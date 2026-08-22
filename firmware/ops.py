@@ -17,6 +17,11 @@ So the operation set is CLOSED. Four spending shapes, all renderable:
     DirectTransfer a transfer to a named pubkey on either chain
     EthereumSpend  an EIP-1559 transfer, with the chain, nonce and fee cap
 
+and two non-spends:
+
+    PolicyChange   the tier floor; blood-locked in both directions
+    Challenge      a coordinator nonce; Touch-default; no coins move
+
 Everything else is refused, including generic EVM calldata and bare hashes.
 This is a scope decision, not a missing feature — see BUILD.md section 5.
 
@@ -28,6 +33,7 @@ that forgot a field is a bug of the same severity as a signing bug.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -352,10 +358,77 @@ class PolicyChange:
         return lines
 
 
+# Frozen on purpose. A free-form purpose is a field the owner cannot evaluate
+# the way they evaluate an address. Coordinators that need a new purpose get a
+# new constant here, the same way a new spend shape does.
+CHALLENGE_PURPOSES = frozenset({"coordinator/v1"})
+CHALLENGE_TAG = b"CELL/challenge/v1"
+
+
+@dataclass(frozen=True)
+class Challenge:
+    """A coordinator nonce. No coins move.
+
+    The attestation record binds to a transaction sighash. Coordinators that
+    are not asking for a spend still need that binding, or "this device ran
+    the gate" can be lifted onto any later operation. The digest is computed
+    HERE from the fields the owner is shown — the same rule as EthereumSpend —
+    so the host cannot supply a sighash the screen did not contain.
+
+    Touch-default: amount_for_policy is 0 and the class is not in
+    policy.ALWAYS_BLOOD. Escalation to blood remains available.
+    """
+
+    nonce: str
+    purpose: str = "coordinator/v1"
+
+    def op_class(self) -> str:
+        return "attest.challenge"
+
+    def amount_for_policy(self) -> int:
+        return 0
+
+    def nonce_bytes(self) -> bytes:
+        if not isinstance(self.nonce, str) or len(self.nonce) != 64:
+            raise UnrenderableOperation("challenge nonce must be 32 bytes hex")
+        try:
+            raw = bytes.fromhex(self.nonce)
+        except ValueError:
+            raise UnrenderableOperation("challenge nonce is not hex") from None
+        if len(raw) != 32:
+            raise UnrenderableOperation("challenge nonce must be 32 bytes")
+        return raw
+
+    def digest(self) -> bytes:
+        if self.purpose not in CHALLENGE_PURPOSES:
+            raise UnrenderableOperation(
+                f"refusing unknown challenge purpose {self.purpose!r}. "
+                f"This device attests {', '.join(sorted(CHALLENGE_PURPOSES))} "
+                f"and nothing else.")
+        try:
+            self.purpose.encode("ascii")
+        except UnicodeEncodeError:
+            raise UnrenderableOperation("challenge purpose must be ASCII") from None
+        return hashlib.sha256(
+            CHALLENGE_TAG + b"|" + self.purpose.encode("ascii")
+            + b"|" + self.nonce_bytes()
+        ).digest()
+
+    def render(self) -> list[str]:
+        # Refuse unknown purpose / bad nonce before the owner is asked to
+        # confirm a screen that would not match the digest.
+        self.digest()
+        lines = ["ATTEST CHALLENGE",
+                 f"  purpose  {self.purpose}",
+                 "  nonce"]
+        return lines + wrap_full(self.nonce.lower(), DISPLAY_COLS)
+
+
 # Every operation the device will sign. Anything not on this list is refused
 # before it reaches the renderer, so an unknown type cannot reach the key by
 # arriving with a render() method that returns something plausible.
-ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, EthereumSpend, PolicyChange)
+ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, EthereumSpend,
+           PolicyChange, Challenge)
 
 
 def parse(payload: dict) -> Operation:
@@ -374,6 +447,7 @@ def parse(payload: dict) -> Operation:
         "transfer": DirectTransfer,
         "eth_spend": EthereumSpend,
         "policy_change": PolicyChange,
+        "challenge": Challenge,
     }
     if kind not in table:
         raise UnrenderableOperation(
