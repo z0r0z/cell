@@ -52,6 +52,7 @@ PAGE = """<!DOCTYPE html>
 <script src="./three-d-stage.js"></script>
 <script type="module">
 const SIZE = %(size)d, FRAMES = %(frames)d, ELEV = %(elev)f, GAIN = %(gain)f;
+const TILT = %(tilt)f;
 
 async function post(path, body, kind) {
   await fetch(path, {method:'POST', headers: kind ? {'X-Frame': kind} : {}, body});
@@ -92,20 +93,36 @@ async function run() {
   // then pixel-stable instead of drifting as a flat slab presents different
   // silhouettes, and the highlights stay put instead of strobing as the body
   // passes through a moving lamp. This is how a product turntable is shot.
+  //
+  // The rig is three nested groups, and the nesting is what makes a low camera
+  // and a visible screen compatible:
+  //
+  //   yaw    turned to face the camera, so "toward the viewer" is well defined
+  //     tilt   tips the deck up toward the lens by TILT degrees
+  //       spin   the turntable itself
+  //
+  // Because the tilt sits OUTSIDE the spin, the spin axis is what leans
+  // forward. The deck therefore holds a constant angle to the camera all the
+  // way round, instead of tumbling into and out of view — which is what you
+  // get if you tilt inside the spin.
   const obj = stage._object;
-  const box = new mod.Box3().setFromObject(obj);
-  const centre = box.getCenter(new mod.Vector3());
-  const sph = box.getBoundingSphere(new mod.Sphere());
+  const box0 = new mod.Box3().setFromObject(obj);
+  const centre = box0.getCenter(new mod.Vector3());
+  const sph = box0.getBoundingSphere(new mod.Sphere());
 
-  // Pivot about the object's own centre, on the world vertical.
-  const pivot = new mod.Group();
-  obj.parent.add(pivot);
-  pivot.position.copy(centre);
-  obj.position.sub(centre);
-  pivot.add(obj);
-
-  // Compose once, at the hero three-quarter angle, and leave it alone.
   const el = (ELEV * Math.PI) / 180, az = (27 * Math.PI) / 180;
+
+  const yaw = new mod.Group();
+  yaw.rotation.y = az;                     // local +Z now points at the camera
+  const tilt = new mod.Group();
+  tilt.rotation.x = (TILT * Math.PI) / 180; // +X rotation tips +Y toward +Z
+  const spin = new mod.Group();
+  obj.parent.add(yaw);
+  yaw.position.copy(centre);
+  yaw.add(tilt); tilt.add(spin);
+  obj.position.sub(centre);
+  spin.add(obj);
+
   const dist = (sph.radius / Math.tan((cam.fov * Math.PI) / 360)) * 1.06;
   cam.position.set(
     centre.x + Math.sin(az) * Math.cos(el) * dist,
@@ -115,9 +132,21 @@ async function run() {
   controls.target.copy(centre);
   cam.updateProjectionMatrix();
 
+  // Tilting swings corners below the shadow plane. Find the lowest point over
+  // a whole revolution and lift the rig once, so the contact shadow still
+  // reads and nothing ever sinks through the floor mid-spin.
+  let minY = Infinity;
+  for (let i = 0; i < 36; i++) {
+    spin.rotation.y = (i / 36) * Math.PI * 2;
+    yaw.updateMatrixWorld(true);
+    minY = Math.min(minY, new mod.Box3().setFromObject(obj).min.y);
+  }
+  yaw.position.y += -minY;
+  yaw.updateMatrixWorld(true);
+
   for (let i = 0; i < FRAMES; i++) {
-    pivot.rotation.y = (i / FRAMES) * Math.PI * 2;
-    pivot.updateMatrixWorld(true);
+    spin.rotation.y = (i / FRAMES) * Math.PI * 2;
+    yaw.updateMatrixWorld(true);
     renderer.render(scene, cam);
     // toDataURL in the same task as render(), before the compositor swaps.
     const url = renderer.domElement.toDataURL('image/png');
@@ -136,9 +165,19 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(ROOT / "diagrams" / "turntable.gif"))
     ap.add_argument("--size", type=int, default=600)
-    ap.add_argument("--frames", type=int, default=48)
-    ap.add_argument("--fps", type=int, default=20)
-    ap.add_argument("--elev", type=float, default=26.0, help="camera elevation, degrees")
+    ap.add_argument("--frames", type=int, default=120,
+                help="frames per revolution. With --fps this sets the "
+                     "speed: frames/fps seconds per turn.")
+    ap.add_argument("--fps", type=int, default=24)
+    ap.add_argument("--elev", type=float, default=26.0,
+                    help="camera elevation, degrees. High enough to read the "
+                         "screen and the ring, which are the two things worth "
+                         "seeing.")
+    ap.add_argument("--tilt", type=float, default=0.0,
+                    help="tip the deck toward the lens, degrees. Applied "
+                         "outside the spin, so the deck holds a constant angle "
+                         "for the whole revolution instead of tumbling away. "
+                         "Only useful with a low --elev.")
     ap.add_argument("--gain", type=float, default=1.22,
                 help="studio lighting multiplier. The shell is black PETG by "
                      "design; too much here turns it silver and loses the identity.")
@@ -155,8 +194,8 @@ def main() -> int:
     frames_dir = Path(tempfile.mkdtemp())
     profile = Path(tempfile.mkdtemp())
     (VIEWER / "__turntable.html").write_text(
-        PAGE % {"size": args.size, "frames": args.frames,
-                "elev": args.elev, "gain": args.gain})
+        PAGE % {"size": args.size, "frames": args.frames, "elev": args.elev,
+                "gain": args.gain, "tilt": args.tilt})
     done = threading.Event()
     status = {"msg": "timed out"}
     count = {"n": 0}
