@@ -620,6 +620,8 @@ PETG, not PLA — PLA creeps under screw preload and softens in a hot car. The o
 
 Everything on I²C1 at 400 kHz plus SPI0 for the display. BCM numbering.
 
+`diagrams/wiring.svg` draws the Phase 1 half of this table — the reader, which is what you build first. It is generated from the table below by `tools/gen_wiring.py`, so the sheet you solder from cannot drift from the spec. Change the table, re-run the generator, commit both.
+
 | Pin | Function |
 |---|---|
 | GPIO2/3 | I²C1 — AS7341 (0x39), ATECC608B (0x60) |

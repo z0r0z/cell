@@ -237,6 +237,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/run_tests.py` | Every self-test in one run. What CI runs |
 | `tools/export_model.py` | Re-exports `instrument.obj` from `viewer/model.js` |
 | `tools/render_turntable.py` | Renders the turntable GIF/MP4 from the same model |
+| `tools/gen_wiring.py` | Draws the Phase 1 wiring sheet from BUILD.md §11 |
 | `tools/gen_mechanical.py` | Regenerates `diagrams/mechanical.svg` from the mesh |
 | `tools/gen_printables.py` | Generates every printable part, checks it, writes the manifest |
 | `tools/gen_enclosure.py` | The inside of the two shells, and the fit checks |

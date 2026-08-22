@@ -36,11 +36,12 @@ jobs:
           python-version: "3.12"
       - run: pip install numpy
       - run: python tools/gen_mechanical.py
+      - run: python3 tools/gen_wiring.py
       - run: |
-          if ! git diff --quiet diagrams/mechanical.svg; then
+          if ! git diff --quiet diagrams/mechanical.svg diagrams/wiring.svg; then
             echo "::error::diagrams/mechanical.svg is out of date."
-            echo "Run: python tools/gen_mechanical.py"
-            git diff --stat diagrams/mechanical.svg
+            echo "Run: python tools/gen_mechanical.py && python3 tools/gen_wiring.py"
+            git diff --stat diagrams/mechanical.svg diagrams/wiring.svg
             exit 1
           fi
 

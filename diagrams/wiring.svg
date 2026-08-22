@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 830" width="1180" height="830" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+<rect width="1180" height="830" fill="#0C0C0B"/>
+<text x="46" y="50" font-size="21" font-weight="200" letter-spacing="9" fill="#D8D2C8">CELL — PHASE 1 WIRING</text>
+<rect x="47" y="61" width="26" height="2" fill="#B23A48"/>
+<text x="46" y="82" font-size="10" letter-spacing="2" fill="#6F7178">The reader only. Read from the pin table in BUILD.md section 11 at generation time. BCM numbering. No display, no buttons, no secure element — those are Phase 2.</text>
+<rect x="60" y="130" width="250" height="430" rx="6" fill="#121211" stroke="#8A8B8F" stroke-width="1.2"/>
+<text x="76" y="158" font-size="13" fill="#D8D2C8">Raspberry Pi Zero 2 W</text>
+<text x="76" y="176" font-size="9.5" fill="#6F7178">radios disabled, antenna trace cut</text>
+<text x="76" y="220" font-size="10.5" fill="#9FA3A8">GPIO2/3</text>
+<line x1="310" y1="216" x2="400" y2="216" stroke="#4E7A5B" stroke-width="1.4"/>
+<circle cx="310" cy="216" r="2.6" fill="#4E7A5B"/>
+<rect x="400" y="190" width="600" height="45" rx="4" fill="#141312" stroke="#4E7A5B" stroke-width="1"/>
+<text x="414" y="208" font-size="12" fill="#D8D2C8">AS7341 spectrometer</text>
+<text x="414" y="224" font-size="9" fill="#6F7178">0x39 on I²C1, 400 kHz</text>
+<text x="700" y="208" font-size="9" fill="#6F7178">8 colour channels + Clear + NIR.</text>
+<text x="700" y="220" font-size="9" fill="#6F7178">Drives white LED #1 on its LDR pin.</text>
+<text x="76" y="278" font-size="10.5" fill="#9FA3A8">GPIO12</text>
+<line x1="310" y1="274" x2="400" y2="274" stroke="#8A7440" stroke-width="1.4"/>
+<circle cx="310" cy="274" r="2.6" fill="#8A7440"/>
+<rect x="400" y="248" width="600" height="45" rx="4" fill="#141312" stroke="#8A7440" stroke-width="1"/>
+<text x="414" y="266" font-size="12" fill="#D8D2C8">White LED #2</text>
+<text x="414" y="282" font-size="9" fill="#6F7178">2N7002 + 68 Ω</text>
+<text x="700" y="266" font-size="9" fill="#6F7178">45° opposed to LED #1, so droplet</text>
+<text x="700" y="280" font-size="9" fill="#6F7178">asymmetry cancels.</text>
+<text x="76" y="338" font-size="10.5" fill="#9FA3A8">GPIO6</text>
+<line x1="310" y1="334" x2="400" y2="334" stroke="#B23A48" stroke-width="1.4"/>
+<circle cx="310" cy="334" r="2.6" fill="#B23A48"/>
+<rect x="400" y="308" width="600" height="45" rx="4" fill="#141312" stroke="#B23A48" stroke-width="1"/>
+<text x="414" y="326" font-size="12" fill="#D8D2C8">650 nm laser, ≤5 mW</text>
+<text x="414" y="342" font-size="9" fill="#6F7178">2N7002, interlocked</text>
+<text x="700" y="326" font-size="9" fill="#6F7178">COHERENT SOURCE IS MANDATORY.</text>
+<text x="700" y="338" font-size="9" fill="#6F7178">An LED produces no speckle.</text>
+<text x="76" y="396" font-size="10.5" fill="#9FA3A8">GPIO23</text>
+<line x1="310" y1="392" x2="400" y2="392" stroke="#8A7440" stroke-width="1.4"/>
+<circle cx="310" cy="392" r="2.6" fill="#8A7440"/>
+<rect x="400" y="366" width="600" height="45" rx="4" fill="#141312" stroke="#8A7440" stroke-width="1"/>
+<text x="414" y="384" font-size="12" fill="#D8D2C8">940 nm IR LED</text>
+<text x="414" y="400" font-size="9" fill="#6F7178">2N7002 + 47 Ω</text>
+<text x="700" y="384" font-size="9" fill="#6F7178">Co-sited with LED #1. Gives touch</text>
+<text x="700" y="398" font-size="9" fill="#6F7178">mode its infrared channel.</text>
+<text x="76" y="456" font-size="10.5" fill="#9FA3A8">GPIO22</text>
+<line x1="310" y1="452" x2="400" y2="452" stroke="#9FA3A8" stroke-width="1.4"/>
+<circle cx="310" cy="452" r="2.6" fill="#9FA3A8"/>
+<rect x="400" y="426" width="600" height="45" rx="4" fill="#141312" stroke="#9FA3A8" stroke-width="1"/>
+<text x="414" y="444" font-size="12" fill="#D8D2C8">Cartridge microswitch</text>
+<text x="414" y="460" font-size="9" fill="#6F7178">pull-up, LOW when seated</text>
+<text x="700" y="444" font-size="9" fill="#6F7178">Gates the laser. Wire the interlock</text>
+<text x="700" y="456" font-size="9" fill="#6F7178">even though the chamber is sealed.</text>
+<text x="76" y="514" font-size="10.5" fill="#9FA3A8">CSI</text>
+<line x1="310" y1="510" x2="400" y2="510" stroke="#B23A48" stroke-width="1.4"/>
+<circle cx="310" cy="510" r="2.6" fill="#B23A48"/>
+<rect x="400" y="484" width="600" height="45" rx="4" fill="#141312" stroke="#B23A48" stroke-width="1"/>
+<text x="414" y="502" font-size="12" fill="#D8D2C8">Pi Camera, LENS REMOVED</text>
+<text x="414" y="518" font-size="9" fill="#6F7178">mini-CSI ribbon</text>
+<text x="700" y="502" font-size="9" fill="#6F7178">Fixed exposure ≤2 ms, fixed gain,</text>
+<text x="700" y="516" font-size="9" fill="#6F7178">AWB and denoise off.</text>
+<line x1="46" y1="586" x2="1134" y2="586" stroke="#22242A" stroke-width="1"/>
+<text x="46" y="606" font-size="10" letter-spacing="3" fill="#6F7178">WHAT EATS A FIRST BUILD</text>
+<text x="46" y="630" font-size="11" fill="#D8D2C8">Both I²C breakouts ship with pull-ups fitted.</text>
+<text x="46" y="646" font-size="9.5" fill="#6F7178">Remove one 2.2 kΩ pair. With both fitted the bus may not enumerate, and it presents as a dead sensor rather than as a wiring fault. This is the most</text>
+<text x="46" y="660" font-size="9.5" fill="#6F7178">common first-build failure.</text>
+<text x="46" y="690" font-size="11" fill="#D8D2C8">The optical chamber must be light-tight before any reading means anything.</text>
+<text x="46" y="706" font-size="9.5" fill="#6F7178">Black PETG, ≥4 perimeters, interior painted matte black. Test: cartridge in, room at 10,000 lux, all LEDs off, Clear channel under 0.5% of its LEDs-on</text>
+<text x="46" y="720" font-size="9.5" fill="#6F7178">value. Thin PETG passes more light than you would expect, and a leak quietly ruins the 415 nm gate rather than failing loudly.</text>
+<text x="46" y="750" font-size="11" fill="#D8D2C8">The camera lens comes off, and the exposure is fixed.</text>
+<text x="46" y="766" font-size="9.5" fill="#6F7178">Lensless speckle grain is about 4 px on an IMX219 at 20 mm, which is well sampled; with the lens fitted it is ~1.6 px and undersampled. Any</text>
+<text x="46" y="780" font-size="9.5" fill="#6F7178">auto-exposure or auto-white-balance between frames destroys the correlation measurement outright.</text>
+</svg>
