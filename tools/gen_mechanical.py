@@ -190,6 +190,41 @@ top_leads = sorted([
 ], key=lambda t: t[1])
 for i, (ax, ay, txt) in enumerate(top_leads):
     lead(ax, ay, tx(hi[0])+34, tz(lo[2])+16 + 24*i, txt)
+# ---- cartridge fit ----------------------------------------------------
+# The drawing otherwise describes the outside of the device only. The fit that
+# actually stops a build working is the consumable reaching the read spot, and
+# it spans two frames: the slot is on the front face, the well has to land
+# under the ring. That relationship was wrong once already.
+CART_L, CART_W, CART_T = 45.0, 14.0, 2.4      # BUILD.md section 8
+TRAVEL = hi[2] - RING_C[1]                     # front face to read spot
+PROUD = CART_L - TRAVEL
+
+if PROUD < 8.0:
+    raise SystemExit(
+        f"cartridge fit: only {PROUD:.1f} mm would stand proud of the slot. "
+        f"Travel is {TRAVEL:.1f} mm and BUILD.md section 8 specifies a "
+        f"{CART_L:.0f} mm cartridge. Move the dish or lengthen the cartridge — "
+        f"a blood-contact part you cannot grip is not a design detail.")
+
+S2 = 3.0
+CX, CY = 858, 214
+A(f'<text x="{CX}" y="{CY-30}" font-size="10" letter-spacing="3" fill="{MUT}">CARTRIDGE FIT</text>')
+xf = CX + TRAVEL*S2                                     # front face
+A(f'<line x1="{xf:.1f}" y1="{CY-14:.1f}" x2="{xf:.1f}" y2="{CY+100:.1f}" stroke="{DIM}" stroke-width="1.2"/>')
+A(f'<text x="{xf+5:.1f}" y="{CY+112:.1f}" font-size="8.5" fill="{MUT}">front face</text>')
+A(f'<rect x="{CX:.1f}" y="{CY:.1f}" width="{CART_L*S2:.1f}" height="{CART_W*S2:.1f}" '
+  f'rx="1.5" fill="#141312" stroke="{STEEL}" stroke-width="0.9"/>')
+A(f'<rect x="{xf:.1f}" y="{CY:.1f}" width="{PROUD*S2:.1f}" height="{CART_W*S2:.1f}" '
+  f'rx="1.5" fill="none" stroke="{RED}" stroke-width="0.9"/>')
+A(f'<circle cx="{CX+5*S2:.1f}" cy="{CY+CART_W*S2/2:.1f}" r="{2.0*S2:.1f}" fill="#2A0C12" stroke="{RED}" stroke-width="1"/>')
+A(f'<text x="{CX:.1f}" y="{CY-6:.1f}" font-size="8.5" fill="{MUT}">well, under the ring</text>')
+dim_h(CX, xf, CY+CART_W*S2+24, f'travel {TRAVEL:.1f}')
+dim_h(xf, CX+CART_L*S2, CY+CART_W*S2+50, f'{PROUD:.1f} proud')
+A(f'<text x="{CX:.1f}" y="{CY+CART_W*S2+92:.1f}" font-size="8.5" fill="{MUT}">'
+  f'{CART_L:.0f} × {CART_W:.0f} × {CART_T:.1f} overall</text>')
+A(f'<text x="{CX:.1f}" y="{CY+CART_W*S2+106:.1f}" font-size="8.5" fill="{MUT}">'
+  f'the proud end is the grip tab</text>')
+
 # left-half features get a legend row instead of leaders that would cross the dish
 LGY = tz(hi[2]) + 26
 A(f'<text x="{tx(lo[0]):.1f}" y="{LGY:.0f}" font-size="9.5" fill="{MUT}">'
@@ -241,7 +276,7 @@ dim_h(rx(hi[2]), rx(lo[2]), RY-4, f'{D:.1f}')
 # ================= NOTES ===============================================
 NY = RY + HT*S + 56
 A(f'<line x1="46" y1="{NY-18:.0f}" x2="{W-46}" y2="{NY-18:.0f}" stroke="#22242A" stroke-width="1"/>')
-A(f'<text x="46" y="{NY:.0f}" font-size="10" letter-spacing="3" fill="{MUT}">THREE THINGS THE MODEL DOES NOT SAY</text>')
+A(f'<text x="46" y="{NY:.0f}" font-size="10" letter-spacing="3" fill="{MUT}">THREE CHOICES THAT LOOK COSMETIC AND ARE NOT</text>')
 notes = [
     ('Vents must be blind pockets.', f'{N_VENT} slots on the front face, {vh[2]-vl[2]:.1f} deep. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate fails. Print them blind and verify with the light-tightness test.'),
     ('The pad is reserved, not fitted.', f'{ph[0]-pl[0]:.1f} × {ph[2]-pl[2]:.1f} printed marking sizing the optional fingerprint sensor. Deliberately flat, not a pocket: an unpopulated recess on the deck collects blood. The base build leaves it blank — the PIN does identity.'),

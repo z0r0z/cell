@@ -102,6 +102,23 @@
 <path d="M557.9,430.8 L644.2,250.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
 <circle cx="557.9" cy="430.8" r="1.3" fill="#6F7178"/>
 <text x="648.2" y="253.0" font-size="9" text-anchor="start" fill="#6F7178">sample slot 34.0 × 3.0, front</text>
+<text x="858" y="184" font-size="10" letter-spacing="3" fill="#6F7178">CARTRIDGE FIT</text>
+<line x1="952.8" y1="200.0" x2="952.8" y2="314.0" stroke="#8A8B8F" stroke-width="1.2"/>
+<text x="957.8" y="326.0" font-size="8.5" fill="#6F7178">front face</text>
+<rect x="858.0" y="214.0" width="135.0" height="42.0" rx="1.5" fill="#141312" stroke="#9FA3A8" stroke-width="0.9"/>
+<rect x="952.8" y="214.0" width="40.2" height="42.0" rx="1.5" fill="none" stroke="#B23A48" stroke-width="0.9"/>
+<circle cx="873.0" cy="235.0" r="6.0" fill="#2A0C12" stroke="#B23A48" stroke-width="1"/>
+<text x="858.0" y="208.0" font-size="8.5" fill="#6F7178">well, under the ring</text>
+<line x1="858.0" y1="280.0" x2="952.8" y2="280.0" stroke="#8A8B8F" stroke-width="0.7"/>
+<line x1="858.0" y1="277.0" x2="858.0" y2="283.0" stroke="#8A8B8F" stroke-width="0.7"/>
+<line x1="952.8" y1="277.0" x2="952.8" y2="283.0" stroke="#8A8B8F" stroke-width="0.7"/>
+<text x="905.4" y="275.0" font-size="9.5" text-anchor="middle" fill="#8A8B8F">travel 31.6</text>
+<line x1="952.8" y1="306.0" x2="993.0" y2="306.0" stroke="#8A8B8F" stroke-width="0.7"/>
+<line x1="952.8" y1="303.0" x2="952.8" y2="309.0" stroke="#8A8B8F" stroke-width="0.7"/>
+<line x1="993.0" y1="303.0" x2="993.0" y2="309.0" stroke="#8A8B8F" stroke-width="0.7"/>
+<text x="972.9" y="301.0" font-size="9.5" text-anchor="middle" fill="#8A8B8F">13.4 proud</text>
+<text x="858.0" y="348.0" font-size="8.5" fill="#6F7178">45 × 14 × 2.4 overall</text>
+<text x="858.0" y="362.0" font-size="8.5" fill="#6F7178">the proud end is the grip tab</text>
 <text x="128.0" y="468" font-size="9.5" fill="#6F7178">display 49.7 × 37.7  ·  buttons Ø5.8, <tspan fill="#B23A48">CONFIRM Ø8.6</tspan>  ·  pad 24.0 × 12.0 <tspan fill="#6F7178">(reserved, print flat)</tspan></text>
 <text x="46" y="544" font-size="10" letter-spacing="3" fill="#6F7178">FRONT</text>
 <rect x="128.0" y="559.8" width="482.2" height="117.5" rx="12.5" fill="#121211" stroke="#8A8B8F" stroke-width="0.9"/>
@@ -157,7 +174,7 @@
 <line x1="1010.0" y1="766.3" x2="1010.0" y2="772.3" stroke="#8A8B8F" stroke-width="0.7"/>
 <text x="858.1" y="764.3" font-size="9.5" text-anchor="middle" fill="#8A8B8F">73.2</text>
 <line x1="46" y1="929" x2="1134" y2="929" stroke="#22242A" stroke-width="1"/>
-<text x="46" y="947" font-size="10" letter-spacing="3" fill="#6F7178">THREE THINGS THE MODEL DOES NOT SAY</text>
+<text x="46" y="947" font-size="10" letter-spacing="3" fill="#6F7178">THREE CHOICES THAT LOOK COSMETIC AND ARE NOT</text>
 <text x="46" y="971" font-size="11" fill="#D8D2C8">Vents must be blind pockets.</text>
 <text x="46" y="987" font-size="9.5" fill="#6F7178">15 slots on the front face, 3.0 deep. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate fails. Print them blind and verify with the light-tightness test.</text>
 <text x="46" y="1017" font-size="11" fill="#D8D2C8">The pad is reserved, not fitted.</text>
