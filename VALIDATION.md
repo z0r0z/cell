@@ -66,7 +66,7 @@ calibration.
 
 ## Scheduled for first build
 
-Two measurements gate the design, and Phase 1 makes both for about $60:
+Two measurements gate the design, and the reader kit makes both:
 
 **Speckle sampling.** Lensless grain is ~λz/D ≈ 4 µm at 20 mm, about 4 px on an
 IMX219. `hardware.py` includes the check: autocorrelate one frame, confirm the

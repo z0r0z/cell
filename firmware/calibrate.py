@@ -539,7 +539,11 @@ def cmd_touch_capture(args):
         from hardware import RealTouchSensor          # provided by the device build
         print(f"[{args.label}] {TOUCH_PANEL[args.label]}")
         input(f"Press Enter, then hold still for {th.duration_s:.0f} s...")
-        red, ir, bore, fs = RealTouchSensor().read_ppg(th.duration_s)
+        sensor = RealTouchSensor()
+        # fs is a TARGET; the sensor reports what it achieved and that is what
+        # gets stored, because every frequency-derived feature scales with it.
+        red, ir, fs = sensor.read_ppg(th.duration_s, th.fs)
+        bore = sensor.read_bore_reference()
     n = len(list(TOUCH_DATA.glob(f"{args.label}_*.npz")))
     path = TOUCH_DATA / f"{args.label}_{n:04d}.npz"
     save_touch(path, red, ir, bore, args.label, fs)

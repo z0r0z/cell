@@ -1,6 +1,6 @@
 # CELL — Build Specification
 
-Rev 0.5. Single device, about US$90 in parts, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
+Rev 0.5. Single device, $90.50 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
 
 The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm — and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
@@ -36,11 +36,21 @@ The seed is backed up on paper or steel as with any conventional hardware wallet
 
 ---
 
-## 2. Build it in two phases
+## 2. Two kits, ordered separately
 
-The blood reader is the novel component. The wallet layer is a solved problem that can be forked from an existing project. Build them separately.
+The blood reader is the novel component. The wallet layer is a solved problem that can be forked from an existing project, so you build and buy them as two separate kits.
 
-### Phase 1 — the blood reader (~US$60, one weekend)
+**"Phase" here means a shopping list, not a schedule.** Every row in `BOM.csv` carries a `Kit` column that says which one it belongs to:
+
+| Kit | What it is | Cost |
+|---|---|---|
+| `Reader` | The blood reader hardware — Pi, spectrometer, laser, camera, LEDs, filament | $60.10 |
+| `Reader consumable` | Lancets, alcohol pads, PET window film, tape, sharps container. Needed to run the reader at all, and good for hundreds of runs | $31.00 |
+| `Wallet` | The signing half — secure element, display, buttons, QR camera, fasteners | $30.40 |
+
+Order the reader kit and its consumables together; they are one purchase and the reader is useless without both. The wallet kit is a second purchase you only make if the reader works.
+
+### Kit 1 — the blood reader ($60.10 hardware + $31.00 consumables, one weekend)
 
 | Item | ~USD |
 |---|---|
@@ -54,13 +64,13 @@ The blood reader is the novel component. The wallet layer is a solved problem th
 | Jumper wires, small breadboard | 5 |
 | PETG white + black, ~40 g | 3.50 |
 
-Plus lancets, PET film and tape (~$17).
+Plus the reader consumables ($31.00): 100 sterile lancets, 100 alcohol pads, PET window film, 3M 300LSE tape, and a 1 litre sharps container. Every one of them is needed to run the spoof panel in §13, so budget them with the hardware rather than after it. They cover hundreds of runs — 100 sheets of film is about 1600 windows.
 
-Phase 1 has no security requirements, because nothing is being signed. Leave wifi enabled, work over SSH, print results to the console. No display, secure element, enclosure or airgap is needed. The only printed parts are a light-tight optical chamber and a plate of cartridges.
+The reader has no security requirements, because nothing is being signed. Leave wifi enabled, work over SSH, print results to the console. No display, secure element, enclosure or airgap is needed. The only printed parts are a light-tight optical chamber and a plate of cartridges.
 
-It answers the question that determines whether the rest is worth building: does the gate separate real blood from every fake? Run the spoof panel in §13. If it does not, the remaining $30 and the enclosure work are unnecessary.
+It answers the question that determines whether the rest is worth building: does the gate separate real blood from every fake? Run the spoof panel in §13. If it does not, you never order the wallet kit.
 
-### Phase 2 — the wallet (+US$29)
+### Kit 2 — the wallet (+$30.40)
 
 | Item | ~USD |
 |---|---|
@@ -73,7 +83,7 @@ It answers the question that determines whether the rest is worth building: does
 
 Fork SeedSigner, insert the gate before `sign()`, then do the airgap hardening: radios disabled, antenna trace cut, read-only rootfs.
 
-**Full device: ~US$90.** Consumables (lancets, film, tape, sharps bin) add ~$31 and last hundreds of uses.
+**Full device: $90.50 of hardware,** plus $31.00 of consumables that last hundreds of uses. $121.50 all in.
 
 ---
 
@@ -313,17 +323,17 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 | Item | Part | ~USD | Notes |
 |---|---|---|---|
 | Compute | Raspberry Pi Zero 2 W | 15 | Radios get disabled *and* the antenna trace cut |
-| Gate chip | ATECC608B breakout (Adafruit 4314) | 6 | Phase 2. PIN counter, AES key storage, KDF |
+| Gate chip | ATECC608B breakout (Adafruit 4314) | 6 | Wallet kit. PIN counter, AES key storage, KDF |
 | Spectrometer | AMS AS7341 breakout (Adafruit 4698) | 16 | 8 colour channels + Clear + NIR. Drives an LED directly |
 | Laser | 650 nm diode module, ≤5 mW | 2 | Liveness gate. Coherent source is mandatory — an LED will not produce speckle |
-| Camera (speckle) | Pi Camera + **mini**-CSI cable | 10 | **Phase 1.** Lens removed. Fixed exposure/gain — see §8 |
-| Display | ST7789 1.3" 240×240 SPI | 8 | Phase 2 |
-| Camera (QR) | Cheap USB webcam | 8 | Phase 2. **Not a second CSI camera** — the Pi Zero has one CSI port and the speckle path has it. QR decoding tolerates auto-exposure |
-| Buttons | 12 mm tactile ×4 | 3 | Phase 2. One is CONFIRM, on its own pin |
+| Camera (speckle) | Pi Camera + **mini**-CSI cable | 10 | **Reader kit.** Lens removed. Fixed exposure/gain — see §8 |
+| Display | ST7789 1.3" 240×240 SPI | 8 | Wallet kit |
+| Camera (QR) | Cheap USB webcam | 8 | Wallet kit. **Not a second CSI camera** — the Pi Zero has one CSI port and the speckle path has it. QR decoding tolerates auto-exposure |
+| Buttons | 12 mm tactile ×4 | 3 | Wallet kit. One is CONFIRM, on its own pin |
 | LEDs | 5 mm white ×2, 940 nm IR ×1, 2N7002 ×2, resistors | 3 | |
 | Power | USB-C breakout, power only | 2 | **No battery** — see §2. Desolder D+/D− or use a data blocker |
 | Storage | 16 GB A2 microSD | 6 | |
-| Test cartridges | Printed once, sealed, kept with the device | 0 | Phase 2. REFERENCE + NULL, see §4 |
+| Test cartridges | Printed once, sealed, kept with the device | 0 | Wallet kit. REFERENCE + NULL, see §4 |
 | Filament | PETG black ~90 g, white ~30 g | 4 | Not PLA |
 | Fasteners | M2.5×8 + heat-set inserts ×8 | 3 | |
 | Ring window | Ø10 × 0.5 mm clear acrylic or glass disc | 1 | Seals the chamber, contact surface for touch mode |
@@ -337,7 +347,7 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 | Target | Change | Cost |
 |---|---|---|
 | **~$70 today** | Original Pi Zero instead of the 2 W. It has no radios to disable — one less build step and one less thing to get wrong. Cheapest USB webcam for QR | −$20 |
-| **~$60, worth testing in Phase 1** | Replace the AS7341 with four discrete LEDs (415, 525, 630, 940 nm) and one photodiode, flashed in sequence. Classic multi-wavelength colorimetry. You lose spectral resolution, but the speckle gate does the security work — the colour half only has to establish "this is blood" | −$12 |
+| **~$60, worth testing on the reader** | Replace the AS7341 with four discrete LEDs (415, 525, 630, 940 nm) and one photodiode, flashed in sequence. Classic multi-wavelength colorimetry. You lose spectral resolution, but the speckle gate does the security work — the colour half only has to establish "this is blood" | −$12 |
 | **~$40 at ~100 units** | One custom PCB with bare parts. The AS7341 die is ~$3 against $16 for the breakout; the ATECC608B ~$1 against $6 | −$30 |
 
 Most of the current bill is the cost of breakout boards rather than the silicon on them.
@@ -739,18 +749,18 @@ For calibration, don't run 100 samples on one person in one day. Use one larger 
 
 ## 15. Build order
 
-Each milestone is independently testable and each will find something you didn't expect.
+A sequence of checks, not a schedule — with the parts in front of you this is a weekend. Each milestone is independently testable and each will find something you didn't expect.
 
 | # | Milestone | Gate to proceed |
 |---|---|---|
 | 1 | Pi boots, radios dead | `iw dev` and `hciconfig` both empty, trace cut |
 | 2 | AS7341 reading a white card on a breadboard | <1% RSD over 100 reads |
-| — | *— end of what you need for Phase 1 setup —* | |
+| — | *— end of what the reader kit needs —* | |
 | 3 | Print 20 cartridges, measure white patches | <3% spread after normalisation. **Fix your printer here if not** |
 | 4 | Optical chamber light-tight | Clear channel <0.5% of LEDs-on at 10,000 lux |
 | 5 | **Spectrum of dye vs. your blood** | 415 nm separates them cleanly. This is the "it works" moment |
 | 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure — early D, late D, the drop and its direction — not on a curve fit |
-| 7 | **Spoof panel** — the Phase 1 finish line | ROC generated, thresholds set, documented. **Stop here and decide whether to continue** |
+| 7 | **Spoof panel** — the reader is done | ROC generated, thresholds set, documented. **This is the result the whole design rests on** |
 | 8 | ATECC608B PIN counter | Increments on failure, survives power loss mid-attempt |
 | 9 | SeedSigner fork, testnet round trip | Coins move |
 | 10 | Blood gate in front of `sign()` | Testnet tx signed only after a real sample |

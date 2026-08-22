@@ -2,7 +2,7 @@
 
 A hardware wallet that requires a live pulse, or a drop of fresh blood, to authorise a transaction.
 
-Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, about $90 in parts. Public domain.
+Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, $90 of hardware plus $31 of consumables that last hundreds of runs. Public domain.
 
 <img src="diagrams/turntable.gif" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
 
@@ -18,11 +18,11 @@ Orbit it, and export OBJ or glTF straight from the viewer. The turntable above i
 
 ## Status
 
-**Rev 0.6.** The design is complete, the gate logic self-tests on every commit, and the blood reader is buildable today for about $60.
+**Rev 0.6.** The design is complete, the gate logic self-tests on every commit, and the blood reader is buildable today for $60 of hardware plus $31 of consumables.
 
 Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build — `calibrate.py` runs the spoof panel for both tiers, sets every threshold from your own samples, and writes a file the device loads. The touch panel is 15-second sessions, so that half is minutes of work. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
 
-Build it in two phases. Phase 1 is the blood reader alone, $60 and a weekend, and it proves the sensing before you spend anything on the wallet half. Read `SAFETY.md` first.
+You buy it as two kits. The reader kit is the blood reader alone — $60 of hardware plus $31 of lancets, film, tape and a sharps container — and a weekend's work proves the sensing before you spend anything on the wallet half. Read `SAFETY.md` first.
 
 ## What it does
 
@@ -146,7 +146,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | Path | Contents |
 |---|---|
 | `BUILD.md` | Hardware specification: parts, wiring, optics, cartridge, firmware, calibration |
-| `BOM.csv` | Bill of materials with sourcing notes |
+| `BOM.csv` | Bill of materials, by kit, with sourcing notes |
 | `firmware/blood_gate.py` | Blood tier, six gates |
 | `firmware/touch_gate.py` | Touch tier, seven gates |
 | `firmware/ops.py` | The closed operation set and its renderer |
@@ -171,7 +171,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 
 <img src="diagrams/build-sheet.svg" alt="Build sheet: parts, optical head, cartridge" width="100%">
 
-`BUILD.md` §2 splits the build in two. Phase 1 is the blood reader alone at about $60: a Pi, a spectrometer, a laser, a camera, a printed chamber and cartridges. It has no security requirements because it signs nothing, and it answers the only question that determines whether the rest is worth building. Phase 2 adds the wallet for a further $30.
+`BUILD.md` §2 splits the build into two kits, and every row of `BOM.csv` says which kit it belongs to. The reader kit is $60 of hardware plus $31 of consumables: a Pi, a spectrometer, a laser, a camera, a printed chamber, cartridges, and the lancets and film to run them. It has no security requirements because it signs nothing, and it answers the only question that determines whether the rest is worth building. The wallet kit adds the signing half for a further $30.
 
 ## Safety
 

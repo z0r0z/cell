@@ -43,3 +43,28 @@ jobs:
             git diff --stat diagrams/mechanical.svg
             exit 1
           fi
+
+  printables:
+    # The STLs in models/print are what a builder actually prints. They are
+    # generated from the same constants BUILD.md specifies, so a change to the
+    # generator that is not regenerated leaves stale parts in the repo and
+    # somebody prints yesterday's cartridge. gen_printables.py also validates
+    # every mesh and the fit checks, and exits non-zero rather than hand a
+    # slicer something it would have to guess at.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy
+      - run: python tools/gen_printables.py
+      - run: |
+          if ! git diff --quiet models/print; then
+            echo "::error::models/print is out of date."
+            echo "Run: python tools/gen_printables.py"
+            git diff --stat models/print
+            exit 1
+          fi

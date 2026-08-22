@@ -10,11 +10,12 @@ refuses, because it converts a deliberate physical act into a rubber stamp on
 something the owner cannot evaluate. The blood gate proves a human chose to
 sign. That proof is worth nothing if the human could not tell what they chose.
 
-So the operation set is CLOSED. Three shapes, all renderable:
+So the operation set is CLOSED. Four spending shapes, all renderable:
 
     BitcoinSpend   amount, destination, fee, and where the change goes
     NoteSpend      a confidential note, its amount, the recipient owner
     DirectTransfer a transfer to a named pubkey on either chain
+    EthereumSpend  an EIP-1559 transfer, with the chain, nonce and fee cap
 
 Everything else is refused, including generic EVM calldata and bare hashes.
 This is a scope decision, not a missing feature — see BUILD.md section 5.
@@ -252,6 +253,58 @@ class DirectTransfer:
 
 
 @dataclass(frozen=True)
+class EthereumSpend:
+    """An EIP-1559 value transfer, with every field the signature commits to.
+
+    DirectTransfer above authorises a transfer in the abstract, for flows where
+    a companion builds and submits the transaction. This class is different: it
+    is what the device signs when it signs Ethereum itself, so it must carry
+    the whole of what that signature authorises.
+
+    That is why the chain, the nonce and the worst-case fee are here rather
+    than hidden. A signature that does not pin the chain id replays on every
+    other EVM chain the owner holds funds on. One that does not pin the nonce
+    can be reordered against another. One that does not pin gas_limit ×
+    max_fee_per_gas has no bound on what it costs. The owner cannot consent to
+    a field they were not shown, so all of them are shown.
+
+    Calldata is absent by construction, not by omission — eth.py refuses it.
+    """
+
+    amount_wei: int
+    destination: str                # EIP-55 checksummed
+    chain_id: int
+    chain_name: str
+    nonce: int
+    max_fee_wei: int                # gas_limit * max_fee_per_gas, the worst case
+
+    def op_class(self) -> str:
+        return "tx.send"
+
+    def amount_for_policy(self) -> int:
+        return self.amount_wei
+
+    def render(self) -> list[str]:
+        if not self.destination:
+            raise UnrenderableOperation("transfer has no destination")
+        if self.amount_wei < 0 or self.max_fee_wei < 0 or self.nonce < 0:
+            raise UnrenderableOperation("negative amount, fee or nonce")
+        if not self.chain_name:
+            raise UnrenderableOperation(
+                f"chain {self.chain_id} has no name; the owner cannot tell "
+                f"which network this lands on")
+        lines = [f"SEND ON {self.chain_name.upper()}",
+                 f"  amount   {format_eth(self.amount_wei)}",
+                 "  to"]
+        lines += wrap_full(self.destination, DISPLAY_COLS)
+        lines.append(f"  max fee  {format_eth(self.max_fee_wei)}")
+        lines.append(f"  chain id {self.chain_id}")
+        lines.append(f"  nonce    {self.nonce}")
+        lines.append(f"  MOST     {format_eth(self.amount_wei + self.max_fee_wei)}")
+        return lines
+
+
+@dataclass(frozen=True)
 class PolicyChange:
     """A change to the tier floor. Blood-locked in both directions.
 
@@ -302,7 +355,7 @@ class PolicyChange:
 # Every operation the device will sign. Anything not on this list is refused
 # before it reaches the renderer, so an unknown type cannot reach the key by
 # arriving with a render() method that returns something plausible.
-ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, PolicyChange)
+ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, EthereumSpend, PolicyChange)
 
 
 def parse(payload: dict) -> Operation:
@@ -319,6 +372,7 @@ def parse(payload: dict) -> Operation:
         "btc_spend": BitcoinSpend,
         "note_spend": NoteSpend,
         "transfer": DirectTransfer,
+        "eth_spend": EthereumSpend,
         "policy_change": PolicyChange,
     }
     if kind not in table:

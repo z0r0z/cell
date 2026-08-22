@@ -201,27 +201,34 @@ def _rfc6979_k(msg32: bytes, d: int, extra: bytes = b"") -> int:
 # --------------------------------------------------------------------------
 
 
-def ecdsa_sign(msg32: bytes, seckey: bytes) -> tuple[int, int, int]:
+def ecdsa_sign(msg32: bytes, seckey: bytes,
+               grind_low_r: bool = True) -> tuple[int, int, int]:
     """Sign a 32-byte digest. Returns (r, s, recovery_id), s always low.
 
     The recovery id is what Ethereum's `v` is built from; Bitcoin ignores it.
+
+    `grind_low_r` retries with an incrementing RFC 6979 extra-entropy counter
+    until R's top bit is clear, which saves the DER encoding a padding byte.
+    Bitcoin Core and every wallet that follows it do this, so leaving it on
+    makes our signatures byte-identical to theirs for the same key and
+    message — a standing cross-check that costs a few milliseconds. It is not
+    a consensus requirement, and it is switched off for the RFC 6979 test
+    vectors, which predate the convention.
     """
     if len(msg32) != 32:
         raise ValueError("message must be a 32-byte digest")
     d = seckey_int(seckey)
     z = int.from_bytes(msg32, "big") % N
 
-    attempt = b""
+    counter = 0
     while True:
-        k = _rfc6979_k(msg32, d, attempt)
+        extra = b"" if counter == 0 else counter.to_bytes(32, "little")
+        k = _rfc6979_k(msg32, d, extra)
         R = point_mul(G, k)
         r = R[0] % N
-        if r == 0:
-            attempt += b"\x00"
-            continue
-        s = (pow(k, N - 2, N) * (z + r * d)) % N
-        if s == 0:
-            attempt += b"\x00"
+        s = (pow(k, N - 2, N) * (z + r * d)) % N if r else 0
+        if r == 0 or s == 0 or (grind_low_r and r >> 255):
+            counter += 1
             continue
         rec = (2 if R[0] >= N else 0) | (R[1] & 1)
         if s > N // 2:                     # BIP-62 low-S
@@ -230,8 +237,9 @@ def ecdsa_sign(msg32: bytes, seckey: bytes) -> tuple[int, int, int]:
         return r, s, rec
 
 
-def ecdsa_sign_compact(msg32: bytes, seckey: bytes) -> bytes:
-    r, s, _ = ecdsa_sign(msg32, seckey)
+def ecdsa_sign_compact(msg32: bytes, seckey: bytes,
+                       grind_low_r: bool = True) -> bytes:
+    r, s, _ = ecdsa_sign(msg32, seckey, grind_low_r)
     return r.to_bytes(32, "big") + s.to_bytes(32, "big")
 
 
@@ -378,7 +386,7 @@ def _selftest() -> int:
     # Nakamoto".
     sk1 = (1).to_bytes(32, "big")
     z = hashlib.sha256(b"Satoshi Nakamoto").digest()
-    r, s, _ = ecdsa_sign(z, sk1)
+    r, s, _ = ecdsa_sign(z, sk1, grind_low_r=False)
     checks.append(("RFC 6979 vector r",
                    f"{r:064x}" == "934b1ea10a4b3c1757e2b0c017d0b6143ce3c9a7"
                                   "e6a4a49860d7a6ab210ee3d8"))
@@ -389,6 +397,11 @@ def _selftest() -> int:
     # Determinism and low-S.
     checks.append(("signing is deterministic",
                    ecdsa_sign_compact(z, sk1) == ecdsa_sign_compact(z, sk1)))
+    checks.append(("grinding produces a low R",
+                   all(ecdsa_sign(hashlib.sha256(bytes([i])).digest(), sk1)[0] >> 255 == 0
+                       for i in range(16))))
+    checks.append(("grinding is opt-out, not silent",
+                   ecdsa_sign(z, sk1, grind_low_r=False)[0] != ecdsa_sign(z, sk1)[0]))
     sk = hashlib.sha256(b"cell-test-key").digest()
     lows = all(ecdsa_sign(hashlib.sha256(bytes([i])).digest(), sk)[1] <= N // 2
                for i in range(24))
