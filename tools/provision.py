@@ -138,6 +138,15 @@ def cmd_import(args) -> int:
 def _write(mnemonic: str, se, args) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+
+    # The real chip has to be told the PIN before it can check one. There is no
+    # change_pin anywhere: the wrapping key is derived from the PIN, so
+    # changing it would strand the seed blob. Changing your PIN means
+    # reprovisioning from the backup words, which is also the only path that
+    # proves you still have them.
+    if hasattr(se, "set_pin"):
+        se.set_pin(args.pin)
+
     prov = wallet.provision(mnemonic, se, args.pin, network=args.network)
 
     (out / BLOB).write_bytes(prov.seed_blob)

@@ -1,6 +1,6 @@
 # CELL — Build Specification
 
-Rev 0.8. Single device, $90.50 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
+Rev 0.8. Single device, $92.40 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
 
 The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm — and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
@@ -44,13 +44,13 @@ The blood reader is the novel component. The wallet layer is a solved problem th
 
 | Kit | What it is | Cost |
 |---|---|---|
-| `Reader` | The blood reader hardware — Pi, spectrometer, laser, camera, LEDs, filament | $60.10 |
+| `Reader` | The blood reader hardware — Pi, spectrometer, laser, camera, LEDs, filament | $61.60 |
 | `Reader consumable` | Lancets, alcohol pads, PET window film, tape, sharps container. Needed to run the reader at all, and good for hundreds of runs | $31.00 |
-| `Wallet` | The signing half — secure element, display, buttons, QR camera, fasteners | $30.40 |
+| `Wallet` | The signing half — secure element, display, buttons, QR camera, fasteners | $30.80 |
 
 Order the reader kit and its consumables together; they are one purchase and the reader is useless without both. The wallet kit is a second purchase you only make if the reader works.
 
-### Kit 1 — the blood reader ($60.10 hardware + $31.00 consumables, one weekend)
+### Kit 1 — the blood reader ($61.60 hardware + $31.00 consumables, one weekend)
 
 | Item | ~USD |
 |---|---|
@@ -62,7 +62,7 @@ Order the reader kit and its consumables together; they are one purchase and the
 | 2 × 2N7002 + resistors | 1.30 |
 | 16 GB microSD | 6 |
 | Jumper wires, small breadboard | 5 |
-| PETG white + black, ~40 g | 3.50 |
+| PETG white + black, ~90 g black + 60 g white | 5.00 |
 
 Plus the reader consumables ($31.00): 100 sterile lancets, 100 alcohol pads, PET window film, 3M 300LSE tape, and a 1 litre sharps container. Every one of them is needed to run the spoof panel in §13, so budget them with the hardware rather than after it. They cover hundreds of runs — 100 sheets of film is about 1600 windows.
 
@@ -70,7 +70,7 @@ The reader has no security requirements, because nothing is being signed. Leave 
 
 It answers the question that determines whether the rest is worth building: does the gate separate real blood from every fake? Run the spoof panel in §13. If it does not, you never order the wallet kit.
 
-### Kit 2 — the wallet (+$30.40)
+### Kit 2 — the wallet (+$30.80)
 
 | Item | ~USD |
 |---|---|
@@ -79,11 +79,11 @@ It answers the question that determines whether the rest is worth building: does
 | ATECC608B breakout | 6 |
 | 4 × 12 mm tactile buttons | 3 |
 | USB-C breakout, power only | 2 |
-| M2.5 screws + heat-set inserts | 2.40 |
+| M2.5 screws + heat-set inserts, M2 display screws | 2.80 |
 
 Fork SeedSigner, insert the gate before `sign()`, then do the airgap hardening: radios disabled, antenna trace cut, read-only rootfs.
 
-**Full device: $90.50 of hardware,** plus $31.00 of consumables that last hundreds of uses. $121.50 all in.
+**Full device: $92.40 of hardware,** plus $31.00 of consumables that last hundreds of uses. $123.40 all in.
 
 ---
 
@@ -446,7 +446,7 @@ Four features in total. Two of them matter more than their size suggests:
 python3 tools/gen_printables.py     # -> models/print/*.stl
 ```
 
-Every printed part except the two enclosure shells comes out of that generator, dimensioned from the constants in this section: the cartridge, the pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the slot baffle, and a jig for cutting the PET windows. It validates each mesh before writing it — every shell closed, consistently wound, positive in volume — and exits non-zero rather than hand a slicer something it would have to guess at. `models/print/MANIFEST.md` lists orientation, settings and the dimensions it had to derive. The shells still come from the viewer export; that stays the one source for anything with an outside surface.
+That one command builds everything printable — the shells included, via `tools/gen_enclosure.py` — dimensioned from the constants in this section: the cartridge, the pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the slot baffle, the display bezel, a jig for cutting the PET windows, and the two shells. It validates each mesh before writing it — every shell closed, consistently wound, positive in volume — and exits non-zero rather than hand a slicer something it would have to guess at. It also re-checks the cartridge geometry, the bezel, and the filament the BOM buys against what the parts actually weigh. `models/print/MANIFEST.md` is regenerated in the same pass and lists quantities, orientation, settings and every dimension the generator had to derive — it is interpolated from those constants, so it cannot drift from the STLs beside it. `PRINTING.md` walks the whole print through in order.
 
 **Why the well sits 10.5 mm back.** It has to leave room for a 4 mm patch *ahead* of it. Features nearer the tip cross the read spot first, so a patch ahead of the well is read before the sample; a patch behind it would only be reachable after the sample had already been read, which is no use for normalising that same reading. At the original 6.0 mm the moat wall was 2.5 mm from the tip and there was nowhere to put the patch at all — which is exactly how this shipped with a white patch that no optical path could reach. `tools/gen_printables.py` re-checks all six distances on every run and refuses to write a cartridge that breaks any of them.
 
@@ -549,6 +549,8 @@ Edit the model, re-export, re-run the generator. CI fails if the drawing and the
 
 **3. The dish is a reader, not a dial.** The ring and the 60 index ticks are decorative. Nothing rotates. The cartridge enters through the front slot and sits under the dish, and the ring frames the measurement spot and serves as the contact surface for the touch tier.
 
+**4. The display window is bigger than any 1.3 in module.** 49.7 × 37.7 comes from the viewer model; a 1.3" 240×240 panel has a ~23 mm active area. `models/print/display_bezel.stl` masks the window down to the screen and is the one printed part fitted to a component this specification does not pin down — **measure the module you bought** and set `SCREEN_W`, `SCREEN_H` and `SCREEN_OFFSET_Y` at the top of `tools/gen_printables.py` before printing it. The module hangs below the deck on the four Ø4 posts, M2 self-tappers into their Ø1.8 pilots; the bezel drops into the window from outside, flush with the deck, counterbored over those screw heads.
+
 ### Print settings
 
 | Part | Material | Layer | Perimeters | Infill | Special |
@@ -557,12 +559,13 @@ Edit the model, re-export, re-run the generator. CI fails if the drawing and the
 | Optical chamber | PETG black | 0.12 | 6 | 40% | Paint interior matte black |
 | Aperture tube | PETG black | 0.12 | 4 | 100% | Paint interior matte black |
 | Cartridge | PETG **white** | 0.15 | 3 | 100% | **Ironing ON** — only the white patch surface matters |
+| Display bezel | PETG black | 0.12 | 4 | 100% | Front face down. Fitted to your screen — see below |
 
-`tools/gen_printables.py` emits every part in this table except the shells, already at these settings — see `models/print/MANIFEST.md`.
+`tools/gen_printables.py` emits every part in this table except the shells, already at these settings — see `models/print/MANIFEST.md`, which is generated alongside the STLs and carries orientation, quantities and every derived dimension. `PRINTING.md` is the runbook: plate order, what to check off each part, and the post-processing that is not optional.
 
 PETG, not PLA — PLA creeps under screw preload and softens in a hot car. The oxblood elements (seam, ring, bezel, ticks) are a second filament or a paint fill; the model separates them as distinct objects with their own materials, so a multi-material printer can take them straight.
 
-**Note:** `instrument.mtl` is referenced by the OBJ but wasn't supplied. Material names are carried on the objects (`shell`, `oxblood`, `trim_oxblood`, `glass`, `pad`, `etch_floor`, `steel`, `cavity`), so you can assign your own without losing the separation.
+**Note:** `models/instrument.mtl` is exported alongside the OBJ by `tools/export_model.py` and carries the viewer's own colours. Material names also ride on the objects themselves (`shell`, `oxblood`, `trim_oxblood`, `glass`, `pad`, `etch_floor`, `steel`, `cavity`), so you can substitute your own filament colours without losing the separation.
 
 ---
 
@@ -666,6 +669,21 @@ The device reads BIP-174 version 0 and BIP-370 version 2, and hands back whichev
 - **Taproot script-path spends.** The device holds no leaf scripts and could not render one, so an input whose output key is not the tweak of a key it derives is refused. Key-path spends are fully supported.
 - **More than one destination per Bitcoin transaction**, for the reason in section 5.
 - **Any calldata on Ethereum.**
+
+### Starting on boot
+
+`tools/cell.service` is the systemd unit. It runs the loop as an unprivileged `cell` user with access to exactly four device nodes, because the QR parser is the one part of this device that reads bytes an attacker chose, and a bug there should cost one process rather than the machine.
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin -G spi,i2c,gpio,video cell
+sudo mkdir -p /opt/cell && sudo cp -r firmware /opt/cell/
+sudo chown -R cell:cell /boot/cell && sudo chmod 700 /boot/cell
+sudo cp tools/cell.service /etc/systemd/system/ && sudo systemctl enable --now cell
+```
+
+The unit has no `After=network.target` and wants no network. If a later edit adds one, that is a change to the threat model rather than a convenience.
+
+The rootfs is read-only (`raspi-config` → Performance → Overlay FS), and `/boot/cell` is the only writable path the service is given. That directory holds the encrypted seed blob, the watch-only accounts, the registered quorums and `thresholds.json` — everything that must survive a power cut, and nothing that must stay secret from someone holding the card.
 
 ### The screen and the buttons
 

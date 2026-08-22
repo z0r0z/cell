@@ -14,8 +14,9 @@ Wallet,Power,USB-C power input,"USB-C breakout, power only",1,2.00,2.00,NO BATTE
 Reader,Compute,Prototyping,Small breadboard + jumper wires,1,5.00,5.00,No PCB needed to prove the sensing.
 Reader,Storage,microSD,16GB A2,1,6.00,6.00,Read-only rootfs via overlayfs
 Reader,Enclosure,Filament black,PETG black ~90g,1,2.00,2.00,Optical chamber. NOT PLA - creeps under screw preload.
-Reader,Enclosure,Filament white,PETG white ~30g,1,1.50,1.50,Cartridges. Ironing ON - the well floor is a photometric reference.
-Wallet,Enclosure,Fasteners,M2.5x8 screw + heat-set insert,8,0.30,2.40,
+Reader,Enclosure,Filament white,PETG white ~60g,1,3.00,3.00,"Cartridges, ~2.4 g each. 20 for the build order's batch check, plus the REFERENCE and NULL pair. Ironing ON - the white patch is a photometric reference."
+Wallet,Enclosure,Fasteners,M2.5x8 screw + heat-set insert,8,0.30,2.40,Six bosses plus the two front fasteners
+Wallet,Enclosure,Display fasteners,M2x6 self-tapping screw,4,0.10,0.40,Into the Ø1.8 pilots in the four display posts. Module hangs below the deck; display_bezel.stl masks the window down to the active area
 Wallet,Optics,Ring window,10mm dia x 0.5mm clear acrylic or glass disc,1,1.00,1.00,Seals the optical chamber and gives touch mode a defined contact surface. No AR coating needed - specular exits at 45 deg.
 Reader consumable,Consumable,Safety lancets,Contact-activated sterile 28G / 1.8mm,100,0.06,6.00,COMMERCIAL ONLY. Never fabricate or reuse. Any pharmacy.
 Reader consumable,Consumable,Alcohol prep pads,70% IPA individually wrapped,100,0.02,2.00,

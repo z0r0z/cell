@@ -56,7 +56,7 @@ from se import PinLockout, SecureElement
 from wallet import Provisioning, WalletError
 
 PIN_LENGTH = 6
-VERSION = "0.7"
+VERSION = "0.8"
 
 
 class Abort(Exception):
@@ -115,17 +115,19 @@ class Device:
     def idle(self) -> None:
         fp = self.prov.master_fingerprint.hex()
         quorums = len(self.prov.multisig)
-        self._screen(f"CELL {VERSION}", [
+        body = [
             f"  wallet   {fp}",
             f"  network  {self.network}",
             f"  quorums  {quorums} registered" if quorums else "  quorums  none",
-            f"  tier     {self.policy.describe()}"
-            if hasattr(self.policy, "describe") else "",
+        ]
+        if hasattr(self.policy, "describe"):
+            body.append(f"  tier     {self.policy.describe()}")
+        self._screen(f"CELL {VERSION}", body + [
             "",
             "  CONFIRM  scan a transaction",
             "  UP       show a receiving address",
             "  DOWN     show this device's keys",
-        ], "")
+        ])
 
     def run_once(self) -> str:
         """One trip round the loop. Returns a short outcome for the log/tests."""

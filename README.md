@@ -2,7 +2,7 @@
 
 A hardware wallet that requires a live pulse, or a drop of fresh blood, to authorise a transaction.
 
-Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, $90 of hardware plus $31 of consumables that last hundreds of runs. Public domain.
+Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, $92 of hardware plus $31 of consumables that last hundreds of runs. Public domain.
 
 <img src="diagrams/turntable.gif" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
 
@@ -18,11 +18,11 @@ Orbit it, and export OBJ or glTF straight from the viewer. The turntable above i
 
 ## Status
 
-**Rev 0.8.** The design is complete, the signing stack and the gate logic both self-test on every commit, and the blood reader is buildable today for $60 of hardware plus $31 of consumables.
+**Rev 0.8.** The design is complete, the signing stack and the gate logic both self-test on every commit, and the blood reader is buildable today for $62 of hardware plus $31 of consumables.
 
 Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build — `calibrate.py` runs the spoof panel for both tiers, sets every threshold from your own samples, and writes a file the device loads. The touch panel is 15-second sessions, so that half is minutes of work. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
 
-You buy it as two kits. The reader kit is the blood reader alone — $60 of hardware plus $31 of lancets, film, tape and a sharps container — and a weekend's work proves the sensing before you spend anything on the wallet half. Read `SAFETY.md` first.
+You buy it as two kits. The reader kit is the blood reader alone — $62 of hardware plus $31 of lancets, film, tape and a sharps container — and a weekend's work proves the sensing before you spend anything on the wallet half. Read `SAFETY.md` first.
 
 ## What it does
 
@@ -105,7 +105,11 @@ By default the record never reaches the chain. It is stripped before broadcast, 
 
 For an allowlist it is the whole point, so the option is there.
 
-A contract can check the record itself. It needs three things: the signer's attestation key, recorded once the way you record an xpub; a counter higher than the last one it saw from that key; and a firmware hash it recognises. The signature is BIP-340 Schnorr, which the EVM has no precompile for, but it can be verified through `ecrecover` for a few thousand gas.
+A contract can check the record itself. `contracts/src/CellAttestation.sol` verifies the signature; `CellRegistry.sol` holds the three things the record cannot carry: whose key it is, the highest counter seen from that key, and which firmware and calibration you accept.
+
+The signature is BIP-340 Schnorr, which the EVM has no precompile for. It is rearranged into one `ecrecover` call plus a `modexp` to lift the point, so verification costs about 41k gas and a full `redeem` about 81k.
+
+The digest the device signs commits to the chain, the contract and the claimant, so a record cannot be replayed on a fork, against another deployment, or by someone else.
 
 What that buys is a signature nobody can farm. A script can produce a million of them. A body produces about two a day, and each one costs a lancet and ten minutes. For allowlists, mints, quorum votes and anything else where one-human-one-action matters, that is a rate limit denominated in something an attacker cannot buy more of.
 
@@ -186,6 +190,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | Path | Contents |
 |---|---|
 | `BUILD.md` | Hardware specification: parts, wiring, optics, cartridge, firmware, calibration |
+| `PRINTING.md` | Print runbook: order, checks, post-processing |
 | `BOM.csv` | Bill of materials, by kit, with sourcing notes |
 | `firmware/blood_gate.py` | Blood tier, six gates |
 | `firmware/touch_gate.py` | Touch tier, seven gates |
@@ -207,6 +212,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/se_atecc.py` | ATECC608B driver. Unverified until probed on hardware |
 | `firmware/test_wallet.py` | End to end, and every footgun we could name |
 | `tools/provision.py` | Choose a seed, wrap it, record the watch-only accounts |
+| `tools/cell.service` | The systemd unit that starts the loop at boot |
 | `firmware/signer.py` | The unlock chain: policy, confirm, PIN, gate, sign, attest |
 | `firmware/se.py` | Secure element interface and a software stub for tests |
 | `firmware/policy.py` | Tier selection and escalation rules |
@@ -214,11 +220,14 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/calibrate.py` | Spoof-panel harness for both tiers, and the synthetic self-test |
 | `firmware/hardware.py` | Sensor drivers. Untested; includes a bring-up checklist |
 | `models/` | Enclosure mesh, coordinate convention, regeneration |
+| `models/print/` | The ten printable STLs and their generated manifest |
 | `diagrams/` | Explainer, build sheet, dimensioned drawings |
 | `firmware/run_tests.py` | Every self-test in one run. What CI runs |
 | `tools/export_model.py` | Re-exports `instrument.obj` from `viewer/model.js` |
 | `tools/render_turntable.py` | Renders the turntable GIF/MP4 from the same model |
 | `tools/gen_mechanical.py` | Regenerates `diagrams/mechanical.svg` from the mesh |
+| `tools/gen_printables.py` | Generates every printable part, checks it, writes the manifest |
+| `tools/gen_enclosure.py` | The inside of the two shells, and the fit checks |
 | `viewer/` | Parametric three.js model — the source `instrument.obj` is exported from |
 | `VALIDATION.md` | Verification status: what is tested, by what method |
 | `SAFETY.md` | Blood-contact handling. Two minutes, read it first |
@@ -228,7 +237,9 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 
 <img src="diagrams/build-sheet.svg" alt="Build sheet: parts, optical head, cartridge" width="100%">
 
-`BUILD.md` §2 splits the build into two kits, and every row of `BOM.csv` says which kit it belongs to. The reader kit is $60 of hardware plus $31 of consumables: a Pi, a spectrometer, a laser, a camera, a printed chamber, cartridges, and the lancets and film to run them. It has no security requirements because it signs nothing, and it answers the only question that determines whether the rest is worth building. The wallet kit adds the signing half for a further $30.
+`BUILD.md` §2 splits the build into two kits, and every row of `BOM.csv` says which kit it belongs to. The reader kit is $62 of hardware plus $31 of consumables: a Pi, a spectrometer, a laser, a camera, a printed chamber, cartridges, and the lancets and film to run them. It has no security requirements because it signs nothing, and it answers the only question that determines whether the rest is worth building. The wallet kit adds the signing half for a further $31.
+
+Ten parts are printed, all from `python3 tools/gen_printables.py`, all checked before they are written. `PRINTING.md` is the runbook — what to print in what order, what to check off each stage, and the post-processing the device does not work without.
 
 ## Safety
 

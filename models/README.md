@@ -24,10 +24,11 @@ python tools/gen_mechanical.py
 **Do not hand-edit the OBJ.** It is 53 MB of triangles, and nothing downstream
 of a hand edit can be reconciled with a parametric change.
 
-`instrument.mtl` is referenced by the OBJ but was never supplied. Material
-names also ride on the objects themselves (`shell`, `oxblood`, `trim_oxblood`,
+`instrument.mtl` is written by `tools/export_model.py` in the same pass as the
+OBJ, from the viewer's own materials, so the two stay in step. Material names
+also ride on the objects themselves (`shell`, `oxblood`, `trim_oxblood`,
 `glass`, `pad`, `etch_floor`, `steel`, `cavity`), so the separation survives
-without it — assign your own.
+even if you drop the MTL and assign your own.
 
 ## Coordinate convention: centre-origin
 
@@ -46,8 +47,10 @@ silent 58 mm error that will not look wrong on screen.
 
 `models/print/` holds the parts that are *not* enclosure: the cartridge, the
 pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the
-slot baffle, the window jig, and both enclosure shells. `python3
-tools/gen_printables.py` builds all nine.
+slot baffle, the display bezel, the window jig, and both enclosure shells.
+`python3 tools/gen_printables.py` builds all ten, validates each one, and
+regenerates `models/print/MANIFEST.md` from the same constants — so the
+manifest cannot describe a part the STLs no longer are.
 
 The shells are the one place the one-way chain above does not tell the whole
 story. `model.js` owns the outside and is an appearance model: its shells are

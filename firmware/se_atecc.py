@@ -33,14 +33,38 @@ back, so `assert_locked()` runs before anything else and refuses if it is not.
 
     Slot 0   wrapping secret     IsSecret, no read, HMAC use only
     Slot 1   attestation secret  IsSecret, no read, HMAC use only
-    Slot 2   PIN verifier        IsSecret, CheckMac target
-    Slot 3   PIN baseline        written only after a correct PIN
+    Slot 2   PIN key             IsSecret, no read, HMAC use only
+    Slot 3   PIN baseline        readable, written after a correct PIN
+    Slot 4   PIN verifier        readable, written once at provisioning
     Counter0 PIN attempts        monotonic, never decreases
+    Counter1 operations          monotonic, for attestation anti-replay
+
+HOW THE PIN IS CHECKED, and why not the obvious way. The chip's CheckMac
+command compares a MAC the HOST computed against one the chip computes from a
+slot secret — which means the host has to know that secret. Here it does not,
+by design, so CheckMac is the wrong instrument no matter how natural it looks
+in the datasheet.
+
+Instead the chip computes HMAC(slot 2, "CELL/pin/v1" || SHA256(pin)) and the
+firmware compares it against a verifier written at provisioning. A wrong PIN
+produces a different HMAC and no match. Somebody holding the SD card learns
+nothing, because the verifier is an HMAC under a key that never left slot 2.
+Somebody holding the chip has to ask it once per guess, and every ask spends
+an attempt off Counter0 first.
+
+WHAT THE FIRMWARE CANNOT ENFORCE ALONE. The counter increment above is done by
+this code, not by silicon. An attacker running their own firmware against an
+unlocked chip could call the HMAC without paying for it. Closing that requires
+the CONFIG ZONE to bind slot use to the counter — see `CONFIG_REQUIREMENTS`
+below — and then locking it. `assert_locked()` refuses to run against a chip
+whose zones are open, which is the part this file can check; the binding
+itself is a provisioning step that only a built device can confirm.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 
 from se import MAX_PIN_ATTEMPTS, PinLockout, SecureElement
 
@@ -48,9 +72,44 @@ SLOT_WRAP = 0
 SLOT_ATTEST = 1
 SLOT_PIN = 2
 SLOT_PIN_BASELINE = 3
+SLOT_PIN_VERIFIER = 4
 COUNTER_PIN = 0
+COUNTER_OPS = 1
 
 I2C_ADDRESS = 0x60
+
+# cryptoauthlib's Python binding documents these by their C names but does not
+# export them, so they are restated here with the values its own docstrings
+# quote. Note that the two zone namespaces are NOT the same: atcab_is_locked
+# takes LOCK_ZONE_*, while atcab_read_zone and atcab_write_zone take ATCA_ZONE_*.
+# Using one where the other belongs reads the wrong region and succeeds.
+LOCK_ZONE_CONFIG = 0x00
+LOCK_ZONE_DATA = 0x01
+ATCA_ZONE_CONFIG = 0x00
+ATCA_ZONE_OTP = 0x01
+ATCA_ZONE_DATA = 0x02
+SHA_MODE_TARGET_TEMPKEY = 0x00
+
+
+# What the chip's own configuration has to say, because the firmware cannot
+# make it true from outside. Written down here rather than left in somebody's
+# head: an ATECC608B whose config zone does not carry these is a chip that
+# looks identical from software and provides none of the guarantees.
+CONFIG_REQUIREMENTS = """\
+Slot 0 (wrapping)    IsSecret, no clear read, no write after data-zone lock,
+                     usable only as an HMAC key, LimitedUse bound to Counter0
+Slot 1 (attestation) IsSecret, no clear read, HMAC key use only
+Slot 2 (PIN key)     IsSecret, no clear read, HMAC key use only
+Slot 3 (baseline)    clear read, write allowed (a public 4-byte counter value)
+Slot 4 (verifier)    clear read, write allowed, written once at provisioning
+Counter0             attached to slot 0's LimitedUse, so a use costs a count
+Counter1             free-running, for attestation anti-replay
+Both zones           LOCKED before the device holds funds
+
+The LimitedUse binding on slot 0 is the one that matters most and the one this
+file cannot verify: without it, the attempt counter is enforced only by the
+code above, which an attacker replacing the firmware would simply not run.
+"""
 
 
 class DeviceError(Exception):
@@ -106,8 +165,8 @@ class ATECC608B(SecureElement):
         is a hard failure rather than a warning.
         """
         cal = self._cal
-        for zone, name in ((cal.ATCA_ZONE_CONFIG, "config"),
-                           (cal.ATCA_ZONE_DATA, "data")):
+        for zone, name in ((LOCK_ZONE_CONFIG, "config"),
+                           (LOCK_ZONE_DATA, "data")):
             locked = cal.AtcaReference(0)
             if cal.atcab_is_locked(zone, locked) != cal.Status.ATCA_SUCCESS:
                 raise DeviceError(f"could not read the {name} zone lock state")
@@ -146,13 +205,9 @@ class ATECC608B(SecureElement):
             raise PinLockout("attempt counter exhausted; device wiped")
 
         self._increment(COUNTER_PIN)                    # spend it first
-        cal = self._cal
-        challenge = hashlib.sha256(b"CELL/pin/v1|" + pin.encode()).digest()
-        ok = cal.AtcaReference(0)
-        status = cal.atcab_checkmac(
-            0, SLOT_PIN, challenge,
-            self._pin_mac(challenge), bytes(13), ok)
-        if status != cal.Status.ATCA_SUCCESS:
+        got = self._pin_verifier(pin)
+        want = self._read_slot(SLOT_PIN_VERIFIER)
+        if not hmac.compare_digest(got, want):
             if self.attempts_remaining() == 0:
                 self.wipe()
                 raise PinLockout("attempt counter exhausted; device wiped")
@@ -161,9 +216,20 @@ class ATECC608B(SecureElement):
         self._pin_authorised = True
         return True
 
-    def _pin_mac(self, challenge: bytes) -> bytes:
-        """The MAC the chip is asked to reproduce from its stored PIN key."""
-        return hashlib.sha256(challenge + bytes([SLOT_PIN])).digest()
+    def _pin_verifier(self, pin: str) -> bytes:
+        """What slot 2 says this PIN is. Computed on the chip, not here."""
+        return self._hmac(SLOT_PIN,
+                          b"CELL/pin/v1" + hashlib.sha256(pin.encode()).digest())
+
+    def set_pin(self, pin: str) -> None:
+        """Write the verifier. Provisioning only, before the zones are locked.
+
+        There is deliberately no change_pin: the wrapping key is derived from
+        the PIN, so changing it would leave the seed blob unopenable. Changing
+        the PIN means reprovisioning from the backup words, which is also the
+        only path that proves the owner still has them.
+        """
+        self._write_slot(SLOT_PIN_VERIFIER, self._pin_verifier(pin))
 
     # ---- keys ----
 
@@ -213,11 +279,27 @@ class ATECC608B(SecureElement):
                 raw = self._hmac(SLOT_ATTEST,
                                  b"CELL/attest/v1|" + bytes([counter]))
 
+    def _read_slot(self, slot: int, length: int = 32) -> bytes:
+        cal = self._cal
+        buf = bytearray(length)
+        if cal.atcab_read_zone(ATCA_ZONE_DATA, slot, 0, 0, buf,
+                               length) != cal.Status.ATCA_SUCCESS:
+            raise DeviceError(f"could not read slot {slot}")
+        return bytes(buf)
+
+    def _write_slot(self, slot: int, value: bytes) -> None:
+        if len(value) != 32:
+            raise DeviceError("slot writes are 32 bytes")
+        cal = self._cal
+        if cal.atcab_write_zone(ATCA_ZONE_DATA, slot, 0, 0, value,
+                                32) != cal.Status.ATCA_SUCCESS:
+            raise DeviceError(f"could not write slot {slot}")
+
     def _hmac(self, slot: int, message: bytes) -> bytes:
         cal = self._cal
         out = bytearray(32)
         status = cal.atcab_sha_hmac(message, len(message), slot, out,
-                                    cal.SHA_MODE_TARGET_TEMPKEY)
+                                    SHA_MODE_TARGET_TEMPKEY)
         if status != cal.Status.ATCA_SUCCESS:
             raise DeviceError(f"HMAC on slot {slot} failed: status {status}")
         return bytes(out)
@@ -226,10 +308,10 @@ class ATECC608B(SecureElement):
 
     def counter(self) -> int:
         """Operation counter, for attestation anti-replay."""
-        return self._counter(1)
+        return self._counter(COUNTER_OPS)
 
     def increment_counter(self) -> int:
-        return self._increment(1)
+        return self._increment(COUNTER_OPS)
 
     def _counter(self, which: int) -> int:
         cal = self._cal
@@ -247,12 +329,7 @@ class ATECC608B(SecureElement):
 
     def _baseline(self) -> int:
         """The counter value at the last correct PIN, read from slot 3."""
-        cal = self._cal
-        buf = bytearray(32)
-        if cal.atcab_read_zone(cal.ATCA_ZONE_DATA, SLOT_PIN_BASELINE, 0, 0,
-                               buf, 32) != cal.Status.ATCA_SUCCESS:
-            raise DeviceError("could not read the PIN baseline slot")
-        value = int.from_bytes(bytes(buf[:4]), "big")
+        value = int.from_bytes(self._read_slot(SLOT_PIN_BASELINE)[:4], "big")
         # A baseline ahead of the counter would mean the slot was tampered
         # with to buy attempts. Refuse rather than grant them.
         now = self._counter(COUNTER_PIN)
@@ -264,11 +341,8 @@ class ATECC608B(SecureElement):
 
     def _set_baseline(self) -> None:
         """Record the counter after a correct PIN. Only reachable then."""
-        cal = self._cal
-        value = self._counter(COUNTER_PIN).to_bytes(4, "big") + bytes(28)
-        if cal.atcab_write_zone(cal.ATCA_ZONE_DATA, SLOT_PIN_BASELINE, 0, 0,
-                                value, 32) != cal.Status.ATCA_SUCCESS:
-            raise DeviceError("could not record the PIN baseline")
+        self._write_slot(SLOT_PIN_BASELINE,
+                         self._counter(COUNTER_PIN).to_bytes(4, "big") + bytes(28))
 
     # ---- destruction ----
 
@@ -284,9 +358,7 @@ class ATECC608B(SecureElement):
         rand = bytearray(32)
         if cal.atcab_random(rand) != cal.Status.ATCA_SUCCESS:
             raise DeviceError("could not draw randomness to overwrite the slot")
-        if cal.atcab_write_zone(cal.ATCA_ZONE_DATA, SLOT_WRAP, 0, 0,
-                                bytes(rand), 32) != cal.Status.ATCA_SUCCESS:
-            raise DeviceError("could not overwrite the wrapping secret")
+        self._write_slot(SLOT_WRAP, bytes(rand))
         self._pin_authorised = False
 
 

@@ -13,7 +13,7 @@ samples. That step is part of the build, not a caveat about it.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — twenty-seven suites, no hardware required.
+`python firmware/run_tests.py` — twenty-nine suites, no hardware required.
 
 ### The signing stack
 
@@ -147,14 +147,32 @@ input whose pass condition is a refusal.
 Interoperability against published vectors is the meaningful result in both
 tables — a round trip against your own implementation proves nothing.
 
+### Verified without the hardware
+
+These close part of what used to be listed below as unverifiable. None of them
+say anything about the parts themselves; they say the code addresses those
+parts correctly, which is a different failure mode and the one that fails
+silently.
+
+| Component | Method | Result |
+|---|---|---|
+| cryptoauthlib calls | Signatures introspected from the installed package and compared to ours | All eight match. **Found two real defects**: `atcab_checkmac` was called with six arguments where the binding takes five, and the data zone was read using the lock-zone constant, which names a different region. Both imported cleanly and would have reached a bench |
+| The PIN mechanism | Read against what CheckMac actually does | **Redesigned.** CheckMac compares a MAC the *host* computed, so the host must know the slot secret — which here it must not. Replaced with a verifier the chip computes under a slot key that never leaves it |
+| Zone constants | Cross-checked against the binding's own docstrings | `LOCK_ZONE_*` and `ATCA_ZONE_*` are different namespaces with different values; both now restated with the values the docstrings quote |
+| ST7789, gpiozero, OpenCV, Pillow, qrcode | Every argument, constant and return shape we use, introspected | All present and correctly used; the 320-row default is overridden |
+| Script execution | `python-bitcoinlib`'s interpreter, under P2SH/DERSIG/STRICTENC/NULLDUMMY/CLEANSTACK/MINIMALDATA | p2pkh and bare 2-of-3 multisig **execute and succeed**; mangled, lifted, wrong-key, wrong-sighash-byte, out-of-order, short-quorum and non-empty-dummy variants all fail. Witness execution is not covered — that library predates segwit |
+| `app.load_device` | Built from a real provisioned directory and driven to its idle screen | Assembles; exercises `provision.load`, the account records and the display path |
+
 ## Written but unverified
 
 | Component | Why | How to verify |
 |---|---|---|
 | `firmware/se_atecc.py` | Needs the chip. The logic around it is now covered against a fake transport; nothing that touches I2C is | `python3 firmware/se_atecc.py --probe` on a built device |
-| `firmware/display.py` | Needs the panel. The layout limits are covered; the SPI driver and the font metrics are not | Any screen on a built device |
-| `firmware/buttons.py` | Needs the switches. The consent and debounce logic is covered; the GPIO edges are not | Press each button on a built device |
-| `firmware/camera.py` | Needs the webcam. Collection and framing are covered; optical decoding is not | Scan a signed PSBT into a coordinator and back |
+| `firmware/display.py` | Needs the panel. Layout limits and library calls are covered; the SPI timing, the font metrics and the Y offset many 240x240 panels need are not | Any screen on a built device |
+| `firmware/buttons.py` | Needs the switches. Consent and debounce logic and the library calls are covered; whether 30 ms actually settles YOUR switches is not | Press each button on a built device |
+| `firmware/camera.py` | Needs the webcam. Collection, framing and the OpenCV calls are covered; whether a cheap lens focuses on a 240x240 panel is not | Scan a signed PSBT into a coordinator and back |
+| Segwit and taproot on a node | No interpreter available here supports witness execution | Broadcast one testnet transaction |
+| The ATECC608B config zone | The LimitedUse binding between slot 0 and Counter0 is what makes the attempt counter real, and no software can confirm it from outside | `se_atecc.py --probe`, then try eleven wrong PINs on a device you can afford to wipe |
 | `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
 | `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |
 | Attestation key custody | The ATECC608B signs NIST P-256 only, so the secp256k1 attestation scalar is derived from a chip secret and exists in RAM while signing, rather than never leaving the chip | Stated in `se_atecc.py`; switch `attest.py` to P-256 if you need the stronger property |

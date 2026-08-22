@@ -18,3 +18,8 @@ thresholds.json
 # leaves one behind and it must never be committed.
 viewer/__turntable.html
 viewer/__export.html
+
+# foundry
+contracts/out/
+contracts/cache/
+contracts/lib/

@@ -1,0 +1,60 @@
+# The signing loop, started at boot.
+#
+#   sudo cp tools/cell.service /etc/systemd/system/
+#   sudo systemctl enable --now cell
+#
+# WHY IT RUNS AS ITS OWN USER. The loop needs the SPI and I2C device nodes and
+# nothing else. Running it as root would give an attacker who finds a bug in
+# the QR parser — the one part of this device that reads attacker-controlled
+# bytes — the whole machine instead of one unprivileged process. Create the
+# account once:
+#
+#   sudo useradd -r -s /usr/sbin/nologin -G spi,i2c,gpio,video cell
+#   sudo chown -R cell:cell /boot/cell
+#   sudo chmod 700 /boot/cell
+#
+# WHY IT RESTARTS. A device used twice a year sits in a drawer; the failure
+# people actually hit is a crash on Tuesday discovered in March. app.main()
+# already refuses to die on an exception — it paints the error and returns to
+# idle — so a restart here means something worse happened, and coming back to
+# a usable screen beats a dark one.
+
+[Unit]
+Description=CELL hardware wallet signing loop
+After=multi-user.target
+# No network dependency, deliberately. This device has no network. If a future
+# edit adds one, that edit is a change to the threat model, not a convenience.
+
+[Service]
+Type=simple
+User=cell
+Group=cell
+WorkingDirectory=/opt/cell
+ExecStart=/usr/bin/python3 /opt/cell/firmware/app.py --dir /boot/cell
+Restart=always
+RestartSec=2
+
+# The filesystem is read-only in normal operation (see BUILD.md section 12).
+# These make that explicit at the process level too, so a bug cannot write
+# outside the one directory that has to be writable.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/boot/cell
+NoNewPrivileges=yes
+# The seed spends milliseconds in memory during signing. Keeping it out of
+# swap is the difference between that and leaving it on the card.
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+
+# The device nodes the loop actually needs, and no others.
+DeviceAllow=/dev/spidev0.0 rw
+DeviceAllow=/dev/i2c-1 rw
+DeviceAllow=/dev/gpiochip0 rw
+DeviceAllow=/dev/video0 rw
+DevicePolicy=closed
+
+[Install]
+WantedBy=multi-user.target
