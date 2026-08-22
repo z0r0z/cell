@@ -32,6 +32,11 @@ SUITES = [
      [sys.executable, "hashes.py"]),
     ("secp256k1 — RFC 6979, ECDSA, BIP-340, BIP-341",
      [sys.executable, "secp256k1.py"]),
+    # The two fast scalar multiplies against the affine group law they are
+    # optimisations of. A wrong answer here is a wrong signature, not a
+    # failed assertion, so the fast paths are never the only implementation.
+    ("curve arithmetic — the fast multiplies against the definition",
+     [sys.executable, "test_curve.py"]),
     ("BIP-39 — wordlist integrity and the official vectors",
      [sys.executable, "bip39.py"]),
     ("BIP-32 — official vectors, hardened isolation, owns()",
