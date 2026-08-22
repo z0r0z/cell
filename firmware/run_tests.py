@@ -80,6 +80,8 @@ SUITES = [
      [sys.executable, "test_gate_robustness.py"]),
     ("drift margins — what the normalisation actually cancels",
      [sys.executable, "robustness.py", "--quick"]),
+    ("speckle physics — exposure, frame rate and grain",
+     [sys.executable, "speckle_sim.py", "--quick"]),
 ]
 
 

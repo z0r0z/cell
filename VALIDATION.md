@@ -57,6 +57,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Enrolment invariant | Reference emitted by `enroll-reference` | Reproduces the G4 clamp mask; 415 nm stays excluded |
 | Hostile captures | 9 malformed captures | Zeros, NaNs, negative counts, short speckle — each rejected at a named gate, none raise |
 | Drift invariance | LED aging, gain drift, ambient leak, beam envelope | Gate scores do not move: the white patch divides the first two out, the dark read subtracts the third, the spatial high-pass removes the fourth |
+| Speckle physics | Ornstein-Uhlenbeck field, exposure-integrated | Reproduces frozen and liquid limits; exposure, frame interval and grain each swept against the G5/G6 thresholds |
 | Drift margins | 7 disturbance axes, bisected | Tightest budget reported and ranked; a finite tolerance on an invariance axis fails the suite |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
 

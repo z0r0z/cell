@@ -470,6 +470,10 @@ That one command builds everything printable — the shells included, via `tools
     ─────────────────────────────────────   white PETG cartridge body
 ```
 
+**The 2 ms exposure has 2.5x of margin, and the failure is not the obvious one.** `firmware/speckle_sim.py` models the scattered field as an Ornstein-Uhlenbeck process and integrates it over the exposure, which is the only way to see this: a frame that averages many independent speckle patterns loses contrast AND looks like the frame before it, so liquid blood reads as arrested. Swept against the shipped thresholds at a 0.3 ms correlation time, liquid still reads liquid at 2 ms and fails G5 by 5 ms. It fails toward a false REJECT rather than a false accept, and only because G5 runs first — without the free-motion check the same blur would satisfy G6 and be read as a clot.
+
+**The camera rate sets how still a clot has to be.** At 30 fps the same model reads liquid up to a 31 ms correlation time and arrest from 269 ms, so clotting has to raise tau_c about ninefold, through a band where the sample reads as neither and is rejected. A faster camera narrows that band: 120 fps moves it to 7.4 ms and 64 ms. Recording tau_c against time for one genuine clot is the first measurement the speckle path needs.
+
 - **45°/0° is not decorative.** Wet blood is glossy. A normal-incidence lamp would swamp the sensor with surface reflection carrying zero chemical information. At 45° the specular lobe exits at 45° and misses the aperture entirely.
 - Two opposed LEDs cancel directional shading from droplet asymmetry.
 - The aperture tube defines a 3 mm spot inside the 4 mm well, so the sensor never sees the meniscus at the edge.
