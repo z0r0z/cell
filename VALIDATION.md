@@ -103,6 +103,7 @@ and camera — the seams between parts that are individually correct.
 | Tier policy | A spend above the floor demands blood and says what that costs; a small one runs at touch |
 | Read-only screens | The receiving address matches what the seed derives, with nothing unlocked to show it |
 | Every screen, everywhere | None overflowed 40 columns or 20 rows |
+| **The seam to the sensing half** | `app.gate_result` adapted against the gates' REAL outputs, not a mock: a genuine blood capture and a genuine touch capture pass, ketchup and a pumped silicone finger fail with a message naming the gate. The two tiers report measurements under different keys — blood `gate_scores`, touch `features` — and `liveness_digest` reads both, so two captures at either tier attest to different measurements |
 
 ### The secure element driver
 

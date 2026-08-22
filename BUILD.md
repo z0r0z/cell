@@ -683,6 +683,14 @@ Run it dry, without any of that hardware:
 python3 firmware/app.py --dir /boot/cell --console
 ```
 
+### Wiring the gates to the signer
+
+`app.run_gate_on_hardware` is the seam between the two halves of this device. Both tiers share one AS7341 and one bore, so the touch sensor is handed the blood head rather than opening I2C a second time; thresholds come from `thresholds.json` if it is there, and from the physics-derived defaults if it is not.
+
+`app.gate_result` adapts what the gates return — every gate's score, the features behind them, and a message naming the specific failure — into the `(passed, attestation)` the unlock chain consumes. The attestation dict is what `signer.liveness_digest` hashes into the record, which is why the measurements travel rather than a boolean: a co-signer can then pin a claim to one capture instead of to somebody's assertion that a gate ran.
+
+Note that the two tiers name their measurements differently — blood reports `gate_scores`, touch reports `features` — and the digest reads both. Adding a tier means checking it appears under one of those names, or its attestation degrades to a signed boolean without anything failing.
+
 ### Provisioning
 
 Once, with the case open, on the device:

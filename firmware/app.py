@@ -372,6 +372,62 @@ def parse_eth_request(payload: bytes) -> eth.EthTransaction:
 # --------------------------------------------------------------------------
 
 
+def gate_result(result) -> tuple[bool, dict]:
+    """Adapt a gate's own result object to what signer.py consumes.
+
+    The gates return rich objects — every gate's score, the features behind
+    them, and a message naming the specific failure. signer.py wants
+    `(passed, attestation)`, where the attestation dict is hashed into the
+    record so a co-signer can pin a claim to one capture rather than to a
+    boolean. This is the only place those two shapes meet.
+
+    `user_message` is carried through because a refusal that says "liveness
+    failed" teaches the owner nothing; one that says which gate failed tells
+    them whether to warm their hands or throw the cartridge away.
+    """
+    att = dict(result.attestation)
+    if not result.accepted:
+        att.setdefault("message", result.user_message())
+    return bool(result.accepted), att
+
+
+def run_gate_on_hardware(tier: Tier, directory) -> tuple[bool, dict]:  # pragma: no cover
+    """Drive the sensor head for the tier the policy chose.
+
+    Both tiers share one AS7341 and one bore, so the touch sensor is handed
+    the head rather than opening the I2C bus a second time. Thresholds come
+    from the calibration file if one is present — `Thresholds.load` falls back
+    to the physics-derived defaults, and BUILD.md section 13 is the procedure
+    for replacing them with values measured on your own hardware.
+    """
+    from pathlib import Path
+
+    import blood_gate
+    import hardware
+    import touch_gate
+
+    cal = Path(directory) / "thresholds.json"
+    head = hardware.RealSensorHead()
+    try:
+        if tier is Tier.BLOOD:
+            th = blood_gate.Thresholds.load(cal) if cal.exists() \
+                else blood_gate.Thresholds()
+            capture = blood_gate.acquire(head, th)
+            return gate_result(blood_gate.evaluate(capture, th))
+
+        th = touch_gate.TouchThresholds.load(cal) if cal.exists() \
+            else touch_gate.TouchThresholds()
+        sensor = hardware.RealTouchSensor(head)
+        # fs is a TARGET. The sensor reports what it achieved, and that is what
+        # the evaluation must use, because every frequency-derived feature
+        # scales with it.
+        red, ir, fs = sensor.read_ppg(th.duration_s, th.fs)
+        bore = sensor.read_bore_reference()
+        return gate_result(touch_gate.evaluate(red, ir, bore, th, fs=fs))
+    finally:
+        head.close()
+
+
 def load_device(directory: str, console: bool = False, **kw) -> Device:   # pragma: no cover
     """Assemble the real thing from a provisioned directory."""
     import hashlib
@@ -381,8 +437,6 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
     import provision as prov_tool
 
-    import blood_gate
-    import touch_gate
     from display import open_display
 
     d = Path(directory)
@@ -395,14 +449,7 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
         se = ATECC608B()
 
     def run_gate(tier: Tier):
-        import hardware
-        head = hardware.RealSensorHead()
-        try:
-            if tier is Tier.BLOOD:
-                return blood_gate.run(head)
-            return touch_gate.run(hardware.RealTouchSensor(head))
-        finally:
-            head.close()
+        return run_gate_on_hardware(tier, d)
 
     fw_hash = hashlib.sha256(
         b"".join(sorted(p.read_bytes() for p in Path(__file__).parent.glob("*.py")))

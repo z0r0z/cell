@@ -298,6 +298,73 @@ def main() -> int:
     check("...including the fingerprint",
           d12.prov.master_fingerprint.hex() in d12.display.text())
 
+
+    # ---- the seam to the sensing half -----------------------------------
+    # app.load_device wires the gates to the unlock chain. The gates return
+    # rich result objects; the signer wants (passed, attestation). This is the
+    # adapter, checked against the gates' REAL outputs rather than a mock,
+    # because an adapter tested against its own idea of the shape is an
+    # adapter that compiles and then fails on a bench.
+    print("\n the seam to the gates")
+    import blood_gate
+    import calibrate
+    import touch_gate
+
+    ok_blood, att_blood = app.gate_result(
+        blood_gate.evaluate(calibrate.synth_capture("genuine", 0)))
+    check("a genuine blood capture is adapted as a pass", ok_blood is True)
+    check("...carrying the gate scores the attestation hashes",
+          "gate_scores" in att_blood and att_blood["gate_scores"])
+
+    bad_blood, att_bad = app.gate_result(
+        blood_gate.evaluate(calibrate.synth_capture("ketchup", 0)))
+    check("a spoof is adapted as a failure", bad_blood is False)
+    check("...with a message naming the gate that caught it",
+          "message" in att_bad and len(att_bad["message"]) > 8)
+
+    tth = touch_gate.TouchThresholds()
+    red, ir, bore = touch_gate._synth("genuine", 0, tth)
+    ok_touch, att_touch = app.gate_result(
+        touch_gate.evaluate(red, ir, bore, tth, fs=tth.fs))
+    check("a genuine touch capture is adapted as a pass", ok_touch is True)
+    # The two tiers name their measurements differently — blood reports
+    # gate_scores, touch reports features — and liveness_digest reads both.
+    # What matters is not the key but that the record commits to the capture.
+    check("...carrying measurements under one of the names the digest reads",
+          bool(att_touch.get("gate_scores") or att_touch.get("features")))
+
+    red_f, ir_f, bore_f = touch_gate._synth("pump_fake", 0, tth)
+    ok_fake, att_fake = app.gate_result(
+        touch_gate.evaluate(red_f, ir_f, bore_f, tth, fs=tth.fs))
+    check("a pumped silicone finger is adapted as a failure", ok_fake is False)
+    check("...with a message for the owner", "message" in att_fake)
+
+    # And the digest the attestation commits to must actually change with the
+    # capture, or the record attests to nothing in particular.
+    import signer as signer_mod
+    from policy import Tier as _Tier
+    d_a = signer_mod.liveness_digest(_Tier.BLOOD, att_blood)
+    d_b = signer_mod.liveness_digest(
+        _Tier.BLOOD,
+        app.gate_result(blood_gate.evaluate(calibrate.synth_capture("genuine", 1)))[1])
+    check("two blood captures attest to different measurements", d_a != d_b)
+
+    # The same must hold for touch, or the touch tier's attestation would be a
+    # signed boolean rather than a claim about a capture.
+    red_b, ir_b, bore_b = touch_gate._synth("genuine", 1, tth)
+    t_a = signer_mod.liveness_digest(_Tier.TOUCH, att_touch)
+    t_b = signer_mod.liveness_digest(_Tier.TOUCH, app.gate_result(
+        touch_gate.evaluate(red_b, ir_b, bore_b, tth, fs=tth.fs))[1])
+    check("two touch captures attest to different measurements", t_a != t_b)
+    check("and a touch digest is not a blood digest", t_a != d_a)
+
+    # The thresholds the device loads must be the ones it evaluates against.
+    check("both gates expose the load() the device build calls",
+          hasattr(blood_gate.Thresholds, "load")
+          and hasattr(touch_gate.TouchThresholds, "load"))
+    check("touch thresholds carry the capture parameters the adapter uses",
+          hasattr(tth, "duration_s") and hasattr(tth, "fs"))
+
     # ---- every screen fits the panel ------------------------------------
     print("\n every screen fits")
     over = []
