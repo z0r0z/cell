@@ -265,13 +265,20 @@ No tiers, no spending thresholds. Every key on the device requires blood, becaus
 
 ### The closed operation set
 
-It signs exactly three things:
+It signs exactly four things:
 
 - A Bitcoin spend — amount, destination, fee, change ownership
+- An Ethereum transfer — amount, destination, chain, nonce, worst-case fee
 - A confidential note spend — note, amount, recipient owner
 - A direct transfer to a pubkey
 
 **It refuses everything else**, including generic EVM calldata and bare hashes. If the device can't render an operation as a sentence a human can read, it doesn't sign it. A device that displays `0x9a3f…` and asks for blood is worse than one that refuses.
+
+Two consequences of that rule are worth stating outright, because both look like missing features and neither is:
+
+**One destination per Bitcoin transaction.** A PSBT paying several recipients is refused. The device shows one destination in full, on a screen the owner can check character by character; a batch would be a total they cannot. Split the payment, or batch at a layer above the signer.
+
+**Every Ethereum field is displayed.** The chain id, the nonce and `gas_limit × max_fee_per_gas` are on the confirmation screen next to the amount. They are what the signature commits to, so they are what the owner is asked to approve. An unrecognised chain id is a refusal rather than a number nobody can evaluate — a signature that does not pin the chain replays on every other EVM network the owner holds funds on.
 
 This is a scope decision, not a limitation. Make it deliberately.
 
@@ -596,7 +603,56 @@ Verify: `iw dev` empty, `hciconfig` empty. Desolder USB D+/D− or use a data-bl
 
 ### Wallet layer
 
-Fork [SeedSigner](https://github.com/SeedSigner/seedsigner). It's a mature airgapped Pi Zero signer that already solves animated-QR PSBT in/out, the ST7789 UI, camera handling, `embit` Bitcoin logic, and a hardened read-only image build. You're adding a gate, not building a wallet. Writing your own PSBT parser is how you lose money to a change-address bug.
+The signing stack is in `firmware/`, not delegated. That was a reversal: the earlier plan was to fork [SeedSigner](https://github.com/SeedSigner/seedsigner) and add a gate to it, on the reasoning that writing your own PSBT parser is how you lose money to a change-address bug. That reasoning is still correct, and it is exactly why the parser here is written the way it is — but the gate turned out not to be separable. The tier decision needs the amount. The confirmation screen needs the change ownership. The attestation binds to the sighash. All three want the transaction already parsed, and a signer that hands those out through a plugin boundary is a signer whose security properties live on both sides of that boundary.
+
+So the stack is here, and the mitigation for writing it ourselves is that none of it is trusted on its own authority:
+
+| Module | Checked against |
+|---|---|
+| `secp256k1.py` | RFC 6979 vectors, BIP-340 vectors, OpenSSL for ECDSA verification |
+| `bip39.py` | The official Trezor vectors; the wordlist's SHA-256 is verified on load |
+| `bip32.py` | BIP-32 vectors 1, 2 and 5 |
+| `addresses.py` | BIP-173 and BIP-350 valid *and* invalid vectors; EIP-55 vectors |
+| `tx.py` | BIP-143 P2WPKH and P2SH-P2WPKH vectors; a real mainnet transaction |
+| `eth.py` | Yellow-paper RLP vectors; EIP-1559 encoding |
+| `hashes.py` | ISO RIPEMD-160 vectors; Keccak-256 vectors |
+
+During development every signature was also compared byte for byte against `embit` (Bitcoin, all four script types) and `eth-account` (Ethereum, six chains). They match exactly — including Bitcoin Core's low-R grinding convention, which is why our DER encodings are the same length as everyone else's. Neither package is a dependency; the vectors they confirmed are in the suites.
+
+SeedSigner remains the reference worth reading for the parts this repo does not solve: the ST7789 UI, camera handling, and the hardened read-only image build.
+
+### What the device recomputes rather than believes
+
+A PSBT is a document written by software the device does not trust. `firmware/psbt.py` treats every number in it as an assertion until it is rederived:
+
+- **Input amounts.** A segwit v0 signature commits to its own input's amount and not the others', so a host that understates one turns the difference into fee. Every non-taproot input must carry its full parent transaction, whose txid is recomputed and compared to the outpoint. Taproot commits to every amount at once, so there — and only there — a witness UTXO alone is enough.
+- **Which output is change.** The host labels an output as change by attaching a derivation path. The device derives the key at that path from its own seed, rebuilds the scriptPubKey, and compares it byte for byte. An output that fails is shown as an unverified destination, in full, with a warning — never folded into "change".
+- **The script type**, read from the scriptPubKey itself, because it selects the sighash algorithm.
+- **The sighash flag.** SIGHASH_ALL only. Every other flag lets someone change part of the transaction after the owner approved it.
+
+`firmware/test_wallet.py` runs each of these as an attack and requires a refusal.
+
+### Provisioning
+
+Once, with the case open, on the device:
+
+```bash
+python3 tools/provision.py new    --out /boot/cell --pin ******   # or `import`
+python3 tools/provision.py show   --dir /boot/cell                # the public half
+```
+
+`new` draws entropy from the kernel CSPRNG XORed with the ATECC608B's hardware RNG — not because the kernel is suspect, but so that a flaw in either source alone is survivable. It prints the words once, then asks you for three of them back before it writes anything. There is no command that reprints them: a device that will show its seed on demand will show it to whoever is holding it.
+
+It writes two files:
+
+| File | Contents |
+|---|---|
+| `seed.blob` | The mnemonic, AES-256-GCM, under a key derived inside the ATECC608B from your PIN and a secret that never leaves the chip. Mode 0600 |
+| `accounts.json` | Master fingerprint and the account xpubs. Watch-only, public, safe to copy to a coordinator |
+
+Before it reports success it re-reads the blob through the same path signing uses — verify_pin, then the chip's KDF, then decrypt — and refuses to declare the device provisioned unless the words come back byte for byte. A device that cannot reopen its own seed is the worst outcome available here, and it costs nothing to rule out.
+
+Then lock the ATECC608B's config and data zones. `se_atecc.py` refuses to run against an unlocked chip: an unlocked chip's slots can still be read or rewritten, which gives every appearance of security and none of it.
 
 You diverge in one place: SeedSigner is stateless and re-derives from a seed you type each time. You store an encrypted seed and gate its decryption.
 

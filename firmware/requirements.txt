@@ -2,6 +2,16 @@
 numpy>=1.24
 scipy>=1.10
 
+# Seed storage. AES-256-GCM via OpenSSL, so the seed is authenticated as well
+# as encrypted and the cipher is not a hand-rolled one. On Raspberry Pi OS this
+# is `apt install python3-cryptography`.
+cryptography>=41.0
+
+# Everything else in the signing stack — secp256k1, BIP-32/39, PSBT, RLP,
+# RIPEMD-160, Keccak-256 — is pure Python in this directory, with no third
+# party dependency, and is checked against the published test vectors by
+# run_tests.py.
+
 # Device only, Raspberry Pi. Uncomment when building hardware.py.
 # adafruit-blinka
 # adafruit-circuitpython-as7341

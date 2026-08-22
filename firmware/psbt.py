@@ -39,7 +39,7 @@ import addresses
 import ops
 import secp256k1 as ec
 import tx as txmod
-from bip32 import HARDENED, ExtendedKey
+from bip32 import ExtendedKey
 from tx import Reader, Transaction, ser_compact
 
 PSBT_MAGIC = b"psbt\xff"
@@ -472,18 +472,24 @@ class PSBT:
             except addresses.BadAddress as e:
                 raise BadPSBT(f"output {i} cannot be displayed as an address: {e}. "
                               f"This device does not sign what it cannot show.")
+            claimed_ours = bool(_get_all(self.outputs[i], OUT_BIP32_DERIVATION)
+                                or _get(self.outputs[i], OUT_TAP_INTERNAL_KEY))
             if self._output_is_ours(i, root):
                 change_sats += out.value
                 change_addr = change_addr or addr
-            elif self.outputs[i] and (_get_all(self.outputs[i], OUT_BIP32_DERIVATION)
-                                      or _get(self.outputs[i], OUT_TAP_INTERNAL_KEY)):
-                # The host claimed this was ours and it is not. Show it as a
-                # destination, in full, and say why.
-                recipients.append((addr, out.value))
+            elif claimed_ours:
+                # The host labelled this output as ours and the device cannot
+                # derive it. It stays in the change slot rather than becoming a
+                # second recipient, because BitcoinSpend renders an unverified
+                # change output as a WARNING with the address in full — which is
+                # exactly the screen the owner needs to catch this. Folding it
+                # in with the real destinations would bury it.
+                change_sats += out.value
+                change_addr = addr
                 change_ours = False
                 warnings.append(
                     f"output {i} is labelled as change but this wallet cannot "
-                    f"derive it; it is shown as a destination")
+                    f"derive it")
             else:
                 recipients.append((addr, out.value))
 

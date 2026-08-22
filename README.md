@@ -134,6 +134,11 @@ python calibrate.py selftest --n 8     # blood tier, 6 gates, 18 sample classes
 python touch_gate.py                   # touch tier, 7 gates
 python policy.py                       # tier rules
 python attest.py                       # attestation, quorum, malformed input
+python secp256k1.py                    # RFC 6979, ECDSA, BIP-340, BIP-341
+python bip32.py                        # BIP-32 vectors, hardened isolation
+python tx.py                           # BIP-143 and BIP-341 sighash vectors
+python eth.py                          # RLP, EIP-1559, recovery
+python test_wallet.py                  # end to end, then every footgun
 ```
 
 Each spoof class fails at the physically correct gate, and the self-test fails
@@ -150,6 +155,18 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/blood_gate.py` | Blood tier, six gates |
 | `firmware/touch_gate.py` | Touch tier, seven gates |
 | `firmware/ops.py` | The closed operation set and its renderer |
+| `firmware/wallet.py` | Provisioning, and the two signing entry points |
+| `firmware/psbt.py` | BIP-174: what the device recomputes rather than trusts |
+| `firmware/tx.py` | Transactions and all three sighash algorithms |
+| `firmware/eth.py` | RLP and EIP-1559, built from displayed fields |
+| `firmware/secp256k1.py` | The curve both chains sign on |
+| `firmware/bip32.py` / `bip39.py` | HD derivation and the mnemonic |
+| `firmware/addresses.py` | bech32/bech32m, script types, EIP-55 |
+| `firmware/seedstore.py` | The seed at rest |
+| `firmware/qr.py` | The airgap: framing and reassembly |
+| `firmware/se_atecc.py` | ATECC608B driver. Unverified until probed on hardware |
+| `firmware/test_wallet.py` | End to end, and every footgun we could name |
+| `tools/provision.py` | Choose a seed, wrap it, record the watch-only accounts |
 | `firmware/signer.py` | The unlock chain: policy, confirm, PIN, gate, sign, attest |
 | `firmware/se.py` | Secure element interface and a software stub for tests |
 | `firmware/policy.py` | Tier selection and escalation rules |

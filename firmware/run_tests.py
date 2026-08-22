@@ -3,8 +3,16 @@
 
     python firmware/run_tests.py
 
-This is what CI runs and what a reviewer should run first: the gate logic, the
-tier policy, the attestation format, and the full calibration round trip.
+This is what CI runs and what a reviewer should run first: the signing stack
+against published test vectors, the gate logic, the tier policy, the
+attestation format, and the full calibration round trip.
+
+The signing suites are checked against the vectors published in the BIPs, RFC
+6979, the EIPs and the Ethereum yellow paper — not against our own output.
+During development they were also compared byte for byte against `embit` and
+`eth-account`, which is why the low-R grinding matches Bitcoin Core and the
+Ethereum signatures match every EVM library. Those packages are not
+dependencies; the vectors they confirmed are baked into the suites.
 
 Sensing thresholds are calibrated against physical samples at first build —
 see BUILD.md section 13. VALIDATION.md is the verification status record.
@@ -20,6 +28,28 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 SUITES = [
+    ("hash primitives — RIPEMD-160 and Keccak-256 vectors",
+     [sys.executable, "hashes.py"]),
+    ("secp256k1 — RFC 6979, ECDSA, BIP-340, BIP-341",
+     [sys.executable, "secp256k1.py"]),
+    ("BIP-39 — wordlist integrity and the official vectors",
+     [sys.executable, "bip39.py"]),
+    ("BIP-32 — official vectors, hardened isolation, owns()",
+     [sys.executable, "bip32.py"]),
+    ("addresses — BIP-173/350 vectors, scripts, EIP-55",
+     [sys.executable, "addresses.py"]),
+    ("transactions — BIP-143 and BIP-341 sighash vectors",
+     [sys.executable, "tx.py"]),
+    ("ethereum — RLP, EIP-1559 encoding, recovery",
+     [sys.executable, "eth.py"]),
+    ("seed store — AES-256-GCM wrap and tamper detection",
+     [sys.executable, "seedstore.py"]),
+    ("QR transport — framing and hostile frames",
+     [sys.executable, "qr.py"]),
+    ("secure element driver — interface conformance",
+     [sys.executable, "se_atecc.py"]),
+    ("wallet — end to end, and every footgun we could name",
+     [sys.executable, "test_wallet.py"]),
     ("blood tier — 6 gates, 17 sample classes",
      [sys.executable, "calibrate.py", "selftest", "--n", "8"]),
     ("touch tier — 7 gates, 9 sample classes",
@@ -206,6 +236,33 @@ def docs_match_the_code() -> bool:
     return ok
 
 
+def schnorr_implementations_agree() -> bool:
+    """attest.py carries its own BIP-340 so it can be audited standalone.
+
+    Two copies of a signature scheme is a maintenance hazard: they can drift,
+    and the drift shows up as an attestation nobody can verify. This pins them
+    together, which is cheaper than merging them and keeps attest.py readable
+    on its own.
+    """
+    sys.path.insert(0, str(HERE))
+    import hashlib
+    import attest
+    import secp256k1
+
+    for i in range(8):
+        sk = hashlib.sha256(bytes([i])).digest()
+        msg = hashlib.sha256(b"agree" + bytes([i])).digest()
+        if attest.schnorr_pubkey(sk) != secp256k1.schnorr_pubkey(sk):
+            print("    the two BIP-340 implementations disagree on a pubkey")
+            return False
+        a = attest.schnorr_sign(msg, sk)
+        b = secp256k1.schnorr_sign(msg, sk)
+        if a != b or not secp256k1.schnorr_verify(msg, attest.schnorr_pubkey(sk), a):
+            print("    the two BIP-340 implementations disagree on a signature")
+            return False
+    return True
+
+
 def main() -> int:
     failures = []
     for name, cmd in SUITES:
@@ -214,38 +271,26 @@ def main() -> int:
         if r.returncode != 0:
             failures.append(name)
 
-    name = "calibration round trip — capture, sweep, load"
-    print(f"\n=== {name} " + "=" * max(0, 60 - len(name)))
-    try:
-        good = calibration_round_trip()
-    except Exception as e:                                   # noqa: BLE001
-        print(f"    raised {type(e).__name__}: {e}")
-        good = False
-    print("PASS" if good else "FAIL")
-    if not good:
-        failures.append(name)
-
-    name = "docs match the code — counts, record size, BOM totals"
-    print(f"\n=== {name} " + "=" * max(0, 60 - len(name)))
-    try:
-        good = docs_match_the_code()
-    except Exception as e:                                   # noqa: BLE001
-        print(f"    raised {type(e).__name__}: {e}")
-        good = False
-    print("PASS" if good else "FAIL")
-    if not good:
-        failures.append(name)
-
-    name = "touch calibration round trip — capture, sweep, load"
-    print(f"\n=== {name} " + "=" * max(0, 60 - len(name)))
-    try:
-        good = touch_calibration_round_trip()
-    except Exception as e:                                   # noqa: BLE001
-        print(f"    raised {type(e).__name__}: {e}")
-        good = False
-    print("PASS" if good else "FAIL")
-    if not good:
-        failures.append(name)
+    # The checks that need to run in-process rather than as a subprocess.
+    # Counted rather than hardcoded, so adding one cannot leave the summary
+    # line quietly claiming a number it no longer runs.
+    IN_PROCESS = [
+        ("BIP-340 — attest.py and secp256k1.py agree", schnorr_implementations_agree),
+        ("calibration round trip — capture, sweep, load", calibration_round_trip),
+        ("docs match the code — counts, record size, BOM totals", docs_match_the_code),
+        ("touch calibration round trip — capture, sweep, load",
+         touch_calibration_round_trip),
+    ]
+    for name, fn in IN_PROCESS:
+        print(f"\n=== {name} " + "=" * max(0, 60 - len(name)))
+        try:
+            good = fn()
+        except Exception as e:                               # noqa: BLE001
+            print(f"    raised {type(e).__name__}: {e}")
+            good = False
+        print("PASS" if good else "FAIL")
+        if not good:
+            failures.append(name)
 
     print("\n" + "=" * 66)
     if failures:
@@ -253,10 +298,13 @@ def main() -> int:
         for f in failures:
             print(f"  - {f}")
         return 1
-    print(f"PASS — {len(SUITES) + 3} suites.")
-    print("\nUnlock chain, gate logic, tier policy, attestation and the")
-    print("calibration round trip all verified. Sensing thresholds are")
-    print("calibrated to your hardware at first build — BUILD.md section 13.")
+    print(f"PASS — {len(SUITES) + len(IN_PROCESS)} suites.")
+    print("\nSigning stack, unlock chain, gate logic, tier policy,")
+    print("attestation and the calibration round trip all verified against")
+    print("published test vectors. Sensing thresholds are calibrated to your")
+    print("hardware at first build — BUILD.md section 13. The ATECC608B")
+    print("itself is unverified until you run `python3 firmware/se_atecc.py")
+    print("--probe` on a built device; VALIDATION.md tracks that.")
     return 0
 
 

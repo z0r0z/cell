@@ -13,11 +13,32 @@ samples. That step is part of the build, not a caveat about it.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — seven suites, no hardware required.
+`python firmware/run_tests.py` — nineteen suites, no hardware required.
+
+### The signing stack
+
+Every row here is checked against vectors published by someone else. A round
+trip against our own implementation proves nothing, so none of these are that.
 
 | Component | Method | Result |
 |---|---|---|
+| RIPEMD-160 | ISO reference vectors, incl. the 1 MB case | Byte-exact; also cross-checked against OpenSSL where available |
+| Keccak-256 | Published vectors, plus rate-boundary lengths | Byte-exact; asserted to differ from SHA3-256, which is the mistake that silently produces wrong Ethereum addresses |
+| ECDSA nonces | RFC 6979 secp256k1/SHA-256 vector | Byte-exact on both r and s |
+| ECDSA signatures | OpenSSL verification of our output | Accepted; low-S and low-R enforced across 24 signatures |
 | BIP-340 Schnorr | Published BIP-340 test vectors | Byte-exact match on pubkey and signature |
+| BIP-341 tweaks | Private and public tweak agreement | Same output key by both routes; key-path signature verifies |
+| BIP-39 | Official Trezor vectors, 12 and 24 words | Mnemonic and seed byte-exact at every length; wordlist SHA-256 verified on load |
+| BIP-32 | Official vectors 1, 2 and 5 | xprv and xpub byte-exact; invalid keys refused; hardened derivation impossible from an xpub |
+| bech32 / bech32m | BIP-173 and BIP-350, valid and invalid | All decode; wrong-variant checksums refused, which is the failure that burns taproot funds |
+| EIP-55 | Vectors from the EIP | Byte-exact; a single flipped case is rejected |
+| BIP-143 sighash | Published P2WPKH and P2SH-P2WPKH vectors | Byte-exact |
+| BIP-341 sighash | Differential against an independent implementation | Byte-exact; asserted to commit to every input's amount |
+| Transaction parsing | The block-170 mainnet transaction | Round trips byte for byte; txid matches the known value |
+| RLP | Yellow-paper vectors | Byte-exact; negative, boolean and float inputs refused |
+| EIP-1559 | Field-by-field differential | The digest changes if any of the seven signed fields changes |
+| Cross-implementation | `embit` and `eth-account`, during development | Signatures byte-identical across four Bitcoin script types and six EVM chains. Neither package is a dependency |
+| Two Schnorr copies | `attest.py` vs `secp256k1.py` | Pinned to agree on 8 keys, so the standalone copy in `attest.py` cannot drift |
 | Attestation record | Pack/unpack round trip | 238 bytes, exact |
 | Attestation rejection | 8 negative cases | Wrong transaction, replayed counter, unknown firmware, unregistered calibration, swapped gate measurements, wrong signer, forged signature, wrong tier — all refused |
 | Malformed input | 6 hostile inputs | Truncated, empty, bad magic, bad version, unknown tier, all-zero — all return a verdict, none raise |
@@ -37,8 +58,38 @@ samples. That step is part of the build, not a caveat about it.
 | Hostile captures | 9 malformed captures | Zeros, NaNs, negative counts, short speckle — each rejected at a named gate, none raise |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
 
-Interoperability against the BIP-340 vectors is the meaningful result there —
-a round trip against your own implementation proves nothing.
+### The wallet, end to end and under attack
+
+`firmware/test_wallet.py`. The first group proves it works; the rest are the
+ways hardware wallets have actually lost money, each written as a hostile
+input whose pass condition is a refusal.
+
+| Case | Result |
+|---|---|
+| Full unlock chain, 4 script types | p2wpkh, p2sh-p2wpkh, p2pkh, p2tr — signature verifies against the sighash; change recognised; attestation rides in the PSBT |
+| Fee inflation | A witness UTXO alone is refused for segwit v0; one that disagrees with the parent is refused; a parent with the wrong txid is refused |
+| Taproot exception | A witness UTXO alone IS accepted for p2tr, because BIP-341 covers every amount |
+| Change substitution | Change we cannot derive is shown as a WARNING with the address in full, never as "your wallet" |
+| Path lying | A real key quoted at a path that does not derive it is not treated as change; the correctly quoted version still is |
+| Sighash downgrade | NONE, SINGLE, ANYONECANPAY\|ALL, ANYONECANPAY\|NONE all refused; an explicit ALL accepted |
+| Unrenderable transactions | A batched payment and an OP_RETURN output both refused |
+| Nothing to sign | A PSBT holding none of our keys is refused rather than silently returning unchanged |
+| Malformed encodings | Truncated, trailing bytes, bad magic, duplicate map key, pre-signed unsigned transaction — all refused |
+| The seed at rest | A wrong PIN, a tampered blob and a foreign chip all fail closed, with one message for all three |
+| Ethereum | Recovers to the displayed sender; chain id, nonce and worst-case fee displayed; calldata and unnamed chains refused; the chain id changes the digest |
+| The gate still governs | A spend above the floor demands blood; a failed gate signs nothing; cancelling at the prompt signs nothing |
+
+Interoperability against published vectors is the meaningful result in both
+tables — a round trip against your own implementation proves nothing.
+
+## Written but unverified
+
+| Component | Why | How to verify |
+|---|---|---|
+| `firmware/se_atecc.py` | Needs the chip. The interface conformance runs in CI; nothing that touches I2C does | `python3 firmware/se_atecc.py --probe` on a built device |
+| `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
+| `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |
+| Attestation key custody | The ATECC608B signs NIST P-256 only, so the secp256k1 attestation scalar is derived from a chip secret and exists in RAM while signing, rather than never leaving the chip | Stated in `se_atecc.py`; switch `attest.py` to P-256 if you need the stronger property |
 
 ## Calibrated at first build
 
