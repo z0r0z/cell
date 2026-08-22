@@ -100,7 +100,7 @@ if not BTN:
 FAST = [ext(k) for k in objs if k.startswith('fastener_') and 'slot' not in k]
 
 # ---- svg helpers -------------------------------------------------------
-W, H = 1180, 1080
+W = 1180          # height is computed from the content, see the notes block
 S = 4.15
 o = []; A = o.append
 INK, DIM, RED, MUT, STEEL = '#D8D2C8', '#8A8B8F', '#B23A48', '#6F7178', '#9FA3A8'
@@ -123,14 +123,16 @@ def lead(x, y, tx, ty, txt, col=MUT, anchor='start'):
     dx = 4 if anchor == 'start' else -4
     A(f'<text x="{tx+dx:.1f}" y="{ty+3:.1f}" font-size="9" text-anchor="{anchor}" fill="{col}">{txt}</text>')
 
-A(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '
-  f'font-family="Helvetica Neue, Helvetica, Arial, sans-serif">')
-A(f'<rect width="{W}" height="{H}" fill="#0C0C0B"/>')
+# Placeholders. The canvas height is not known until the notes have been laid
+# out, and hard-coding it is how the last note ended up clipped off the bottom
+# when its text grew. Both are filled in at the end.
+A('')   # <svg>
+A('')   # background
 A(f'<text x="46" y="50" font-size="21" font-weight="200" letter-spacing="9" fill="{INK}">CELL — MECHANICAL</text>')
 A(f'<rect x="47" y="61" width="26" height="2" fill="{RED}"/>')
 A(f'<text x="46" y="82" font-size="10" letter-spacing="2" fill="{MUT}">Every dimension read from instrument.obj at generation time. Regenerate after any model change. Millimetres.</text>')
-A(f'<text x="{W-46}" y="50" text-anchor="end" font-size="10.5" letter-spacing="2.4" fill="{MUT}">{L:.1f} × {D:.1f} × {HT:.1f}</text>')
-A(f'<text x="{W-46}" y="68" text-anchor="end" font-size="10.5" letter-spacing="2.4" fill="{MUT}">{len(objs)} objects · {len(V):,} verts</text>')
+A(f'<text x="{W-64}" y="50" text-anchor="end" font-size="10.5" letter-spacing="1.8" fill="{MUT}">{L:.1f} × {D:.1f} × {HT:.1f}</text>')
+A(f'<text x="{W-64}" y="68" text-anchor="end" font-size="10.5" letter-spacing="1.8" fill="{MUT}">{len(objs)} objects · {len(V):,} verts</text>')
 
 # ================= TOP =================================================
 TX, TY = 128, 138
@@ -170,11 +172,24 @@ A(f'<rect x="{tx(bl[0]):.1f}" y="{tz(bl[2]):.1f}" width="{(bh[0]-bl[0])*S:.1f}" 
 
 dim_h(tx(lo[0]), tx(hi[0]), tz(lo[2])-16, f'{L:.1f}')
 dim_v(tz(lo[2]), tz(hi[2]), tx(lo[0])-14, f'{D:.1f}')
-lead(tx(DISH_C[0])+DISH_R*S*0.72, tz(DISH_C[1])-DISH_R*S*0.72, tx(hi[0])+34, tz(lo[2])+16, f'dish Ø{DISH_R*2:.1f} × {DECK_Y-RECESS_Y:.1f} deep')
-lead(tx(RING_C[0])+RING_OD/2*S, tz(RING_C[1]), tx(hi[0])+34, tz(lo[2])+40, f'ring Ø{RING_OD:.1f}/Ø{RING_ID:.1f}, {RING_H:.1f} proud')
-lead(tx(DISH_C[0]), tz(DISH_C[1]-TICK_R), tx(hi[0])+34, tz(lo[2])+64, f'{N_TICK} ticks @ R{TICK_R:.1f}, every 5th steel')
-lead(tx(sh[0]), tz((sl[2]+sh[2])/2), tx(hi[0])+34, tz(lo[2])+88, f'sample slot {sh[0]-sl[0]:.1f} × {sh[1]-sl[1]:.1f}, front')
-lead(tx(bh[0]), tz((bl[2]+bh[2])/2), tx(hi[0])+34, tz(lo[2])+112, f'compute bay {bh[0]-bl[0]:.0f} × {bh[1]-bl[1]:.0f}, rear')
+# Label rows are assigned in order of how high each feature sits in the view,
+# so leader lines fan out instead of crossing. Ordering them by hand is what
+# put the rear-bay leader — anchored at the very back — on the bottom row,
+# raking its line across every other leader on the way there.
+top_leads = sorted([
+    (tx(DISH_C[0])+DISH_R*S*0.72, tz(DISH_C[1])-DISH_R*S*0.72,
+     f'dish Ø{DISH_R*2:.1f} × {DECK_Y-RECESS_Y:.1f} deep'),
+    (tx(RING_C[0])+RING_OD/2*S, tz(RING_C[1]),
+     f'ring Ø{RING_OD:.1f}/Ø{RING_ID:.1f}, {RING_H:.1f} proud'),
+    (tx(DISH_C[0]), tz(DISH_C[1]-TICK_R),
+     f'{N_TICK} ticks @ R{TICK_R:.1f}, every 5th steel'),
+    (tx(sh[0]), tz((sl[2]+sh[2])/2),
+     f'sample slot {sh[0]-sl[0]:.1f} × {sh[1]-sl[1]:.1f}, front'),
+    (tx(bh[0]), tz((bl[2]+bh[2])/2),
+     f'compute bay {bh[0]-bl[0]:.0f} × {bh[1]-bl[1]:.0f}, rear'),
+], key=lambda t: t[1])
+for i, (ax, ay, txt) in enumerate(top_leads):
+    lead(ax, ay, tx(hi[0])+34, tz(lo[2])+16 + 24*i, txt)
 # left-half features get a legend row instead of leaders that would cross the dish
 LGY = tz(hi[2]) + 26
 A(f'<text x="{tx(lo[0]):.1f}" y="{LGY:.0f}" font-size="9.5" fill="{MUT}">'
@@ -229,18 +244,30 @@ A(f'<line x1="46" y1="{NY-18:.0f}" x2="{W-46}" y2="{NY-18:.0f}" stroke="#22242A"
 A(f'<text x="46" y="{NY:.0f}" font-size="10" letter-spacing="3" fill="{MUT}">THREE THINGS THE MODEL DOES NOT SAY</text>')
 notes = [
     ('Vents must be blind pockets.', f'{N_VENT} slots on the front face, {vh[2]-vl[2]:.1f} deep. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate fails. Print them blind and verify with the light-tightness test.'),
-    ('The pad is reserved, not fitted.', f'{ph[0]-pl[0]:.1f} × {ph[2]-pl[2]:.1f} recess for the optional fingerprint sensor. The base build leaves it blank — the PIN does identity. Print it flat if you are not fitting one.'),
+    ('The pad is reserved, not fitted.', f'{ph[0]-pl[0]:.1f} × {ph[2]-pl[2]:.1f} printed marking sizing the optional fingerprint sensor. Deliberately flat, not a pocket: an unpopulated recess on the deck collects blood. The base build leaves it blank — the PIN does identity.'),
     ('The dish is the reader, not a dial.', 'The ring is a bezel, not a control. Nothing rotates. The cartridge enters through the front slot and sits under the dish.'),
 ]
-for i, (h, b) in enumerate(notes):
-    y = NY + 24 + i*44
+# Wrap to the full page width, and let each note take the height it needs.
+# The previous fixed 44 px pitch silently assumed every body fitted in two
+# lines; a longer one overran the note below it and then the canvas.
+WRAP = int((W - 92) / 5.05)      # ~5.05 px per char at font-size 9.5
+y = NY + 24
+for h, b in notes:
     A(f'<text x="46" y="{y:.0f}" font-size="11" fill="{INK}">{h}</text>')
-    words = b.split(); lines = ['']
-    for w in words:
-        if len(lines[-1]) + len(w) > 118: lines.append('')
+    lines = ['']
+    for w in b.split():
+        if len(lines[-1]) + len(w) > WRAP:
+            lines.append('')
         lines[-1] += w + ' '
     for j, ln in enumerate(lines):
         A(f'<text x="46" y="{y+16+j*14:.0f}" font-size="9.5" fill="{MUT}">{ln.strip()}</text>')
+    y += 16 + len(lines)*14 + 16
+
+H = int(y + 20)
+o[0] = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
+        f'width="{W}" height="{H}" '
+        f'font-family="Helvetica Neue, Helvetica, Arial, sans-serif">')
+o[1] = f'<rect width="{W}" height="{H}" fill="#0C0C0B"/>'
 
 A('</svg>')
 OUT.write_text('\n'.join(o))

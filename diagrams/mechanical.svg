@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 1080" width="1180" height="1080" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
-<rect width="1180" height="1080" fill="#0C0C0B"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 1128" width="1180" height="1128" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+<rect width="1180" height="1128" fill="#0C0C0B"/>
 <text x="46" y="50" font-size="21" font-weight="200" letter-spacing="9" fill="#D8D2C8">CELL — MECHANICAL</text>
 <rect x="47" y="61" width="26" height="2" fill="#B23A48"/>
 <text x="46" y="82" font-size="10" letter-spacing="2" fill="#6F7178">Every dimension read from instrument.obj at generation time. Regenerate after any model change. Millimetres.</text>
-<text x="1134" y="50" text-anchor="end" font-size="10.5" letter-spacing="2.4" fill="#6F7178">116.2 × 73.2 × 28.3</text>
-<text x="1134" y="68" text-anchor="end" font-size="10.5" letter-spacing="2.4" fill="#6F7178">99 objects · 295,366 verts</text>
+<text x="1116" y="50" text-anchor="end" font-size="10.5" letter-spacing="1.8" fill="#6F7178">116.2 × 73.2 × 28.3</text>
+<text x="1116" y="68" text-anchor="end" font-size="10.5" letter-spacing="1.8" fill="#6F7178">99 objects · 295,366 verts</text>
 <text x="46" y="122" font-size="10" letter-spacing="3" fill="#6F7178">TOP</text>
 <rect x="128.0" y="138.0" width="482.2" height="303.8" rx="12.5" fill="#121211" stroke="#8A8B8F" stroke-width="0.9"/>
 <circle cx="487.4" cy="310.6" r="97.9" fill="#171514" stroke="#8A8B8F" stroke-width="0.8"/>
@@ -87,21 +87,21 @@
 <line x1="111.0" y1="138.0" x2="117.0" y2="138.0" stroke="#8A8B8F" stroke-width="0.7"/>
 <line x1="111.0" y1="441.8" x2="117.0" y2="441.8" stroke="#8A8B8F" stroke-width="0.7"/>
 <text x="109.0" y="292.9" font-size="9.5" text-anchor="end" fill="#8A8B8F">73.2</text>
-<path d="M557.9,240.1 L644.2,154.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
-<circle cx="557.9" cy="240.1" r="1.3" fill="#6F7178"/>
-<text x="648.2" y="157.0" font-size="9" text-anchor="start" fill="#6F7178">dish Ø47.2 × 2.0 deep</text>
-<path d="M517.3,310.6 L644.2,178.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
-<circle cx="517.3" cy="310.6" r="1.3" fill="#6F7178"/>
-<text x="648.2" y="181.0" font-size="9" text-anchor="start" fill="#6F7178">ring Ø14.4/Ø9.8, 1.5 proud</text>
-<path d="M487.4,222.7 L644.2,202.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
-<circle cx="487.4" cy="222.7" r="1.3" fill="#6F7178"/>
-<text x="648.2" y="205.0" font-size="9" text-anchor="start" fill="#6F7178">60 ticks @ R21.2, every 5th steel</text>
-<path d="M557.9,430.8 L644.2,226.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
-<circle cx="557.9" cy="430.8" r="1.3" fill="#6F7178"/>
-<text x="648.2" y="229.0" font-size="9" text-anchor="start" fill="#6F7178">sample slot 34.0 × 3.0, front</text>
-<path d="M518.5,146.9 L644.2,250.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
+<path d="M518.5,146.9 L644.2,154.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
 <circle cx="518.5" cy="146.9" r="1.3" fill="#6F7178"/>
-<text x="648.2" y="253.0" font-size="9" text-anchor="start" fill="#6F7178">compute bay 72 × 16, rear</text>
+<text x="648.2" y="157.0" font-size="9" text-anchor="start" fill="#6F7178">compute bay 72 × 16, rear</text>
+<path d="M487.4,222.7 L644.2,178.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
+<circle cx="487.4" cy="222.7" r="1.3" fill="#6F7178"/>
+<text x="648.2" y="181.0" font-size="9" text-anchor="start" fill="#6F7178">60 ticks @ R21.2, every 5th steel</text>
+<path d="M557.9,240.1 L644.2,202.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
+<circle cx="557.9" cy="240.1" r="1.3" fill="#6F7178"/>
+<text x="648.2" y="205.0" font-size="9" text-anchor="start" fill="#6F7178">dish Ø47.2 × 2.0 deep</text>
+<path d="M517.3,310.6 L644.2,226.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
+<circle cx="517.3" cy="310.6" r="1.3" fill="#6F7178"/>
+<text x="648.2" y="229.0" font-size="9" text-anchor="start" fill="#6F7178">ring Ø14.4/Ø9.8, 1.5 proud</text>
+<path d="M557.9,430.8 L644.2,250.0" stroke="#6F7178" stroke-width="0.6" fill="none"/>
+<circle cx="557.9" cy="430.8" r="1.3" fill="#6F7178"/>
+<text x="648.2" y="253.0" font-size="9" text-anchor="start" fill="#6F7178">sample slot 34.0 × 3.0, front</text>
 <text x="128.0" y="468" font-size="9.5" fill="#6F7178">display 49.7 × 37.7  ·  buttons Ø5.8, <tspan fill="#B23A48">CONFIRM Ø8.6</tspan>  ·  pad 24.0 × 12.0 <tspan fill="#6F7178">(reserved, print flat)</tspan></text>
 <text x="46" y="544" font-size="10" letter-spacing="3" fill="#6F7178">FRONT</text>
 <rect x="128.0" y="559.8" width="482.2" height="117.5" rx="12.5" fill="#121211" stroke="#8A8B8F" stroke-width="0.9"/>
@@ -159,12 +159,9 @@
 <line x1="46" y1="929" x2="1134" y2="929" stroke="#22242A" stroke-width="1"/>
 <text x="46" y="947" font-size="10" letter-spacing="3" fill="#6F7178">THREE THINGS THE MODEL DOES NOT SAY</text>
 <text x="46" y="971" font-size="11" fill="#D8D2C8">Vents must be blind pockets.</text>
-<text x="46" y="987" font-size="9.5" fill="#6F7178">15 slots on the front face, 3.0 deep. If any becomes a through-hole, ambient light reaches the optical chamber and the</text>
-<text x="46" y="1001" font-size="9.5" fill="#6F7178">415 nm gate fails. Print them blind and verify with the light-tightness test.</text>
-<text x="46" y="1015" font-size="11" fill="#D8D2C8">The pad is reserved, not fitted.</text>
-<text x="46" y="1031" font-size="9.5" fill="#6F7178">24.0 × 12.0 recess for the optional fingerprint sensor. The base build leaves it blank — the PIN does identity. Print</text>
-<text x="46" y="1045" font-size="9.5" fill="#6F7178">it flat if you are not fitting one.</text>
-<text x="46" y="1059" font-size="11" fill="#D8D2C8">The dish is the reader, not a dial.</text>
-<text x="46" y="1075" font-size="9.5" fill="#6F7178">The ring is a bezel, not a control. Nothing rotates. The cartridge enters through the front slot and sits under the</text>
-<text x="46" y="1089" font-size="9.5" fill="#6F7178">dish.</text>
+<text x="46" y="987" font-size="9.5" fill="#6F7178">15 slots on the front face, 3.0 deep. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate fails. Print them blind and verify with the light-tightness test.</text>
+<text x="46" y="1017" font-size="11" fill="#D8D2C8">The pad is reserved, not fitted.</text>
+<text x="46" y="1033" font-size="9.5" fill="#6F7178">24.0 × 12.0 printed marking sizing the optional fingerprint sensor. Deliberately flat, not a pocket: an unpopulated recess on the deck collects blood. The base build leaves it blank — the PIN does identity.</text>
+<text x="46" y="1063" font-size="11" fill="#D8D2C8">The dish is the reader, not a dial.</text>
+<text x="46" y="1079" font-size="9.5" fill="#6F7178">The ring is a bezel, not a control. Nothing rotates. The cartridge enters through the front slot and sits under the dish.</text>
 </svg>
