@@ -227,6 +227,28 @@ def run() -> int:
                       "destination": "bc1qgood0000"})
     check("parser accepts a well-formed spend", isinstance(good, ops.BitcoinSpend))
 
+    # multisig context, matching what the industrial-design mockup shows
+    ms = ops.BitcoinSpend(amount_sats=41_800_000, fee_sats=12_000,
+                          destination="bc1q4m8z9xkt7fk3p2vq8dl4r6nwe5ta9c0hjuxsqz",
+                          quorum_needed=2, quorum_size=3, signatures_present=1)
+    ml = ops.render_for_display(ms)
+    check("multisig threshold shown", any("MULTISIG 2 of 3" in l for l in ml))
+    check("signer position shown", any("signature 2 of 2" in l for l in ml))
+    for label, bad in [
+        ("needed above size", dict(quorum_needed=4, quorum_size=3)),
+        ("zero needed", dict(quorum_needed=0, quorum_size=3)),
+        ("more sigs than signers",
+         dict(quorum_needed=2, quorum_size=3, signatures_present=3)),
+    ]:
+        try:
+            ops.BitcoinSpend(amount_sats=1, fee_sats=1, destination="bc1q",
+                             **bad).render()
+            check(f"refuses nonsensical quorum: {label}", False)
+        except ops.UnrenderableOperation:
+            check(f"refuses nonsensical quorum: {label}", True)
+    check("no multisig lines when not multisig",
+          not any("MULTISIG" in l for l in spend.render()))
+
     # unverified change must be shown as a warning, never folded away
     ch = ops.BitcoinSpend(amount_sats=1000, fee_sats=10, destination="bc1qdest0",
                           change_sats=500, change_address="bc1qunknown",

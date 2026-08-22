@@ -20,6 +20,7 @@ Requires Chrome or Chromium, and network access for the pinned three.js CDN.
 from __future__ import annotations
 
 import argparse
+import atexit
 import http.server
 import json
 import shutil
@@ -103,7 +104,11 @@ def main() -> int:
         sys.exit("No Chrome or Chromium found. Install one, or export by hand "
                  "from viewer/instrument.html.")
 
-    work = Path(tempfile.mkdtemp())
+    # Registered before anything can fail: a timed-out export otherwise
+    # leaves a Chrome profile behind, and enough of those fill a disk.
+    work = Path(tempfile.mkdtemp(prefix="cell-chrome-"))
+    atexit.register(shutil.rmtree, work, True)
+    atexit.register((VIEWER / "__export.html").unlink, True)
     (VIEWER / "__export.html").write_text(EXPORT_HTML)
     captured: dict[str, bytes] = {}
     done = threading.Event()

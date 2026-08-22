@@ -16,9 +16,11 @@ banding into mud, which is the usual way a product GIF goes wrong.
 from __future__ import annotations
 
 import argparse
+import atexit
 import base64
 import http.server
 import shutil
+import signal
 import socketserver
 import subprocess
 import sys
@@ -52,7 +54,7 @@ PAGE = """<!DOCTYPE html>
 <script src="./three-d-stage.js"></script>
 <script type="module">
 const SIZE = %(size)d, FRAMES = %(frames)d, ELEV = %(elev)f, GAIN = %(gain)f;
-const TILT = %(tilt)f;
+const TILT_MAX = %(tilt)f, TILT_MIN = %(tilt_min)f, SS = %(ss)f;
 
 async function post(path, body, kind) {
   await fetch(path, {method:'POST', headers: kind ? {'X-Frame': kind} : {}, body});
@@ -72,7 +74,7 @@ async function run() {
   // Stop the stage driving its own loop; we step the camera by hand.
   renderer.setAnimationLoop(null);
   controls.autoRotate = false;
-  renderer.setPixelRatio(2);          // supersample, then let ffmpeg downscale
+  renderer.setPixelRatio(SS);         // supersample, then let ffmpeg downscale
   renderer.setSize(SIZE, SIZE, false);
   cam.aspect = 1; cam.updateProjectionMatrix();
 
@@ -114,9 +116,20 @@ async function run() {
 
   const yaw = new mod.Group();
   yaw.rotation.y = az;                     // local +Z now points at the camera
-  const tilt = new mod.Group();
-  tilt.rotation.x = (TILT * Math.PI) / 180; // +X rotation tips +Y toward +Z
+  const tilt = new mod.Group();            // +X rotation tips +Y toward +Z
   const spin = new mod.Group();
+
+  // The tilt ANIMATES, phased to the spin. The deck carries the screen and the
+  // screen only reads upright once per revolution, so the lean peaks exactly
+  // there — the object presents its face when the face is worth reading, and
+  // relaxes to a low profile through the back half where the silhouette and
+  // the cartridge slot are what there is to see. A fixed tilt has to choose
+  // between those two and gets neither.
+  const tiltAt = (t) => {
+    const a = t * Math.PI * 2;             // 0 = screen upright toward camera
+    const k = 0.5 + 0.5 * Math.cos(a);     // 1 at the readable position, 0 opposite
+    return ((TILT_MIN + (TILT_MAX - TILT_MIN) * k) * Math.PI) / 180;
+  };
   obj.parent.add(yaw);
   yaw.position.copy(centre);
   yaw.add(tilt); tilt.add(spin);
@@ -132,12 +145,15 @@ async function run() {
   controls.target.copy(centre);
   cam.updateProjectionMatrix();
 
-  // Tilting swings corners below the shadow plane. Find the lowest point over
-  // a whole revolution and lift the rig once, so the contact shadow still
-  // reads and nothing ever sinks through the floor mid-spin.
+  // Tilting swings corners below the shadow plane, and the tilt now varies, so
+  // the sweep has to cover the actual (spin, tilt) pairs the animation uses.
+  // Lift once, by the worst case, so the contact shadow stays put instead of
+  // the object pumping up and down against the floor.
   let minY = Infinity;
-  for (let i = 0; i < 36; i++) {
-    spin.rotation.y = (i / 36) * Math.PI * 2;
+  for (let i = 0; i < 72; i++) {
+    const t = i / 72;
+    spin.rotation.y = t * Math.PI * 2;
+    tilt.rotation.x = tiltAt(t);
     yaw.updateMatrixWorld(true);
     minY = Math.min(minY, new mod.Box3().setFromObject(obj).min.y);
   }
@@ -145,7 +161,9 @@ async function run() {
   yaw.updateMatrixWorld(true);
 
   for (let i = 0; i < FRAMES; i++) {
-    spin.rotation.y = (i / FRAMES) * Math.PI * 2;
+    const t = i / FRAMES;
+    spin.rotation.y = t * Math.PI * 2;
+    tilt.rotation.x = tiltAt(t);
     yaw.updateMatrixWorld(true);
     renderer.render(scene, cam);
     // toDataURL in the same task as render(), before the compositor swaps.
@@ -173,15 +191,25 @@ def main() -> int:
                     help="camera elevation, degrees. High enough to read the "
                          "screen and the ring, which are the two things worth "
                          "seeing.")
-    ap.add_argument("--tilt", type=float, default=0.0,
-                    help="tip the deck toward the lens, degrees. Applied "
-                         "outside the spin, so the deck holds a constant angle "
-                         "for the whole revolution instead of tumbling away. "
-                         "Only useful with a low --elev.")
+    ap.add_argument("--tilt", type=float, default=30.0,
+                    help="MAXIMUM lean toward the lens, degrees, reached when "
+                         "the screen is upright and facing the camera.")
+    ap.add_argument("--tilt-min", type=float, default=4.0,
+                    help="minimum lean, reached on the far side of the "
+                         "revolution where the silhouette is the subject. "
+                         "Set equal to --tilt for a fixed lean.")
     ap.add_argument("--gain", type=float, default=1.22,
                 help="studio lighting multiplier. The shell is black PETG by "
                      "design; too much here turns it silver and loses the identity.")
-    ap.add_argument("--gif-size", type=int, default=460,
+    ap.add_argument("--supersample", type=float, default=2.0,
+                    help="render scale before downsampling. 2.0 is crisp but "
+                         "doubles render time and on-disk frame size; 1.5 is "
+                         "close and much cheaper on a long spin.")
+    ap.add_argument("--gif-fps", type=int, default=15,
+                    help="GIF frame rate. Lower than the MP4 on purpose: a "
+                         "slow spin needs a long duration, and every GIF frame "
+                         "is a full 256-colour image.")
+    ap.add_argument("--gif-size", type=int, default=440,
                     help="GIF width. Kept below --size on purpose: a 256-colour "
                          "GIF of a long slow spin gets large fast, and the MP4 "
                          "is the one worth posting anyway.")
@@ -195,11 +223,25 @@ def main() -> int:
     if not chrome:
         sys.exit("No Chrome or Chromium found.")
 
-    frames_dir = Path(tempfile.mkdtemp())
-    profile = Path(tempfile.mkdtemp())
+    # Frames are large (one PNG per frame at 2x supersampling) and a failed
+    # or timed-out run used to leave the whole directory behind. A handful of
+    # aborted renders is enough to fill a disk, so cleanup is registered
+    # before anything can fail.
+    frames_dir = Path(tempfile.mkdtemp(prefix="cell-frames-"))
+    profile = Path(tempfile.mkdtemp(prefix="cell-chrome-"))
+    atexit.register(shutil.rmtree, frames_dir, True)
+    atexit.register(shutil.rmtree, profile, True)
+    atexit.register((VIEWER / "__turntable.html").unlink, True)
+    # atexit does NOT run on SIGTERM, which is exactly how a long render dies
+    # when something times it out — the case that leaks most.
+    def _bail(signum, _frame):
+        sys.exit(128 + signum)
+    for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(_sig, _bail)
     (VIEWER / "__turntable.html").write_text(
         PAGE % {"size": args.size, "frames": args.frames, "elev": args.elev,
-                "gain": args.gain, "tilt": args.tilt})
+                "gain": args.gain, "tilt": args.tilt,
+                "tilt_min": args.tilt_min, "ss": args.supersample})
     done = threading.Event()
     status = {"msg": "timed out"}
     count = {"n": 0}
@@ -255,7 +297,7 @@ def main() -> int:
     pal = frames_dir / "palette.png"
     # One global palette over every frame. A per-frame palette makes a dark,
     # softly-shaded body shimmer as the quantiser changes its mind each frame.
-    vf = (f"fps={args.fps},scale={args.gif_size}:-1:flags=lanczos,"
+    vf = (f"fps={args.gif_fps},scale={args.gif_size}:-1:flags=lanczos,"
           f"format=rgb24")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
                     "-framerate", str(args.fps), "-i", str(frames_dir / "f%04d.png"),

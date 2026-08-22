@@ -133,6 +133,16 @@ class BitcoinSpend:
     change_sats: int = 0
     change_address: str = ""
     change_is_ours: bool = True
+    # Multisig context, when the input is an m-of-n script. `quorum_needed`
+    # and `quorum_size` come from the witness script and are trustworthy.
+    # `signatures_present` is counted from the partial signatures already in
+    # the PSBT, which the HOST assembled — so it is shown as progress and is
+    # never a security control. What actually establishes that a quorum signed
+    # at blood tier is attest.verify_quorum(), run by the coordinator against
+    # registered keys. See BUILD.md section 4.
+    quorum_needed: int = 0
+    quorum_size: int = 0
+    signatures_present: int = 0
 
     def op_class(self) -> str:
         return "tx.send"
@@ -160,6 +170,16 @@ class BitcoinSpend:
                 lines.append("           wallet cannot prove it owns:")
                 lines += wrap_full(self.change_address or "(none given)", DISPLAY_COLS)
         lines.append(f"  TOTAL    {format_btc(self.amount_sats + self.fee_sats)}")
+        if self.quorum_size:
+            if not 1 <= self.quorum_needed <= self.quorum_size:
+                raise UnrenderableOperation(
+                    f"nonsensical quorum {self.quorum_needed}/{self.quorum_size}")
+            if not 0 <= self.signatures_present < self.quorum_size:
+                raise UnrenderableOperation(
+                    f"impossible signature count {self.signatures_present}")
+            lines.append(f"  MULTISIG {self.quorum_needed} of {self.quorum_size}")
+            lines.append(f"  YOU ARE  signature "
+                         f"{self.signatures_present + 1} of {self.quorum_needed}")
         return lines
 
 
