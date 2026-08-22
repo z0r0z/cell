@@ -87,5 +87,5 @@
   <text x="530" y="778" font-size="11" fill="#8A8B8F">A camera watches for ten minutes.</text>
 
   <rect x="48" y="812" width="904" height="34" rx="5" fill="#1A1013" stroke="#B23A48" stroke-width="1.6"/>
-  <text x="70" y="834" font-size="12.5" fill="#D8D2C8">Only fresh blood <tspan fill="#C9707A">starts moving</tspan> and then <tspan fill="#C9707A">stops</tspan>. Anticoagulated blood never stops. Syrup never started.</text>
+  <text x="70" y="834" font-size="12.5" fill="#D8D2C8">Blood you can store has been anticoagulated, so it <tspan fill="#C9707A">never clots</tspan>. Blood that wasn't has <tspan fill="#C9707A">already clotted</tspan>.</text>
 </svg>
