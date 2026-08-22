@@ -1,6 +1,6 @@
 # CELL — Build Specification
 
-Rev 0.5. Single device, $90.50 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
+Rev 0.8. Single device, $90.50 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
 
 The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm — and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
@@ -642,6 +642,46 @@ A PSBT is a document written by software the device does not trust. `firmware/ps
 - **The sighash flag.** SIGHASH_ALL only. Every other flag lets someone change part of the transaction after the owner approved it.
 
 `firmware/test_wallet.py` runs each of these as an attack and requires a refusal.
+
+### Multisig has to be registered first
+
+The device refuses a multisig input belonging to a quorum it has not been told about, and will not call a multisig output change unless the whole quorum rebuilds it. Register the co-signers once, on every device in the quorum:
+
+```bash
+python3 tools/provision.py show --dir /boot/cell        # your line, to send out
+python3 tools/provision.py multisig --dir /boot/cell \
+    --label family --threshold 2 --cosigners cosigners.txt
+```
+
+The file is one co-signer per line — `label fingerprint path xpub` — and it must include this device. BIP-48 paths (`m/48'/coin'/account'/2'` native, `.../1'` p2sh-wrapped) are derived at provisioning whether or not you ever use them, so getting your own xpub does not mean re-opening a sealed case.
+
+**Why the ceremony.** Without the co-signers on file, the only question the device can answer is "does this script contain a key of mine?". A coordinator under an attacker's control can build a script holding exactly one key of yours and n-1 of theirs: it hashes correctly, the wallet calls it change, and the balance moves to an address you cannot spend without them. With the quorum registered the question becomes "does this equal the script my co-signers produce at the path it claims?", which is arithmetic. BIP-67 key ordering is recorded rather than guessed, because the wrong choice produces a different address instead of an error.
+
+### Both PSBT dialects
+
+The device reads BIP-174 version 0 and BIP-370 version 2, and hands back whichever it was given — a v2 PSBT that came back as v0 is one a coordinator may not be able to finalise. Version 2 is rebuilt into the transaction its scattered fields describe and then verified by exactly the same code, so there is one set of rules about amounts, change and sighashes rather than two that could drift apart.
+
+### What it still will not sign
+
+- **Taproot script-path spends.** The device holds no leaf scripts and could not render one, so an input whose output key is not the tweak of a key it derives is refused. Key-path spends are fully supported.
+- **More than one destination per Bitcoin transaction**, for the reason in section 5.
+- **Any calldata on Ethereum.**
+
+### The screen and the buttons
+
+`app.py` is the loop the owner actually meets, and it is written against protocols — `Display`, `Buttons`, `Camera` — so the whole thing can be driven on a laptop with fakes. `test_app.py` does that, and asserts the ordering the design rests on: the transaction is shown before the PIN is asked for, the PIN before the gate, the gate before anything is unwrapped.
+
+| Part | Driver | Notes |
+|---|---|---|
+| ST7789 240×240 | `display.py` | 40 columns × 20 rows at 6×12. The layout limits are enforced again at paint time, on the exact lines being painted |
+| Four buttons | `buttons.py` | CONFIRM on GPIO26, its own RC debounce, sharing no bus. A press that arrives faster than a screen can be read is ignored, and the queue is drained before consent is asked for |
+| USB webcam | `camera.py` | The CSI port belongs to the speckle path. QR decoding tolerates auto-exposure; the correlation measurement does not |
+
+Run it dry, without any of that hardware:
+
+```bash
+python3 firmware/app.py --dir /boot/cell --console
+```
 
 ### Provisioning
 

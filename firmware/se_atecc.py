@@ -74,8 +74,17 @@ class ATECC608B(SecureElement):
 
     IS_SECURE = True
 
-    def __init__(self, bus: int = 1, address: int = I2C_ADDRESS):
-        cal = _lib()
+    def __init__(self, bus: int = 1, address: int = I2C_ADDRESS, lib=None):
+        """`lib` overrides cryptoauthlib, so the logic can be tested.
+
+        The chip cannot be attached to CI, but the arithmetic around it can be:
+        the attempt budget, the baseline that survives a power cut, the
+        single-use KDF, the refusal to run against an unlocked chip. Those are
+        the parts most likely to be subtly wrong, and a fake transport lets
+        them be exercised. It proves nothing about the silicon — see
+        VALIDATION.md — but a bug found here is a bug not found in the field.
+        """
+        cal = lib if lib is not None else _lib()
         cfg = cal.cfg_ateccx08a_i2c_default()
         cfg.cfg.atcai2c.bus = bus
         cfg.cfg.atcai2c.slave_address = address << 1

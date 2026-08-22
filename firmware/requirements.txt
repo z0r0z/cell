@@ -12,8 +12,17 @@ cryptography>=41.0
 # party dependency, and is checked against the published test vectors by
 # run_tests.py.
 
-# Device only, Raspberry Pi. Uncomment when building hardware.py.
+# Device only, Raspberry Pi. Uncomment when building the hardware.
+# Sensors and the secure element:
 # adafruit-blinka
 # adafruit-circuitpython-as7341
 # picamera2
 # cryptoauthlib
+#
+# The screen, the buttons and the QR camera. Everything above these runs
+# against protocols, so the firmware and its tests work without them.
+# adafruit-circuitpython-rgb-display
+# pillow
+# qrcode
+# gpiozero
+# opencv-python

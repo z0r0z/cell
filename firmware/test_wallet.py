@@ -155,6 +155,131 @@ def build_psbt(root: ExtendedKey, script_type: str, *,
     return p.serialize()
 
 
+
+
+def to_v2(blob: bytes) -> bytes:
+    """Re-express a version 0 PSBT as BIP-370 version 2.
+
+    Test scaffolding. The device reads both dialects and must reach the same
+    conclusions about either, which is exactly what makes converting a PSBT we
+    already have assertions about the useful thing to do here.
+    """
+    p = PSBT.parse(blob)
+    out = PSBT(p.tx)
+    out.globals = {k: v for k, v in p.globals.items()
+                   if k != _kv(psbtmod.GLOBAL_UNSIGNED_TX)}
+    out.globals[_kv(psbtmod.GLOBAL_VERSION)] = (2).to_bytes(4, "little")
+    out.globals[_kv(psbtmod.GLOBAL_TX_VERSION)] = p.tx.version.to_bytes(4, "little")
+    out.globals[_kv(psbtmod.GLOBAL_FALLBACK_LOCKTIME)] = \
+        p.tx.locktime.to_bytes(4, "little")
+    out.globals[_kv(psbtmod.GLOBAL_INPUT_COUNT)] = ser_compact(len(p.tx.vin))
+    out.globals[_kv(psbtmod.GLOBAL_OUTPUT_COUNT)] = ser_compact(len(p.tx.vout))
+    out.inputs = [dict(m) for m in p.inputs]
+    out.outputs = [dict(m) for m in p.outputs]
+    for m, vin in zip(out.inputs, p.tx.vin):
+        m[_kv(psbtmod.IN_PREVIOUS_TXID)] = vin.txid
+        m[_kv(psbtmod.IN_OUTPUT_INDEX)] = vin.vout.to_bytes(4, "little")
+        m[_kv(psbtmod.IN_SEQUENCE)] = vin.sequence.to_bytes(4, "little")
+    for m, vout in zip(out.outputs, p.tx.vout):
+        m[_kv(psbtmod.OUT_AMOUNT)] = vout.value.to_bytes(8, "little")
+        m[_kv(psbtmod.OUT_SCRIPT)] = vout.script_pubkey
+    return out.serialize()
+
+
+# --------------------------------------------------------------------------
+# Multisig scaffolding
+# --------------------------------------------------------------------------
+
+COSIGNER_WORDS = [
+    bip39.entropy_to_mnemonic(bytes([n]) * 16) for n in (0x21, 0x22, 0x23)
+]
+
+
+def multisig_parts(ours: ExtendedKey, n_others: int = 2, threshold: int = 2,
+                   wrapped: bool = False, network: str = "mainnet"):
+    """Our device plus n co-signers, as the wallet layer would record them."""
+    st = "multisig-p2sh-p2wsh" if wrapped else "multisig-p2wsh"
+    path = wallet.multisig_account_path(st, 0, network)
+    members = [(ours, path)]
+    for w in COSIGNER_WORDS[:n_others]:
+        members.append((bip32.from_mnemonic(w), path))
+    cosigners = [
+        wallet.CoSigner(label=f"signer{i}", fingerprint=root.fingerprint().hex(),
+                        path=pth, xpub=root.derive(pth).neutered().serialize("xpub"))
+        for i, (root, pth) in enumerate(members)]
+    ms = wallet.Multisig(label="family", threshold=threshold, cosigners=cosigners,
+                         sorted_keys=True, wrapped=wrapped, network=network)
+    return ms, members
+
+
+def multisig_script_at(ms, members, branch: int, index: int,
+                       swap: ExtendedKey | None = None,
+                       sorted_keys: bool | None = None) -> tuple[bytes, list]:
+    """The witness script for one address, and the (pubkey, path) pairs."""
+    pairs = []
+    for i, (root_, pth) in enumerate(members):
+        src = swap if (swap is not None and i == len(members) - 1) else root_
+        node = src.derive(pth).derive([branch, index])
+        pairs.append((src.fingerprint(), bip32.parse_path(pth) + [branch, index],
+                      node.pubkey))
+    keys = [pk for _, _, pk in pairs]
+    use_sorted = ms.sorted_keys if sorted_keys is None else sorted_keys
+    script = addresses.multisig_script(ms.threshold,
+                                       sorted(keys) if use_sorted else keys)
+    return script, pairs
+
+
+def build_multisig_psbt(ms, members, *, in_amount=200_000, send=150_000,
+                        change=45_000, change_swap=None, change_suffix=None,
+                        change_sorted=None, omit_witness_script=False,
+                        break_witness_script=False,
+                        dest="bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4") -> bytes:
+    in_script, in_pairs = multisig_script_at(ms, members, 0, 0)
+    ch_script, ch_pairs = multisig_script_at(
+        ms, members, 1, 0, swap=change_swap, sorted_keys=change_sorted)
+    if change_suffix is not None:
+        # Quote one co-signer at a different index than the rest.
+        fp, path, pk = ch_pairs[-1]
+        ch_pairs[-1] = (fp, path[:-1] + [change_suffix], pk)
+
+    def spk(script):
+        inner = addresses.p2wsh_script(script)
+        return addresses.p2sh_script(inner) if ms.wrapped else inner
+
+    parent = Transaction(2, [TxIn(b"\x31" * 32, 0)],
+                         [TxOut(in_amount, spk(in_script))], 0)
+    vout = [TxOut(send, addresses.address_to_script(dest))]
+    if change:
+        vout.append(TxOut(change, spk(ch_script)))
+    unsigned = Transaction(2, [TxIn(parent.txid(), 0)], vout, 0)
+
+    p = PSBT(unsigned)
+    p.globals[_kv(psbtmod.GLOBAL_UNSIGNED_TX)] = unsigned.serialize(witness=False)
+    m = p.inputs[0]
+    m[_kv(psbtmod.IN_NON_WITNESS_UTXO)] = parent.serialize()
+    m[_kv(psbtmod.IN_WITNESS_UTXO)] = (
+        in_amount.to_bytes(8, "little")
+        + ser_compact(len(parent.vout[0].script_pubkey)) + parent.vout[0].script_pubkey)
+    m[_kv(psbtmod.IN_WITNESS_SCRIPT)] = in_script
+    if ms.wrapped:
+        m[_kv(psbtmod.IN_REDEEM_SCRIPT)] = addresses.p2wsh_script(in_script)
+    for fp, path, pk in in_pairs:
+        m[_kv(psbtmod.IN_BIP32_DERIVATION, pk)] = (
+            fp + b"".join(i.to_bytes(4, "little") for i in path))
+
+    if change:
+        o = p.outputs[1]
+        if not omit_witness_script:
+            o[_kv(psbtmod.OUT_WITNESS_SCRIPT)] = (
+                ch_script[:-1] + b"\xac" if break_witness_script else ch_script)
+        if ms.wrapped:
+            o[_kv(psbtmod.OUT_REDEEM_SCRIPT)] = addresses.p2wsh_script(ch_script)
+        for fp, path, pk in ch_pairs:
+            o[_kv(psbtmod.OUT_BIP32_DERIVATION, pk)] = (
+                fp + b"".join(i.to_bytes(4, "little") for i in path))
+    return p.serialize()
+
+
 # --------------------------------------------------------------------------
 
 
@@ -181,6 +306,7 @@ def main() -> int:
 
     se, prov = make_device()
     root = bip32.from_mnemonic(MNEMONIC)
+    thief = bip32.from_mnemonic(bip39.entropy_to_mnemonic(b"\x07" * 16))
 
     # ---- provisioning -------------------------------------------------
     print(" provisioning")
@@ -219,6 +345,192 @@ def main() -> int:
             "your wallet" in ln for ln in res.display))
         check(f"{st}: attestation rides in the PSBT",
               signed.get_proprietary(b"CELL\x01") is not None)
+
+
+    # ---- multisig: the quorum the attestation story depends on ---------
+    print("\n multisig")
+    ms, members = multisig_parts(root)
+    prov.register_multisig(ms)
+    ms_blob = build_multisig_psbt(ms, members)
+
+    ms_lines = {}
+    res = run_psbt(ms_blob, se, prov,
+                   confirm=lambda ln: ms_lines.setdefault("l", ln) is None or True)
+    signed = PSBT.parse(res.psbt)
+    signed.descriptors = prov.descriptors()
+    infos = [signed._input_info(0, root)]
+    digest = signed.sighash(0, infos)
+    our_key = root.derive(wallet.multisig_account_path("multisig-p2wsh")).derive([0, 0])
+    sig = signed.inputs[0].get(bytes([psbtmod.IN_PARTIAL_SIG]) + our_key.pubkey)
+    check("2-of-3 p2wsh: our partial signature is present", sig is not None)
+    check("2-of-3 p2wsh: it verifies against the BIP-143 sighash",
+          bool(sig) and sig[-1] == txmod.SIGHASH_ALL
+          and ec.ecdsa_verify(digest, our_key.pubkey, *ec.der_decode(sig[:-1])))
+    check("2-of-3 p2wsh: only our key is signed for",
+          len([k for k in signed.inputs[0] if k[:1] == bytes([psbtmod.IN_PARTIAL_SIG])]) == 1)
+    mtxt = "\n".join(ms_lines["l"])
+    check("the quorum is shown to the owner", "MULTISIG 2 of 3" in mtxt)
+    check("and which signature this is", "signature 1 of 2" in mtxt)
+    check("multisig change is recognised as ours", "-> your wallet" in mtxt)
+
+    # An unregistered quorum must be refused, not signed on the strength of
+    # holding one of its keys.
+    bare = wallet.Provisioning(seed_blob=prov.seed_blob, accounts=prov.accounts,
+                               master_fingerprint=prov.master_fingerprint)
+    refuses("an unregistered quorum is refused",
+            lambda: run_psbt(ms_blob, se, bare), psbtmod.BadPSBT)
+
+    # THE ATTACK registration exists to stop: a change output holding one key
+    # of ours and the rest an attacker's.
+    swapped = build_multisig_psbt(ms, members, change_swap=thief)
+    sw_lines = {}
+    run_psbt(swapped, se, prov,
+             confirm=lambda ln: sw_lines.setdefault("l", ln) is None or True)
+    check("change with a substituted co-signer is NOT called ours",
+          "WARNING" in "\n".join(sw_lines["l"])
+          and "-> your wallet" not in "\n".join(sw_lines["l"]))
+
+    # The subtler variants: same keys, wrong derivation suffix; same keys,
+    # wrong ordering. Both produce a real script that is not our address.
+    for label, kw in [("a co-signer quoted at a different index",
+                       {"change_suffix": 9}),
+                      ("the BIP-67 ordering flipped", {"change_sorted": False}),
+                      ("no witness script at all", {"omit_witness_script": True}),
+                      ("a witness script that is not m-of-n",
+                       {"break_witness_script": True})]:
+        lines = {}
+        run_psbt(build_multisig_psbt(ms, members, **kw), se, prov,
+                 confirm=lambda ln: lines.setdefault("l", ln) is None or True)
+        check(f"change is refused when {label}",
+              "WARNING" in "\n".join(lines["l"]))
+
+    # Registration itself must refuse a quorum we are not in, or one whose
+    # entry for us quotes an xpub this seed does not derive.
+    outsider = wallet.Multisig(
+        label="not-ours", threshold=2,
+        cosigners=[wallet.CoSigner(label=f"x{i}", fingerprint=r.fingerprint().hex(),
+                                   path=wallet.multisig_account_path("multisig-p2wsh"),
+                                   xpub=r.derive(wallet.multisig_account_path(
+                                       "multisig-p2wsh")).neutered().serialize("xpub"))
+                   for i, r in enumerate([bip32.from_mnemonic(w)
+                                          for w in COSIGNER_WORDS])])
+    refuses("registering a quorum we are not in is refused",
+            lambda: prov.register_multisig(outsider), wallet.WalletError)
+
+    liar = wallet.Multisig(
+        label="liar", threshold=2,
+        cosigners=[wallet.CoSigner(label="us", fingerprint=prov.master_fingerprint.hex(),
+                                   path=wallet.multisig_account_path("multisig-p2wsh"),
+                                   xpub=thief.derive(wallet.multisig_account_path(
+                                       "multisig-p2wsh")).neutered().serialize("xpub")),
+                   ms.cosigners[1], ms.cosigners[2]])
+    refuses("a quorum quoting a foreign xpub under our fingerprint is refused",
+            lambda: prov.register_multisig(liar), wallet.WalletError)
+    refuses("a 4-of-3 quorum is refused",
+            lambda: wallet.Multisig(label="z", threshold=4,
+                                    cosigners=ms.cosigners).check(),
+            wallet.WalletError)
+    refuses("a duplicate label is refused",
+            lambda: prov.register_multisig(ms), wallet.WalletError)
+
+    # p2sh-wrapped multisig, because BIP-48 defines both and a wallet that
+    # only handles the native one silently fails on half of them.
+    se2, prov2 = make_device()
+    ms_w, members_w = multisig_parts(root, wrapped=True)
+    prov2.register_multisig(ms_w)
+    resw = run_psbt(build_multisig_psbt(ms_w, members_w), se2, prov2)
+    check("p2sh-p2wsh multisig signs too", resw.signatures == 1)
+
+
+    # ---- PSBT version 2 -------------------------------------------------
+    print("\n psbt version 2 (BIP-370)")
+    v0 = build_psbt(root, "p2wpkh")
+    v2 = to_v2(v0)
+    check("a v2 PSBT has no global unsigned transaction",
+          PSBT.parse(v2).globals.get(_kv(psbtmod.GLOBAL_UNSIGNED_TX)) is None)
+    check("the rebuilt transaction is identical to the v0 one",
+          PSBT.parse(v2).tx.serialize(witness=False)
+          == PSBT.parse(v0).tx.serialize(witness=False))
+
+    r0 = run_psbt(v0, se, prov)
+    r2 = run_psbt(v2, se, prov)
+    check("v2 produces the same signature as v0",
+          [v for m in PSBT.parse(r2.psbt).inputs for k, v in sorted(m.items())
+           if k[:1] == bytes([psbtmod.IN_PARTIAL_SIG])]
+          == [v for m in PSBT.parse(r0.psbt).inputs for k, v in sorted(m.items())
+              if k[:1] == bytes([psbtmod.IN_PARTIAL_SIG])])
+    check("...and comes back as v2, not silently downgraded",
+          PSBT.parse(r2.psbt).psbt_version == 2
+          and PSBT.parse(r2.psbt).globals.get(
+              _kv(psbtmod.GLOBAL_UNSIGNED_TX)) is None)
+    check("a v0 PSBT still reports as v0", PSBT.parse(r0.psbt).psbt_version == 0)
+
+    # v2 must be verified exactly as hard as v0.
+    refuses("a v2 PSBT paying two destinations is refused the same way",
+            lambda: run_psbt(to_v2(build_psbt(
+                root, "p2wpkh", send=100_000, change=45_000,
+                extra_outputs=((50_000, "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce"
+                                        "4xj0gdcccefvpysxf3qccfmv3"),))),
+                se, prov), psbtmod.BadPSBT)
+    refuses("a v2 PSBT with a lying witness UTXO is refused the same way",
+            lambda: run_psbt(to_v2(build_psbt(root, "p2wpkh",
+                                              lie_about_amount=9_000_000)),
+                             se, prov), psbtmod.BadPSBT)
+
+    # Malformed v2 must be refused rather than half-read.
+    def broken(drop=None, mangle=None):
+        p = PSBT.parse(v2)
+        if drop:
+            p.inputs[0].pop(_kv(drop), None) or p.globals.pop(_kv(drop), None)
+        if mangle:
+            key, val = mangle
+            (p.globals if key == psbtmod.GLOBAL_TX_VERSION
+             else p.inputs[0])[_kv(key)] = val
+        return p.serialize()
+
+    for label, blob_ in [
+        ("no input count", broken(drop=psbtmod.GLOBAL_INPUT_COUNT)),
+        ("no previous txid", broken(drop=psbtmod.IN_PREVIOUS_TXID)),
+        ("no output index", broken(drop=psbtmod.IN_OUTPUT_INDEX)),
+        ("a short transaction version",
+         broken(mangle=(psbtmod.GLOBAL_TX_VERSION, b"\x02"))),
+        ("a short previous txid",
+         broken(mangle=(psbtmod.IN_PREVIOUS_TXID, b"\x11" * 31))),
+    ]:
+        refuses(f"refuses a v2 PSBT with {label}",
+                lambda b=blob_: PSBT.parse(b), psbtmod.BadPSBT)
+
+    # Both locktime rules.
+    lock = PSBT.parse(v2)
+    lock.inputs[0][_kv(psbtmod.IN_REQUIRED_HEIGHT_LOCKTIME)] = (800000).to_bytes(4, "little")
+    check("a required height locktime overrides the fallback",
+          PSBT.parse(lock.serialize()).tx.locktime == 800000)
+    lock.inputs[0][_kv(psbtmod.IN_REQUIRED_TIME_LOCKTIME)] = (1700000000).to_bytes(4, "little")
+    refuses("requiring both a height and a time locktime is refused",
+            lambda: PSBT.parse(lock.serialize()), psbtmod.BadPSBT)
+
+    # A version we do not read must be named, not guessed at.
+    unknown = PSBT.parse(v2)
+    unknown.globals[_kv(psbtmod.GLOBAL_VERSION)] = (3).to_bytes(4, "little")
+    refuses("an unknown PSBT version is refused by name",
+            lambda: PSBT.parse(unknown.serialize()), psbtmod.BadPSBT)
+
+    # ---- taproot script-path --------------------------------------------
+    print("\n taproot script-path")
+    sp = PSBT.parse(build_psbt(root, "p2tr", include_parent=False))
+    # An output key that is not the tweak of our internal key means a script
+    # path is in play. The device holds no leaf scripts and could not render
+    # one, so it must refuse rather than sign into a tree it cannot describe.
+    foreign, _ = ec.taproot_tweak_pubkey(
+        thief.derive("m/86h/0h/0h/0/0").pubkey[1:])
+    spk = addresses.p2tr_script(foreign)
+    parent = Transaction.parse(sp.inputs[0][_kv(psbtmod.IN_NON_WITNESS_UTXO)]) \
+        if _kv(psbtmod.IN_NON_WITNESS_UTXO) in sp.inputs[0] else None
+    sp.inputs[0][_kv(psbtmod.IN_WITNESS_UTXO)] = (
+        (200_000).to_bytes(8, "little") + ser_compact(len(spk)) + spk)
+    del parent
+    refuses("refuses a taproot input whose output key is not our tweak",
+            lambda: run_psbt(sp.serialize(), se, prov), psbtmod.BadPSBT)
 
     # ---- what the owner is shown --------------------------------------
     print("\n what the owner sees")
@@ -266,7 +578,6 @@ def main() -> int:
 
     # ---- FOOTGUN: change substitution ---------------------------------
     print("\n footgun: change substitution")
-    thief = bip32.from_mnemonic(bip39.entropy_to_mnemonic(b"\x07" * 16))
     stolen = PSBT.parse(build_psbt(root, "p2wpkh"))
     thief_key = thief.derive("m/84h/0h/0h/1/0")
     stolen.tx.vout[1].script_pubkey = addresses.p2wpkh_script(thief_key.pubkey)

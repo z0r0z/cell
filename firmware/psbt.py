@@ -47,6 +47,11 @@ PSBT_MAGIC = b"psbt\xff"
 # Global
 GLOBAL_UNSIGNED_TX = 0x00
 GLOBAL_XPUB = 0x01
+GLOBAL_TX_VERSION = 0x02
+GLOBAL_FALLBACK_LOCKTIME = 0x03
+GLOBAL_INPUT_COUNT = 0x04
+GLOBAL_OUTPUT_COUNT = 0x05
+GLOBAL_TX_MODIFIABLE = 0x06
 GLOBAL_VERSION = 0xFB
 PROPRIETARY = 0xFC
 
@@ -60,6 +65,11 @@ IN_WITNESS_SCRIPT = 0x05
 IN_BIP32_DERIVATION = 0x06
 IN_FINAL_SCRIPTSIG = 0x07
 IN_FINAL_SCRIPTWITNESS = 0x08
+IN_PREVIOUS_TXID = 0x0E
+IN_OUTPUT_INDEX = 0x0F
+IN_SEQUENCE = 0x10
+IN_REQUIRED_TIME_LOCKTIME = 0x11
+IN_REQUIRED_HEIGHT_LOCKTIME = 0x12
 IN_TAP_KEY_SIG = 0x13
 IN_TAP_BIP32_DERIVATION = 0x16
 IN_TAP_INTERNAL_KEY = 0x17
@@ -68,6 +78,8 @@ IN_TAP_INTERNAL_KEY = 0x17
 OUT_REDEEM_SCRIPT = 0x00
 OUT_WITNESS_SCRIPT = 0x01
 OUT_BIP32_DERIVATION = 0x02
+OUT_AMOUNT = 0x03
+OUT_SCRIPT = 0x04
 OUT_TAP_INTERNAL_KEY = 0x05
 OUT_TAP_BIP32_DERIVATION = 0x07
 
@@ -132,6 +144,192 @@ def _ser_derivation(fp: bytes, path: list[int]) -> bytes:
 
 
 # --------------------------------------------------------------------------
+# BIP-370 (version 2) reconstruction
+#
+# Version 2 removes the global unsigned transaction and scatters its fields
+# across the input and output maps instead. Nothing about what the device
+# checks changes: we rebuild the transaction those fields describe and then
+# run exactly the same verification over it. Doing it this way rather than
+# threading a second representation through psbt.py means there is one set of
+# rules about amounts, change and sighashes, not two that could drift.
+# --------------------------------------------------------------------------
+
+
+def _count(g: KVMap, keytype: int, what: str) -> int:
+    raw = _get(g, keytype)
+    if raw is None:
+        raise BadPSBT(f"a version 2 PSBT must declare its {what} count")
+    r = Reader(raw)
+    n = r.compact()
+    if not r.done:
+        raise BadPSBT(f"trailing bytes in the {what} count")
+    if not 0 < n <= 4096:
+        raise BadPSBT(f"{what} count of {n} is out of range")
+    return n
+
+
+def _rebuild_v2(g: KVMap, in_maps: list[KVMap], out_maps: list[KVMap]) -> Transaction:
+    ver_raw = _get(g, GLOBAL_TX_VERSION)
+    if ver_raw is None or len(ver_raw) != 4:
+        raise BadPSBT("a version 2 PSBT must declare a 4-byte transaction version")
+    tx = Transaction(version=int.from_bytes(ver_raw, "little"))
+
+    for i, m in enumerate(in_maps):
+        txid = _get(m, IN_PREVIOUS_TXID)
+        index = _get(m, IN_OUTPUT_INDEX)
+        if txid is None or len(txid) != 32:
+            raise BadPSBT(f"input {i} has no 32-byte previous txid")
+        if index is None or len(index) != 4:
+            raise BadPSBT(f"input {i} has no 4-byte output index")
+        seq = _get(m, IN_SEQUENCE)
+        if seq is not None and len(seq) != 4:
+            raise BadPSBT(f"input {i} has a malformed sequence")
+        tx.vin.append(txmod.TxIn(
+            txid=txid, vout=int.from_bytes(index, "little"),
+            sequence=int.from_bytes(seq, "little") if seq else 0xFFFFFFFF))
+
+    for i, m in enumerate(out_maps):
+        amount = _get(m, OUT_AMOUNT)
+        script = _get(m, OUT_SCRIPT)
+        if amount is None or len(amount) != 8:
+            raise BadPSBT(f"output {i} has no 8-byte amount")
+        if script is None:
+            raise BadPSBT(f"output {i} has no script")
+        value = int.from_bytes(amount, "little", signed=True)
+        if value < 0:
+            raise BadPSBT(f"output {i} has a negative amount")
+        tx.vout.append(txmod.TxOut(value=value, script_pubkey=script))
+
+    tx.locktime = _v2_locktime(g, in_maps)
+    return tx
+
+
+def _v2_locktime(g: KVMap, in_maps: list[KVMap]) -> int:
+    """The locktime BIP-370 says this transaction ends up with.
+
+    An input may REQUIRE a height or a time locktime. If any does, the
+    transaction takes the largest requirement of that kind and the fallback is
+    ignored. Requiring both kinds at once is not satisfiable, and a device that
+    picked one would be signing a transaction different from the one the
+    coordinator meant — so that is a refusal.
+    """
+    heights, times = [], []
+    for i, m in enumerate(in_maps):
+        h, t = _get(m, IN_REQUIRED_HEIGHT_LOCKTIME), _get(m, IN_REQUIRED_TIME_LOCKTIME)
+        if h is not None:
+            if len(h) != 4:
+                raise BadPSBT(f"input {i} has a malformed height locktime")
+            heights.append(int.from_bytes(h, "little"))
+        if t is not None:
+            if len(t) != 4:
+                raise BadPSBT(f"input {i} has a malformed time locktime")
+            times.append(int.from_bytes(t, "little"))
+    if heights and times:
+        raise BadPSBT(
+            "this PSBT requires both a height locktime and a time locktime, "
+            "which no single transaction can satisfy")
+    if heights:
+        return max(heights)
+    if times:
+        return max(times)
+    fallback = _get(g, GLOBAL_FALLBACK_LOCKTIME)
+    if fallback is None:
+        return 0
+    if len(fallback) != 4:
+        raise BadPSBT("malformed fallback locktime")
+    return int.from_bytes(fallback, "little")
+
+
+# --------------------------------------------------------------------------
+# Multisig descriptors — the registered co-signers
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class MultisigDescriptor:
+    """An m-of-n the device has been told about, and can therefore rebuild.
+
+    THIS IS WHY REGISTRATION EXISTS. Without it, "is this output ours?" can
+    only be answered as "does it contain a key of mine?" — and an attacker who
+    controls the coordinator can build a script holding exactly one key of
+    yours and n-1 of theirs. It hashes correctly, the wallet calls it change,
+    and the balance moves to a script you cannot spend without them.
+
+    With the co-signers registered the question becomes "does this output
+    equal the script my registered quorum produces at the path it claims?",
+    which is arithmetic and cannot be talked around.
+
+    `keys` are (master fingerprint, account path, account xpub), one per
+    co-signer, in the order the descriptor declares. `sorted_keys` is BIP-67
+    lexicographic ordering, which most coordinators default to; getting it
+    wrong produces a different address rather than an error, so it is recorded
+    rather than guessed.
+    """
+
+    threshold: int
+    keys: list[tuple[bytes, list[int], ExtendedKey]]
+    sorted_keys: bool = True
+    wrapped: bool = False               # p2sh-p2wsh rather than bare p2wsh
+    label: str = ""
+
+    @property
+    def n(self) -> int:
+        return len(self.keys)
+
+    def witness_script_for(self, derivations: dict[bytes, bytes]) -> bytes | None:
+        """Rebuild the witness script these derivations claim, or None.
+
+        Every registered co-signer must appear exactly once, at the same
+        change/index suffix as the others. A PSBT that quotes a different
+        suffix for one co-signer is not describing a standard multisig
+        address, and guessing which one it meant is how a wallet ends up
+        confident about the wrong script.
+        """
+        found: list[bytes] = []
+        suffix: list[int] | None = None
+        for fp, prefix, xpub in self.keys:
+            match = None
+            for keybytes, val in derivations.items():
+                try:
+                    origin_fp, path = _parse_derivation(val)
+                except BadPSBT:
+                    return None
+                if origin_fp != fp or path[:len(prefix)] != prefix:
+                    continue
+                if match is not None:
+                    return None                 # ambiguous; refuse to guess
+                match = (keybytes, path[len(prefix):])
+            if match is None:
+                return None
+            keybytes, tail = match
+            if suffix is None:
+                suffix = tail
+            elif tail != suffix:
+                return None
+            try:
+                if xpub.derive(tail).pubkey != keybytes:
+                    return None
+            except ValueError:
+                return None
+            found.append(keybytes)
+
+        if len(found) != self.n or not 1 <= self.threshold <= self.n:
+            return None
+        ordered = sorted(found) if self.sorted_keys else found
+        try:
+            return addresses.multisig_script(self.threshold, ordered)
+        except addresses.BadAddress:
+            return None
+
+    def script_pubkey_for(self, derivations: dict[bytes, bytes]) -> bytes | None:
+        ws = self.witness_script_for(derivations)
+        if ws is None:
+            return None
+        p2wsh = addresses.p2wsh_script(ws)
+        return addresses.p2sh_script(p2wsh) if self.wrapped else p2wsh
+
+
+# --------------------------------------------------------------------------
 # Per-input analysis
 # --------------------------------------------------------------------------
 
@@ -151,6 +349,7 @@ class InputInfo:
     quorum_needed: int = 0
     quorum_size: int = 0
     sigs_present: int = 0
+    descriptor: "MultisigDescriptor | None" = None
 
 
 def _classify(spk: bytes) -> str:
@@ -168,14 +367,41 @@ def _classify(spk: bytes) -> str:
                   f"This device signs p2pkh, p2sh, p2wpkh, p2wsh and p2tr.")
 
 
-def _parse_multisig(script: bytes) -> tuple[int, int]:
-    """(m, n) from a bare CHECKMULTISIG witness script, or (0, 0)."""
-    if len(script) < 3 or script[-1] != 0xAE:
-        return 0, 0
+def parse_multisig(script: bytes) -> tuple[int, list[bytes]]:
+    """(m, keys) from a bare CHECKMULTISIG script, or (0, []).
+
+    Strict on purpose. The loose version of this — read the first and last
+    opcodes, trust the middle — will happily report "2 of 3" for a script
+    whose middle is something else entirely, and that number goes on the
+    screen the owner approves. So every push is walked, every key must be a
+    33-byte compressed point on the curve, and the declared n must equal the
+    number of keys actually present.
+    """
+    if len(script) < 3 + 34 or script[-1] != 0xAE:
+        return 0, []
     m, n = script[0] - 0x50, script[-2] - 0x50
     if not (1 <= m <= n <= 16):
-        return 0, 0
-    return m, n
+        return 0, []
+    keys, i = [], 1
+    while i < len(script) - 2:
+        if script[i] != 33 or i + 34 > len(script) - 2:
+            return 0, []
+        key = script[i + 1:i + 34]
+        try:
+            ec.parse_pubkey(key)
+        except ec.BadKey:
+            return 0, []
+        keys.append(key)
+        i += 34
+    if i != len(script) - 2 or len(keys) != n:
+        return 0, []
+    return m, keys
+
+
+def _parse_multisig(script: bytes) -> tuple[int, int]:
+    """(m, n), or (0, 0). Convenience over parse_multisig."""
+    m, keys = parse_multisig(script)
+    return (m, len(keys)) if m else (0, 0)
 
 
 # --------------------------------------------------------------------------
@@ -201,6 +427,14 @@ class PSBT:
         self.globals: KVMap = {}
         self.inputs: list[KVMap] = [{} for _ in unsigned.vin]
         self.outputs: list[KVMap] = [{} for _ in unsigned.vout]
+        # Multisig quorums this device has been told about. Empty means the
+        # device knows of none, and every multisig script it meets is
+        # therefore unrecognised — which is a refusal, not a shrug.
+        self.descriptors: list[MultisigDescriptor] = []
+        # 0 for BIP-174, 2 for BIP-370. Kept because serialize() must hand the
+        # coordinator back the dialect it sent: a v2 PSBT that comes back as
+        # v0 is a PSBT the coordinator may not be able to finalise.
+        self.psbt_version = 0
 
     # ---- serialisation ----
 
@@ -211,19 +445,39 @@ class PSBT:
         r = Reader(data)
         r.read(5)
         g = _parse_map(r)
+        version = int.from_bytes(_get(g, GLOBAL_VERSION) or b"\x00", "little")
         raw = _get(g, GLOBAL_UNSIGNED_TX)
-        if raw is None:
-            raise BadPSBT("PSBT has no unsigned transaction. Version 2 PSBTs "
-                          "are not supported by this device.")
-        unsigned = Transaction.parse(raw)
+
+        if raw is not None:
+            if version not in (0, 1):
+                raise BadPSBT(
+                    f"PSBT declares version {version} but carries a version 0 "
+                    f"unsigned transaction. One of the two is wrong.")
+            unsigned = Transaction.parse(raw)
+            n_in, n_out = len(unsigned.vin), len(unsigned.vout)
+            in_maps = [_parse_map(r) for _ in range(n_in)]
+            out_maps = [_parse_map(r) for _ in range(n_out)]
+        elif version == 2:
+            n_in = _count(g, GLOBAL_INPUT_COUNT, "input")
+            n_out = _count(g, GLOBAL_OUTPUT_COUNT, "output")
+            in_maps = [_parse_map(r) for _ in range(n_in)]
+            out_maps = [_parse_map(r) for _ in range(n_out)]
+            unsigned = _rebuild_v2(g, in_maps, out_maps)
+        else:
+            raise BadPSBT(
+                f"PSBT version {version} has no unsigned transaction and is "
+                f"not version 2. This device reads BIP-174 version 0 and "
+                f"BIP-370 version 2.")
+
         for i, vin in enumerate(unsigned.vin):
             if vin.script_sig or vin.witness:
                 raise BadPSBT(f"input {i} of the unsigned transaction is already "
                               f"signed; a PSBT's transaction must be bare")
         p = PSBT(unsigned)
+        p.psbt_version = version
         p.globals = g
-        p.inputs = [_parse_map(r) for _ in unsigned.vin]
-        p.outputs = [_parse_map(r) for _ in unsigned.vout]
+        p.inputs = in_maps
+        p.outputs = out_maps
         if not r.done:
             raise BadPSBT(f"{len(data) - r.pos} trailing bytes after the PSBT")
         return p
@@ -331,6 +585,26 @@ class PSBT:
         info.witness_script = witness_script
         if witness_script:
             info.quorum_needed, info.quorum_size = _parse_multisig(witness_script)
+            if not info.quorum_needed:
+                raise BadPSBT(
+                    f"input {i}: the witness script is not a bare m-of-n "
+                    f"multisig. This device signs multisig it can describe to "
+                    f"you, and it cannot describe this one.")
+            # The quorum on the confirmation screen has to be a fact, not a
+            # reading of a script the host wrote. Rebuild it from the
+            # registered co-signers, or refuse.
+            derivs = _get_all(m, IN_BIP32_DERIVATION)
+            for d in self.descriptors:
+                if d.witness_script_for(derivs) == witness_script:
+                    info.descriptor = d
+                    break
+            if info.descriptor is None:
+                raise BadPSBT(
+                    f"input {i} spends a {info.quorum_needed}-of-"
+                    f"{info.quorum_size} multisig this device has not been "
+                    f"told about. Register the co-signers "
+                    f"(tools/provision.py multisig) before signing, so the "
+                    f"device can tell your quorum from someone else's.")
         info.sigs_present = len(_get_all(m, IN_PARTIAL_SIG))
 
         # Taproot's sighash covers every input's amount, so a witness_utxo is
@@ -415,28 +689,28 @@ class PSBT:
         if not derivations:
             return False
 
-        # Every key in a multisig change output must check out, not just ours:
-        # a script where one co-signer's key was swapped is not our address.
+        # Multisig change is only ours if the WHOLE quorum rebuilds. Checking
+        # that one of the keys is ours is not enough: a script holding one key
+        # of yours and n-1 of an attacker's hashes correctly, looks like
+        # change, and moves the balance somewhere you cannot spend alone.
         if witness_script is not None:
-            m_, n_ = _parse_multisig(witness_script)
-            if not m_:
+            if not _parse_multisig(witness_script)[0]:
                 return False
-            expected = addresses.p2wsh_script(witness_script)
-            if redeem is not None:
-                expected = addresses.p2sh_script(redeem)
-                if addresses.p2wsh_script(witness_script) != redeem:
-                    return False
-            if expected != spk:
-                return False
-            mine = 0
-            for keybytes, val in derivations.items():
-                origin_fp, path = _parse_derivation(val)
-                if origin_fp != fp:
+            for d in self.descriptors:
+                rebuilt = d.witness_script_for(derivations)
+                if rebuilt is None or rebuilt != witness_script:
                     continue
-                if root.owns(keybytes, path):
-                    mine += 1
-            return mine >= 1 and all(
-                len(k) == 33 for k in _script_pubkeys(witness_script))
+                if d.script_pubkey_for(derivations) != spk:
+                    continue
+                if redeem is not None and addresses.p2wsh_script(witness_script) != redeem:
+                    continue
+                # ...and one of the quorum has to actually be us, or this is a
+                # perfectly valid address belonging to somebody else.
+                for keybytes, val in derivations.items():
+                    origin_fp, path = _parse_derivation(val)
+                    if origin_fp == fp and root.owns(keybytes, path):
+                        return True
+            return False
 
         for keybytes, val in derivations.items():
             origin_fp, path = _parse_derivation(val)
@@ -597,13 +871,3 @@ class PSBT:
         return added
 
 
-def _script_pubkeys(witness_script: bytes) -> list[bytes]:
-    """The pushed 33-byte keys in a bare multisig script."""
-    out, i = [], 1
-    while i < len(witness_script) - 2:
-        n = witness_script[i]
-        if n != 33:
-            break
-        out.append(witness_script[i + 1:i + 1 + n])
-        i += 1 + n
-    return out

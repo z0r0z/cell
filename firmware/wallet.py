@@ -44,6 +44,12 @@ from se import SecureElement
 PURPOSE = {"p2pkh": 44, "p2sh-p2wpkh": 49, "p2wpkh": 84, "p2tr": 86}
 COIN = {"mainnet": 0, "testnet": 1, "regtest": 1}
 
+# BIP-48 multisig accounts. The last hardened element names the script type:
+# 1' for p2sh-p2wsh, 2' for native p2wsh. Every coordinator worth using
+# follows this, and using our own scheme would mean an xpub nobody else could
+# pair with.
+MULTISIG_SCRIPT = {"multisig-p2sh-p2wsh": 1, "multisig-p2wsh": 2}
+
 # Ethereum's registered coin type. The account level is hardened, and the
 # address index lives at m/44'/60'/account'/0/index like every other wallet,
 # so the same words restore in MetaMask.
@@ -59,6 +65,15 @@ def account_path(script_type: str, account: int = 0,
     if script_type not in PURPOSE:
         raise WalletError(f"unknown script type {script_type!r}")
     return f"m/{PURPOSE[script_type]}h/{COIN[network]}h/{account}h"
+
+
+def multisig_account_path(script_type: str, account: int = 0,
+                          network: str = "mainnet") -> str:
+    """BIP-48: m/48'/coin'/account'/script'."""
+    if script_type not in MULTISIG_SCRIPT:
+        raise WalletError(f"unknown multisig script type {script_type!r}")
+    return (f"m/48h/{COIN[network]}h/{account}h/"
+            f"{MULTISIG_SCRIPT[script_type]}h")
 
 
 def eth_path(account: int = 0, index: int = 0) -> str:
@@ -82,6 +97,64 @@ class Account:
 
 
 @dataclass
+class CoSigner:
+    """One party to a multisig, as recorded on this device.
+
+    The label is what appears on the confirmation screen. It is for the owner's
+    benefit and carries no authority — the fingerprint and xpub are what the
+    device actually checks against.
+    """
+
+    label: str
+    fingerprint: str                    # hex, 8 chars
+    path: str                           # the account path this xpub sits at
+    xpub: str
+
+    def key(self) -> ExtendedKey:
+        node = ExtendedKey.deserialize(self.xpub)
+        if node.seckey is None:
+            return node
+        raise WalletError("a co-signer record must hold a public key only")
+
+
+@dataclass
+class Multisig:
+    """A registered quorum. See psbt.MultisigDescriptor for why this exists."""
+
+    label: str
+    threshold: int
+    cosigners: list[CoSigner]
+    sorted_keys: bool = True
+    wrapped: bool = False
+    network: str = "mainnet"
+
+    def descriptor(self) -> psbtmod.MultisigDescriptor:
+        return psbtmod.MultisigDescriptor(
+            threshold=self.threshold,
+            keys=[(bytes.fromhex(c.fingerprint), bip32.parse_path(c.path), c.key())
+                  for c in self.cosigners],
+            sorted_keys=self.sorted_keys, wrapped=self.wrapped, label=self.label)
+
+    def check(self) -> None:
+        n = len(self.cosigners)
+        if not 1 <= self.threshold <= n <= 16:
+            raise WalletError(
+                f"{self.threshold}-of-{n} is not a usable quorum")
+        fps = [c.fingerprint for c in self.cosigners]
+        if len(set(fps)) != len(fps):
+            raise WalletError(
+                "two co-signers share a master fingerprint. The device matches "
+                "PSBT key origins on that fingerprint, so it could not tell "
+                "them apart.")
+        for c in self.cosigners:
+            got = c.key().fingerprint().hex()
+            # The recorded fingerprint is the MASTER's, and an account xpub
+            # cannot prove what its master was. What we can check is that the
+            # record is self-consistent and the xpub parses as public-only.
+            del got
+
+
+@dataclass
 class Provisioning:
     """What the device knows about itself between power cycles.
 
@@ -92,6 +165,38 @@ class Provisioning:
     seed_blob: bytes
     accounts: list[Account] = field(default_factory=list)
     master_fingerprint: bytes = b"\x00\x00\x00\x00"
+    multisig: list[Multisig] = field(default_factory=list)
+
+    def descriptors(self, network: str = "mainnet") -> list:
+        return [m.descriptor() for m in self.multisig if m.network == network]
+
+    def register_multisig(self, ms: Multisig) -> None:
+        """Add a quorum, refusing one this device is not a member of.
+
+        A device that will register a quorum it has no key in is a device that
+        will call somebody else's address its own change.
+        """
+        ms.check()
+        mine = self.master_fingerprint.hex()
+        ours = [c for c in ms.cosigners if c.fingerprint == mine]
+        if not ours:
+            raise WalletError(
+                f"this device's fingerprint ({mine}) is not among the "
+                f"co-signers. Registering a quorum you are not in would let it "
+                f"be treated as your own change.")
+        # And the xpub filed under our fingerprint has to be one this seed
+        # actually produced. Otherwise a coordinator could register a quorum
+        # that merely claims to include us.
+        want = {a.xpub for a in self.accounts if a.network == ms.network}
+        for c in ours:
+            if c.xpub not in want:
+                raise WalletError(
+                    f"the co-signer entry for this device quotes an xpub this "
+                    f"seed does not derive at {c.path}. Take your xpub from "
+                    f"`provision.py show`, not from the coordinator.")
+        if any(m.label == ms.label for m in self.multisig):
+            raise WalletError(f"a quorum labelled {ms.label!r} is already registered")
+        self.multisig.append(ms)
 
     def account_for(self, script_type: str, network: str = "mainnet") -> Account:
         for a in self.accounts:
@@ -127,6 +232,15 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
     blob = seedstore.wrap(mnemonic, key)
 
     accounts = []
+    for st in MULTISIG_SCRIPT:
+        # Derived at provisioning whether or not a quorum is ever registered.
+        # The xpub is what a co-signer needs from you to build the descriptor,
+        # and asking the owner to re-open a sealed device to get it would be a
+        # design that punishes doing multisig properly.
+        path = multisig_account_path(st, 0, network)
+        accounts.append(Account(script_type=st, path=path,
+                                xpub=root.derive(path).neutered().serialize("xpub"),
+                                network=network))
     for st in script_types:
         path = account_path(st, 0, network)
         node = root.derive(path)
@@ -181,6 +295,9 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
               attach_attestation: bool = True) -> SignedPSBT:
     """Run the full unlock chain over a PSBT and return it signed."""
     p = psbtmod.PSBT.parse(blob)
+    # The registered quorums travel with the PSBT object, because every
+    # "is this ours?" question in psbt.py is answered against them.
+    p.descriptors = prov.descriptors(network)
 
     # Analyse against the watch-only keys. This is what makes it possible to
     # display the transaction — including which output is really our change —

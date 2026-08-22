@@ -18,7 +18,7 @@ Orbit it, and export OBJ or glTF straight from the viewer. The turntable above i
 
 ## Status
 
-**Rev 0.6.** The design is complete, the gate logic self-tests on every commit, and the blood reader is buildable today for $60 of hardware plus $31 of consumables.
+**Rev 0.8.** The design is complete, the signing stack and the gate logic both self-test on every commit, and the blood reader is buildable today for $60 of hardware plus $31 of consumables.
 
 Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build — `calibrate.py` runs the spoof panel for both tiers, sets every threshold from your own samples, and writes a file the device loads. The touch panel is 15-second sessions, so that half is minutes of work. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
 
@@ -109,6 +109,28 @@ Liveness and identity are separate jobs, and the device does both with separate 
 
 `BUILD.md` §16 carries the full threat model.
 
+## The signing stack
+
+The wallet half is implemented here rather than delegated, because the gate has to reach inside it: the tier decision, the confirmation screen and the attestation all depend on what the transaction actually says. It is pure Python with one dependency, `cryptography`, used only for AES-GCM.
+
+| | |
+|---|---|
+| `secp256k1.py` | ECDSA with RFC 6979 nonces, low-S, low-R grinding, BIP-340 Schnorr, BIP-341 tweaks |
+| `bip39.py` / `bip32.py` | Mnemonic and HD derivation, with the wordlist's SHA-256 checked on load |
+| `psbt.py` / `tx.py` | BIP-174 and BIP-370 parsing, and all three sighash algorithms |
+| `addresses.py` | bech32 and bech32m, every script type, EIP-55 |
+| `eth.py` | RLP and EIP-1559, built on the device from fields it displays |
+| `seedstore.py` | The seed at rest |
+| `qr.py` | The airgap: animated frames, and reassembly that refuses substitution |
+| `display.py` / `buttons.py` / `camera.py` | The screen, the four buttons, and the only way data gets in |
+| `app.py` | The loop: scan, show, confirm, PIN, gate, sign, emit |
+
+Every one of them is checked against the vectors published in the BIPs, RFC 6979 and the EIPs — not against its own output. During development the signatures were also compared byte for byte with `embit` and `eth-account` across every script type and six chains; they match exactly. Those packages are not dependencies.
+
+Multisig has to be registered before it can be signed. That is not bureaucracy: without the co-signers on file, "is this output mine?" can only be answered as "does it contain a key of mine?", and an attacker who controls the coordinator can build a script holding one key of yours and the rest theirs. It hashes correctly, the wallet calls it change, and the balance moves somewhere you cannot spend alone. With the quorum registered the device rebuilds the exact script your co-signers produce and compares it byte for byte. `tools/provision.py multisig` does the registering.
+
+`firmware/test_wallet.py` and `firmware/test_app.py` are the other half of the argument. They are a list of the ways hardware wallets have actually lost people's money — fee inflation through a lying witness UTXO, change substitution, a co-signer swapped out of a quorum, a key quoted at a path that does not derive it, sighash downgrades, calldata smuggled into a transfer, chain-id replay — each written as a hostile input, each of which must be refused.
+
 ## Keys and backup
 
 The device holds a standard BIP39 seed, encrypted at rest and unwrapped only after the gate passes. The unwrapping key comes from your PIN and the secure element's own secret, so the encrypted seed is inert on any other machine and recoverable on this one. Back it up on paper or steel as with any hardware wallet. If the device fails, restore to a Ledger, a Trezor or a replacement build.
@@ -139,6 +161,7 @@ python bip32.py                        # BIP-32 vectors, hardened isolation
 python tx.py                           # BIP-143 and BIP-341 sighash vectors
 python eth.py                          # RLP, EIP-1559, recovery
 python test_wallet.py                  # end to end, then every footgun
+python test_app.py                     # the whole loop, driven with fakes
 ```
 
 Each spoof class fails at the physically correct gate, and the self-test fails
@@ -164,6 +187,11 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/addresses.py` | bech32/bech32m, script types, EIP-55 |
 | `firmware/seedstore.py` | The seed at rest |
 | `firmware/qr.py` | The airgap: framing and reassembly |
+| `firmware/display.py` | The ST7789 panel, and the layout limits it must not undo |
+| `firmware/buttons.py` | Four buttons, and the one that means consent |
+| `firmware/camera.py` | QR capture, and the only way data gets in |
+| `firmware/app.py` | The loop, as a person uses it |
+| `firmware/test_app.py` | The whole device, driven end to end with fakes |
 | `firmware/se_atecc.py` | ATECC608B driver. Unverified until probed on hardware |
 | `firmware/test_wallet.py` | End to end, and every footgun we could name |
 | `tools/provision.py` | Choose a seed, wrap it, record the watch-only accounts |

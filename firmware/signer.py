@@ -184,7 +184,17 @@ class Signer:
     def _step(self, name: str) -> None:
         self.trace.append(name)
 
-    def authorize_and_sign(self, req: SignRequest, pin: str) -> SignResult:
+    def authorize_and_sign(self, req: SignRequest,
+                           pin: "str | Callable[[], str]") -> SignResult:
+        """`pin` may be a string, or a callable that asks for one.
+
+        The callable form exists because of the CONFIRM-BEFORE-PIN rule above.
+        A user interface that has to hand the PIN in before calling would have
+        to prompt for it before the owner has seen the transaction, which is
+        the exact ordering this chain refuses to allow. Passing a callable
+        moves the prompt to step 4, where it belongs, without letting the
+        caller reorder anything else.
+        """
         self.trace = []
 
         # 1. Render first. An operation the owner cannot read is refused before
@@ -226,6 +236,10 @@ class Signer:
 
         # 4. PIN. Counter increments before compare; exhaustion wipes.
         self._step("pin")
+        if callable(pin):
+            pin = pin()
+            if not isinstance(pin, str):
+                raise Refused("Cancelled at the PIN.")
         try:
             if not self.se.verify_pin(pin):
                 raise Refused(f"Wrong PIN. {self.se.attempts_remaining()} "

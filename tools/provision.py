@@ -142,13 +142,7 @@ def _write(mnemonic: str, se, args) -> int:
 
     (out / BLOB).write_bytes(prov.seed_blob)
     (out / BLOB).chmod(0o600)
-    (out / ACCOUNTS).write_text(json.dumps({
-        "master_fingerprint": prov.master_fingerprint.hex(),
-        "network": args.network,
-        "accounts": [{"script_type": a.script_type, "path": a.path,
-                      "xpub": a.xpub, "network": a.network}
-                     for a in prov.accounts],
-    }, indent=2) + "\n")
+    _save(out, prov, args.network)
 
     # Prove the round trip before declaring success. Provisioning a device that
     # cannot reopen its own seed is the worst possible outcome here, and it is
@@ -181,6 +175,88 @@ def _write(mnemonic: str, se, args) -> int:
     return 0
 
 
+def _save(out: Path, prov: wallet.Provisioning, network: str) -> None:
+    (out / ACCOUNTS).write_text(json.dumps({
+        "master_fingerprint": prov.master_fingerprint.hex(),
+        "network": network,
+        "accounts": [{"script_type": a.script_type, "path": a.path,
+                      "xpub": a.xpub, "network": a.network}
+                     for a in prov.accounts],
+        "multisig": [{"label": m.label, "threshold": m.threshold,
+                      "sorted_keys": m.sorted_keys, "wrapped": m.wrapped,
+                      "network": m.network,
+                      "cosigners": [{"label": c.label, "fingerprint": c.fingerprint,
+                                     "path": c.path, "xpub": c.xpub}
+                                    for c in m.cosigners]}
+                     for m in prov.multisig],
+    }, indent=2) + "\n")
+
+
+def load(d: Path) -> wallet.Provisioning:
+    """Read a provisioned device's public record and its wrapped seed."""
+    data = json.loads((d / ACCOUNTS).read_text())
+    prov = wallet.Provisioning(
+        seed_blob=(d / BLOB).read_bytes(),
+        master_fingerprint=bytes.fromhex(data["master_fingerprint"]),
+        accounts=[wallet.Account(**a) for a in data["accounts"]])
+    for m in data.get("multisig", []):
+        prov.multisig.append(wallet.Multisig(
+            label=m["label"], threshold=m["threshold"],
+            sorted_keys=m["sorted_keys"], wrapped=m["wrapped"],
+            network=m["network"],
+            cosigners=[wallet.CoSigner(**c) for c in m["cosigners"]]))
+    return prov
+
+
+def cmd_multisig(args) -> int:
+    """Register a quorum, from a file of co-signer xpubs.
+
+    The file is one co-signer per line:
+
+        label fingerprint path xpub
+
+    Every co-signer has to be here, including this device — the whole point is
+    that the device can rebuild the exact script your quorum produces, and it
+    cannot do that from a subset. Take your own line from `provision.py show`.
+    """
+    d = Path(args.dir)
+    prov = load(d)
+    cosigners = []
+    for n, line in enumerate(Path(args.cosigners).read_text().splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 4:
+            print(f"line {n}: expected `label fingerprint path xpub`, got "
+                  f"{len(parts)} fields")
+            return 1
+        label, fp, path, xpub = parts
+        cosigners.append(wallet.CoSigner(label=label, fingerprint=fp.lower(),
+                                         path=path, xpub=xpub))
+
+    ms = wallet.Multisig(label=args.label, threshold=args.threshold,
+                         cosigners=cosigners, sorted_keys=not args.unsorted,
+                         wrapped=args.wrapped, network=args.network)
+    try:
+        prov.register_multisig(ms)
+    except wallet.WalletError as e:
+        print(f"Refused: {e}")
+        return 1
+
+    _save(d, prov, args.network)
+    print(f"Registered {ms.threshold}-of-{len(ms.cosigners)} {ms.label!r}"
+          f"{' (p2sh-wrapped)' if ms.wrapped else ''}"
+          f"{'' if ms.sorted_keys else ', unsorted keys'}")
+    for c in ms.cosigners:
+        mine = " <- this device" if c.fingerprint == prov.master_fingerprint.hex() else ""
+        print(f"  {c.label:<12} {c.fingerprint}  {c.path}{mine}")
+    print("\nThe device will now refuse any multisig input outside a registered")
+    print("quorum, and will only call an output change when the whole quorum")
+    print("rebuilds it. Register the same descriptor on every co-signer.")
+    return 0
+
+
 def cmd_show(args) -> int:
     d = Path(args.dir)
     data = json.loads((d / ACCOUNTS).read_text())
@@ -189,7 +265,16 @@ def cmd_show(args) -> int:
     for a in data["accounts"]:
         print(f"\n  {a['script_type']}  {a['path']}")
         print(f"  {a['xpub']}")
+    for m in data.get("multisig", []):
+        print(f"\n  quorum {m['label']}: {m['threshold']} of "
+              f"{len(m['cosigners'])}")
+        for c in m["cosigners"]:
+            print(f"    {c['label']:<12} {c['fingerprint']}  {c['path']}")
     print("\nThese are public. Give them to a coordinator to watch the wallet.")
+    print("\nFor a multisig co-signer file, your line is:")
+    for a in data["accounts"]:
+        if a["script_type"].startswith("multisig"):
+            print(f"  thisdevice {data['master_fingerprint']} {a['path']} {a['xpub']}")
     return 0
 
 
@@ -216,6 +301,19 @@ def main() -> int:
     p = sub.add_parser("show")
     p.add_argument("--dir", default="/boot/cell")
     p.set_defaults(fn=cmd_show)
+
+    p = sub.add_parser("multisig", help="register a quorum")
+    p.add_argument("--dir", default="/boot/cell")
+    p.add_argument("--label", required=True)
+    p.add_argument("--threshold", type=int, required=True)
+    p.add_argument("--cosigners", required=True,
+                   help="file of `label fingerprint path xpub` lines")
+    p.add_argument("--network", default="mainnet",
+                   choices=["mainnet", "testnet", "regtest"])
+    p.add_argument("--wrapped", action="store_true", help="p2sh-p2wsh")
+    p.add_argument("--unsorted", action="store_true",
+                   help="do NOT sort keys (BIP-67 is the default)")
+    p.set_defaults(fn=cmd_multisig)
 
     args = ap.parse_args()
     if getattr(args, "pin", None) is not None and not args.pin.isdigit():

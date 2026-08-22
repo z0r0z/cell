@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""The whole device, driven end to end with fakes.
+
+Everything below `app.py` already has its own tests. This file is about the
+seams between them — the places where a correct component can still be used
+wrongly, and where the ordering the design depends on could quietly stop
+holding:
+
+    the transaction is DISPLAYED before the PIN is asked for
+    the PIN is asked for before the gate runs
+    the gate runs before anything is unwrapped
+    declining at any point signs nothing and says so
+    every refusal is a screen the owner can read, never a traceback
+
+The last one is not decoration. A device that drops to a traceback in front
+of somebody holding a lancet has failed at the only job it has, so the loop is
+driven with hostile input and asserted to keep its footing.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import sys
+
+import app
+import bip32
+import ops
+import psbt as psbtmod
+import qr
+import wallet
+from buttons import BACK, CONFIRM, DOWN, UP, FakeButtons
+from camera import FakeCamera
+from display import ConsoleDisplay
+from policy import Policy
+from se import SoftSE
+from test_wallet import MNEMONIC, build_multisig_psbt, build_psbt, multisig_parts
+
+PIN = "123456"
+FW = hashlib.sha256(b"test firmware").digest()
+CAL = hashlib.sha256(b"test thresholds").digest()
+
+FAILURES: list[str] = []
+
+
+def check(label: str, ok: bool) -> None:
+    print(f"  {label:<58}{'PASS' if ok else 'FAIL'}")
+    if not ok:
+        FAILURES.append(label)
+
+
+# --------------------------------------------------------------------------
+
+
+def pin_presses(pin: str = PIN) -> list[str]:
+    """The button sequence that types a PIN on four buttons."""
+    out = []
+    for ch in pin:
+        out += [UP] * int(ch) + [CONFIRM]
+    return out
+
+
+class Recorder(ConsoleDisplay):
+    """A display that remembers every screen it was asked to paint."""
+
+    def __init__(self):
+        super().__init__(out=io.StringIO())
+        self.screens: list[list[str]] = []
+
+    def show(self, lines, highlight=None):
+        super().show(lines, highlight)
+        self.screens.append(list(lines))
+
+    def text(self) -> str:
+        return "\n".join("\n".join(s) for s in self.screens)
+
+
+def make_device(*, presses, frames, gate=None, policy=None, prov=None, se=None,
+                network="mainnet"):
+    order: list[str] = []
+
+    def default_gate(tier):
+        order.append(f"gate:{tier.name}")
+        return True, {"gate_scores": {"G1": 0.98}, "features": {"soret": 0.4}}
+
+    se = se or SoftSE(pin=PIN)
+    fake_buttons = FakeButtons(list(presses))
+    if prov is None:
+        prov = wallet.provision(MNEMONIC, se, PIN,
+                                script_types=("p2wpkh", "p2tr", "p2sh-p2wpkh",
+                                              "p2pkh"))
+    d = app.Device(prov=prov, se=se, display=Recorder(),
+                   buttons=fake_buttons, camera=FakeCamera(frames),
+                   run_gate=gate or default_gate, policy=policy or Policy(),
+                   fw_hash=FW, cal_hash=CAL, network=network,
+                   clock=fake_buttons.now)
+    return d, order
+
+
+def main() -> int:
+    print("Application loop — the seams between the parts\n")
+    root = bip32.from_mnemonic(MNEMONIC)
+
+    # ---- the happy path ------------------------------------------------
+    print(" a signature, start to finish")
+    blob = build_psbt(root, "p2wpkh")
+    frames = qr.encode(blob)
+    d, order = make_device(presses=[CONFIRM] + [CONFIRM] + pin_presses()
+                           + [CONFIRM, CONFIRM],
+                           frames=frames)
+    outcome = d.run_once()
+    check("a scanned PSBT is signed", outcome == "signed-psbt")
+    text = d.display.text()
+    check("the destination was shown in full",
+          "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+          in text.replace("\n", "").replace(" ", ""))
+    check("the amount was shown", "0.00150000 BTC" in text)
+    check("the tier was stated", "requires" in text)
+    check("the signed PSBT was emitted as QR frames", len(d.display.frames) > 0)
+    emitted = qr.decode(d.display.frames)
+    check("the emitted frames reassemble into a PSBT",
+          emitted.startswith(psbtmod.PSBT_MAGIC))
+    check("...carrying a signature", any(
+        k[:1] == bytes([psbtmod.IN_PARTIAL_SIG])
+        for k in psbtmod.PSBT.parse(emitted).inputs[0]))
+    check("...and the attestation",
+          psbtmod.PSBT.parse(emitted).get_proprietary(b"CELL\x01") is not None)
+
+    # ---- the ordering the design rests on -------------------------------
+    print("\n ordering")
+    screens = d.display.screens
+
+    def first_screen_matching(needle: str) -> int:
+        for i, s in enumerate(screens):
+            if needle in "\n".join(s):
+                return i
+        return 10**6
+
+    i_amount = first_screen_matching("0.00150000 BTC")
+    i_pin = first_screen_matching("ENTER PIN")
+    i_gate = first_screen_matching("REQUIRED")
+    check("the transaction is shown before the PIN is asked for",
+          i_amount < i_pin)
+    check("the PIN is asked for before the gate is run", i_pin < i_gate)
+    check("the gate ran after both", order and order[0].startswith("gate:"))
+
+    # ---- declining, at each point ---------------------------------------
+    print("\n declining")
+    d2, order2 = make_device(presses=[CONFIRM, BACK], frames=frames)
+    check("declining at the confirmation signs nothing",
+          d2.run_once() == "cancelled")
+    check("...and no gate was run", order2 == [])
+    check("...and it says so", "CANCELLED" in d2.display.text())
+    check("...and nothing was emitted", d2.display.frames == [])
+
+    d3, order3 = make_device(presses=[CONFIRM, CONFIRM, BACK], frames=frames)
+    check("backing out of the PIN signs nothing", d3.run_once() == "cancelled")
+    check("...and no gate was run", order3 == [])
+
+    def failing_gate(tier):
+        return False, {"message": "no pulse detected"}
+
+    d4, _ = make_device(presses=[CONFIRM, CONFIRM] + pin_presses() + [CONFIRM],
+                        frames=frames, gate=failing_gate)
+    check("a failed gate signs nothing", d4.run_once() == "refused")
+    check("...and the reason reaches the owner",
+          "no pulse" in d4.display.text())
+    check("...and nothing was emitted", d4.display.frames == [])
+
+    # ---- a wrong PIN ----------------------------------------------------
+    print("\n the PIN")
+    se = SoftSE(pin=PIN)
+    prov = wallet.provision(MNEMONIC, se, PIN,
+                            script_types=("p2wpkh", "p2tr", "p2sh-p2wpkh", "p2pkh"))
+    d5, order5 = make_device(presses=[CONFIRM, CONFIRM] + pin_presses("999999")
+                             + [CONFIRM],
+                             frames=frames, se=se, prov=prov)
+    check("a wrong PIN is refused", d5.run_once() == "refused")
+    check("...and the gate never ran", order5 == [])
+    check("...and the owner is told how many attempts remain",
+          "attempts remaining" in d5.display.text())
+
+    # ---- hostile and malformed input ------------------------------------
+    print("\n hostile input")
+    cases = [
+        ("a PSBT with no key of ours",
+         qr.encode(build_psbt(bip32.from_mnemonic(
+             "zoo " * 11 + "wrong"), "p2wpkh"))),
+        ("a truncated PSBT", qr.encode(blob[:-8])),
+        ("a PSBT paying two destinations",
+         qr.encode(build_psbt(root, "p2wpkh", send=100_000, change=45_000,
+                              extra_outputs=((50_000,
+                                              "bc1qrp33g0q5c5txsp9arysrx4k6zd"
+                                              "kfs4nce4xj0gdcccefvpysxf3qccfmv3"),)))),
+        ("a QR that is not a transaction at all", qr.encode(b"hello there")),
+        ("a QR full of JSON that is not ours",
+         qr.encode(json.dumps({"type": "something-else"}).encode())),
+        ("an Ethereum request with an unknown field",
+         qr.encode(json.dumps({"type": "cell-eth-tx", "chain_id": 1, "nonce": 0,
+                               "max_priority_fee_per_gas": 1, "max_fee_per_gas": 2,
+                               "gas_limit": 21000, "value": 0,
+                               "to": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+                               "data": "0xdeadbeef"}).encode())),
+        ("an Ethereum request missing a field",
+         qr.encode(json.dumps({"type": "cell-eth-tx", "chain_id": 1}).encode())),
+    ]
+    for label, fs in cases:
+        dev, _ = make_device(presses=[CONFIRM] * 6, frames=fs)
+        try:
+            outcome = dev.run_once()
+            survived = outcome in ("refused", "unknown-payload", "cancelled")
+        except Exception as e:                                  # noqa: BLE001
+            print(f"      raised {type(e).__name__}: {e}")
+            survived = False
+        check(f"refuses {label}", survived)
+        check(f"...with a screen, not a traceback ({label[:28]})",
+              survived and dev.display.screens
+              and any(len(ln) <= ops.DISPLAY_COLS for ln in dev.display.screens[-1]))
+
+    # An incomplete transfer must be reported, not hung on.
+    dev, _ = make_device(presses=[CONFIRM, CONFIRM], frames=frames[:-1])
+    check("an incomplete scan is reported", dev.run_once() == "scan-failed")
+    check("...in words", "SCAN FAILED" in dev.display.text())
+
+    # ---- Ethereum -------------------------------------------------------
+    print("\n ethereum")
+    req = json.dumps({"type": "cell-eth-tx", "chain_id": 1, "nonce": 3,
+                      "max_priority_fee_per_gas": 10**9,
+                      "max_fee_per_gas": 25 * 10**9, "gas_limit": 21000,
+                      "to": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+                      "value": 10**17}).encode()
+    d6, order6 = make_device(presses=[CONFIRM, CONFIRM] + pin_presses()
+                             + [CONFIRM, CONFIRM],
+                             frames=qr.encode(req))
+    check("an Ethereum request is signed", d6.run_once() == "signed-eth")
+    t6 = d6.display.text()
+    check("the chain is named", "ETHEREUM" in t6.upper())
+    check("the chain id is shown", "chain id 1" in t6)
+    check("the nonce is shown", "nonce    3" in t6)
+    check("the worst-case fee is shown", "max fee" in t6)
+    check("the raw transaction was emitted", len(d6.display.frames) > 0)
+    raw = qr.decode(d6.display.frames)
+    check("...and it is a typed EIP-1559 envelope", raw[0] == 0x02)
+
+    # ---- multisig through the loop --------------------------------------
+    print("\n multisig")
+    se7 = SoftSE(pin=PIN)
+    prov7 = wallet.provision(MNEMONIC, se7, PIN)
+    ms, members = multisig_parts(root)
+    prov7.register_multisig(ms)
+    d7, _ = make_device(presses=[CONFIRM, CONFIRM] + pin_presses() + [CONFIRM, CONFIRM],
+                        frames=qr.encode(build_multisig_psbt(ms, members)),
+                        se=se7, prov=prov7)
+    check("a registered quorum signs", d7.run_once() == "signed-psbt")
+    check("the quorum is on the confirmation screen",
+          "MULTISIG 2 of 3" in d7.display.text())
+
+    se8 = SoftSE(pin=PIN)
+    prov8 = wallet.provision(MNEMONIC, se8, PIN)
+    d8, order8 = make_device(presses=[CONFIRM] * 4,
+                             frames=qr.encode(build_multisig_psbt(ms, members)),
+                             se=se8, prov=prov8)
+    check("an unregistered quorum is refused at the screen",
+          d8.run_once() == "refused")
+    check("...and never reached the gate", order8 == [])
+
+    # ---- the tier still governs -----------------------------------------
+    print("\n the gate still governs")
+    d9, order9 = make_device(presses=[CONFIRM, CONFIRM] + pin_presses()
+                             + [CONFIRM, CONFIRM],
+                             frames=frames, policy=Policy(blood_above=1))
+    d9.run_once()
+    check("a spend above the floor demands blood", order9 == ["gate:BLOOD"])
+    check("...and the owner is told what that means",
+          "ten minutes" in d9.display.text())
+
+    d10, order10 = make_device(presses=[CONFIRM, CONFIRM] + pin_presses()
+                               + [CONFIRM, CONFIRM], frames=frames)
+    d10.run_once()
+    check("a small spend runs at touch", order10 == ["gate:TOUCH"])
+    check("...and says so", "TOUCH REQUIRED" in d10.display.text())
+
+    # ---- the read-only screens ------------------------------------------
+    print("\n the screens that sign nothing")
+    d11, order11 = make_device(presses=[UP, CONFIRM], frames=[])
+    check("UP shows a receiving address", d11.run_once() == "address")
+    addr_text = d11.display.text().replace("\n", "").replace(" ", "")
+    expected = d11.prov.account_for("p2wpkh").xpub
+    node = bip32.ExtendedKey.deserialize(expected).derive([0, 0])
+    import addresses as addr_mod
+    want = addr_mod.script_to_address(addr_mod.p2wpkh_script(node.pubkey))
+    check("...and it is the address this seed derives", want in addr_text)
+    check("...without unlocking anything", order11 == [])
+
+    d12, _ = make_device(presses=[DOWN, CONFIRM], frames=[])
+    check("DOWN shows the device's public identity", d12.run_once() == "keys")
+    check("...including the fingerprint",
+          d12.prov.master_fingerprint.hex() in d12.display.text())
+
+    # ---- every screen fits the panel ------------------------------------
+    print("\n every screen fits")
+    over = []
+    for dev in (d, d2, d4, d5, d6, d7, d9, d11, d12):
+        for s in dev.display.screens:
+            if len(s) > ops.DISPLAY_ROWS or any(len(ln) > ops.DISPLAY_COLS for ln in s):
+                over.append(s)
+    check("no screen anywhere overflowed the display", not over)
+    if over:
+        print(f"      first offender: {over[0]!r}")
+
+    print("\n" + "-" * 66)
+    if FAILURES:
+        print(f"FAIL — {len(FAILURES)}:")
+        for f in FAILURES:
+            print(f"  - {f}")
+        return 1
+    print("PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

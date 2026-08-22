@@ -13,7 +13,7 @@ samples. That step is part of the build, not a caveat about it.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — nineteen suites, no hardware required.
+`python firmware/run_tests.py` — twenty-seven suites, no hardware required.
 
 ### The signing stack
 
@@ -58,6 +58,68 @@ trip against our own implementation proves nothing, so none of these are that.
 | Hostile captures | 9 malformed captures | Zeros, NaNs, negative counts, short speckle — each rejected at a named gate, none raise |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
 
+### Multisig, and the registry it depends on
+
+| Case | Result |
+|---|---|
+| 2-of-3 p2wsh, full unlock chain | Partial signature present and verifying against the BIP-143 sighash; only our key signed for |
+| 2-of-3 p2sh-p2wsh | Signs; both BIP-48 script types covered |
+| Quorum on the confirmation screen | "MULTISIG 2 of 3" and "signature 1 of 2", rebuilt from the registered co-signers rather than read off the host's script |
+| Unregistered quorum | Refused before the gate — a device that signs a quorum it cannot describe cannot tell yours from someone else's |
+| **A co-signer swapped in a change output** | Not treated as change; shown as a WARNING with the address in full. This is the attack registration exists to stop |
+| A co-signer quoted at a different index | Not change |
+| BIP-67 ordering flipped | Not change |
+| Witness script absent, or not a bare m-of-n | Not change; a non-multisig witness script is refused at the input |
+| Registering a quorum we are not in | Refused |
+| Registering one that quotes a foreign xpub under our fingerprint | Refused |
+| 4-of-3, or a duplicate label | Refused |
+
+### PSBT version 2 (BIP-370)
+
+| Case | Result |
+|---|---|
+| v2 rebuilt into a transaction | Byte-identical to the v0 form of the same PSBT |
+| v2 signed | Same signature as v0, returned as v2 rather than silently downgraded |
+| v2 under attack | Two destinations and a lying witness UTXO refused exactly as in v0 |
+| Malformed v2 | Missing input count, previous txid, output index; short version or txid — all refused |
+| Locktimes | A required height locktime overrides the fallback; requiring both a height and a time locktime is refused as unsatisfiable |
+| An unknown PSBT version | Refused by name, not guessed at |
+
+### The application loop
+
+`firmware/test_app.py`. The device driven end to end with fake display, buttons
+and camera — the seams between parts that are individually correct.
+
+| Case | Result |
+|---|---|
+| A scanned PSBT, start to finish | Signed; emitted frames reassemble into a PSBT carrying both the signature and the attestation |
+| Ordering | The transaction is displayed before the PIN is asked for, the PIN before the gate runs |
+| Declining | At the confirmation, at the PIN, and at the gate — nothing signed, nothing emitted, and the owner told so |
+| A wrong PIN | Refused, gate never reached, attempts remaining shown |
+| Hostile input | A PSBT with none of our keys, a truncated one, a two-destination one, a QR that is not a transaction, foreign JSON, an Ethereum request with an unknown or missing field — every one refused as a readable screen, never a traceback |
+| An incomplete scan | Reported in words rather than hung on |
+| Ethereum | Signed; chain, chain id, nonce and worst-case fee all on screen; raw transaction emitted as a typed envelope |
+| Multisig | A registered quorum signs and shows its threshold; an unregistered one is refused before the gate |
+| Tier policy | A spend above the floor demands blood and says what that costs; a small one runs at touch |
+| Read-only screens | The receiving address matches what the seed derives, with nothing unlocked to show it |
+| Every screen, everywhere | None overflowed 40 columns or 20 rows |
+
+### The secure element driver
+
+`firmware/test_se_atecc.py`, against a fake chip. This is logic coverage, not
+evidence about silicon — the fake holds slot secrets in memory, which is the
+one thing the real part does not do.
+
+| Case | Result |
+|---|---|
+| An unlocked chip | Refused outright, with a message saying how to fix it |
+| The attempt counter | Spent before the comparison; the cost survives a power cut |
+| A correct PIN | Restores the budget by moving the on-chip baseline, never by winding the counter back |
+| A baseline ahead of the counter | Treated as tampering and refused |
+| The wipe | Overwrites the wrapping slot; the correct PIN cannot revive the device, across a power cut |
+| The KDF | Refuses without a spent attempt, and is single use |
+| The attestation key | Stable, per-chip, verifies against its own pubkey, and is not the wrapping key |
+
 ### The wallet, end to end and under attack
 
 `firmware/test_wallet.py`. The first group proves it works; the rest are the
@@ -86,7 +148,10 @@ tables — a round trip against your own implementation proves nothing.
 
 | Component | Why | How to verify |
 |---|---|---|
-| `firmware/se_atecc.py` | Needs the chip. The interface conformance runs in CI; nothing that touches I2C does | `python3 firmware/se_atecc.py --probe` on a built device |
+| `firmware/se_atecc.py` | Needs the chip. The logic around it is now covered against a fake transport; nothing that touches I2C is | `python3 firmware/se_atecc.py --probe` on a built device |
+| `firmware/display.py` | Needs the panel. The layout limits are covered; the SPI driver and the font metrics are not | Any screen on a built device |
+| `firmware/buttons.py` | Needs the switches. The consent and debounce logic is covered; the GPIO edges are not | Press each button on a built device |
+| `firmware/camera.py` | Needs the webcam. Collection and framing are covered; optical decoding is not | Scan a signed PSBT into a coordinator and back |
 | `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
 | `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |
 | Attestation key custody | The ATECC608B signs NIST P-256 only, so the secp256k1 attestation scalar is derived from a chip secret and exists in RAM while signing, rather than never leaving the chip | Stated in `se_atecc.py`; switch `attest.py` to P-256 if you need the stronger property |
