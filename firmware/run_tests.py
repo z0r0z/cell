@@ -255,6 +255,10 @@ def docs_match_the_code() -> bool:
     want("BUILD wallet cost", build, f"${kits['Wallet']:.2f}")
     want("BUILD hardware total", build, f"${hw:.2f}")
     want("BUILD all-in total", build, f"${allin:.2f}")
+    # The full-device figure in the README's opening line. It went stale at $92
+    # while the BOM said $94.40, because nothing checked it — the reader-kit
+    # figures below were checked and stayed right.
+    want("README full device cost", readme, f"${hw:.2f} of hardware")
     want("README reader cost", readme, f"${round(kits['Reader'])} of hardware")
     want("README consumables", readme, f"${round(kits['Reader consumable'])} of consumables")
     # CONTRIBUTING quotes the reader kit too, and was the one file this suite

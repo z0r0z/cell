@@ -45,7 +45,7 @@ The blood reader is the novel component. The wallet layer is a solved problem th
 | Kit | What it is | Cost |
 |---|---|---|
 | `Reader` | The blood reader hardware — Pi, spectrometer, laser, camera, LEDs, filament | $61.60 |
-| `Reader consumable` | Lancets, alcohol pads, PET window film, tape, sharps container. Needed to run the reader at all, and good for hundreds of runs | $31.00 |
+| `Reader consumable` | Lancets, alcohol pads, PET window film, tape, sharps container. Needed to run the reader at all. About 100 blood readings, limited by the lancet and pad counts | $31.00 |
 | `Wallet` | The signing half — secure element, display, buttons, QR camera, fasteners | $30.80 |
 
 Order the reader kit and its consumables together; they are one purchase and the reader is useless without both. The wallet kit is a second purchase you only make if the reader works.
@@ -64,7 +64,7 @@ Order the reader kit and its consumables together; they are one purchase and the
 | Jumper wires, small breadboard | 5 |
 | PETG white + black, ~90 g black + 60 g white | 5.00 |
 
-Plus the reader consumables ($31.00): 100 sterile lancets, 100 alcohol pads, PET window film, 3M 300LSE tape, and a 1 litre sharps container. Every one of them is needed to run the spoof panel in §13, so budget them with the hardware rather than after it. They cover hundreds of runs — 100 sheets of film is about 1600 windows.
+Plus the reader consumables ($31.00): 100 sterile lancets, 100 alcohol pads, PET window film, 3M 300LSE tape, and a 1 litre sharps container. Every one of them is needed to run the spoof panel in §13, so budget them with the hardware rather than after it. That is a starter pack, not a device lifetime: the lancets and pads run out first at 100 each, while 100 sheets of film cut about 1,600 windows. Restock the lancets from any pharmacy.
 
 The reader has no security requirements, because nothing is being signed. Leave wifi enabled, work over SSH, print results to the console. No display, secure element, enclosure or airgap is needed. The only printed parts are a light-tight optical chamber and a plate of cartridges.
 
@@ -84,7 +84,17 @@ It answers the question that determines whether the rest is worth building: does
 
 The signing firmware is in this repository — see §12. Build it, provision a seed, then do the airgap hardening: radios disabled, antenna trace cut, read-only rootfs.
 
-**Full device: $94.40 of hardware,** plus $31.00 of consumables that last hundreds of uses. $125.40 all in.
+**Full device: $94.40 of hardware,** plus $31.00 of consumables. $125.40 all in.
+
+**What a signature costs.** A touch-tier signature costs nothing — no
+cartridge, no lancet, and touch is the everyday default. A blood-tier
+signature spends one lancet ($0.06), one alcohol pad ($0.02), one PET window
+(~$0.005) and one printed cartridge (~2.4 g of PETG, ~$0.12): call it **twenty
+cents**. The device is not consumed by either, and nothing here has a shelf
+life — there are no reagents, which is why §5 chose native clotting over dried
+accelerants.
+
+The hardware is not consumed. The $31.00 covers about 100 blood-tier readings — 100 lancets and 100 alcohol pads are what run out first, while 100 sheets of film cut roughly 1,600 cartridge windows. Touch-tier signatures cost nothing, and cartridges are printed filament rather than a purchase.
 
 ---
 
