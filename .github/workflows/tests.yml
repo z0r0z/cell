@@ -135,41 +135,5 @@ jobs:
           tar -xzf "${TARBALL}" -C ~/bitcoin-core --strip-components=1
           rm "${TARBALL}"
 
-      - name: Start the node
-        run: |
-          set -euo pipefail
-          DATADIR="$RUNNER_TEMP/regtest"
-          mkdir -p "$DATADIR"
-          # regtest_e2e.py expects a node already running and drives it with
-          # `bitcoin-cli -datadir=...` only, so the chain has to come from the
-          # config file -- otherwise bitcoin-cli talks to mainnet's 8332 and
-          # the run dies on "could not connect".
-          cat > "$DATADIR/bitcoin.conf" <<'CONF'
-          regtest=1
-          server=1
-          # getrawtransaction fails on confirmed transactions without this, and
-          # the script checks what Core actually mined.
-          txindex=1
-          # regtest has no fee history, so the wallet refuses to send without a
-          # fallback.
-          fallbackfee=0.0002
-          CONF
-          ~/bitcoin-core/bin/bitcoind -datadir="$DATADIR" -daemon
-          # No codesign step: that is only needed on Apple Silicon, where an
-          # unsigned bitcoind is SIGKILLed on launch. Absent here on purpose.
-          for _ in $(seq 60); do
-            if ~/bitcoin-core/bin/bitcoin-cli -datadir="$DATADIR" getblockchaininfo >/dev/null 2>&1; then
-              break
-            fi
-            sleep 1
-          done
-          ~/bitcoin-core/bin/bitcoin-cli -datadir="$DATADIR" getblockchaininfo \
-            | python3 -c "import json,sys; print('chain:', json.load(sys.stdin)['chain'])"
-          echo "DATADIR=$DATADIR" >> "$GITHUB_ENV"
-
       - name: Run the regtest round trip
-        run: python3 tools/regtest_e2e.py --bitcoin-dir ~/bitcoin-core/bin --datadir "$DATADIR"
-
-      - name: Stop the node
-        if: always()
-        run: ~/bitcoin-core/bin/bitcoin-cli -datadir="$DATADIR" stop || true
+        run: python3 tools/regtest_e2e.py --bitcoin-dir ~/bitcoin-core/bin
