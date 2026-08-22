@@ -283,6 +283,40 @@ def run() -> int:
     ch = ops.BitcoinSpend(amount_sats=1000, fee_sats=10, destination="bc1qdest0",
                           change_sats=500, change_address="bc1qunknown",
                           change_is_ours=False)
+    # The confirmation screen is what the owner actually reads, and the signer
+    # appends three lines to it AFTER the operation is rendered. An operation
+    # that filled the screen exactly used to pass the fit check and then push
+    # the tier disclosure off the bottom — the owner bleeding for a screen that
+    # no longer said which tier was running. 87 destination lengths did it.
+    over = 0
+    for n in range(40, 400):
+        long_dest = ops.BitcoinSpend(
+            amount_sats=1, destination="bc1q" + "x" * n, fee_sats=1,
+            change_sats=5, change_address="bc1q" + "y" * 40,
+            change_is_ours=False, quorum_needed=2, quorum_size=3)
+        try:
+            lines = ops.render_for_display(long_dest,
+                                           reserve=ops.CONFIRM_FOOTER_ROWS)
+        except ops.UnrenderableOperation:
+            continue
+        if len(lines) + ops.CONFIRM_FOOTER_ROWS > ops.DISPLAY_ROWS:
+            over += 1
+    check("no operation renders past the screen once the footer is added",
+          over == 0)
+
+    # And the composed screen is checked as a whole, so a long policy reason
+    # cannot widen it past the display either.
+    try:
+        ops.check_fits(["x" * (ops.DISPLAY_COLS + 1)])
+        check("an over-wide confirmation line is refused", False)
+    except ops.UnrenderableOperation:
+        check("an over-wide confirmation line is refused", True)
+    try:
+        ops.check_fits(["ok"] * (ops.DISPLAY_ROWS + 1))
+        check("an over-tall confirmation screen is refused", False)
+    except ops.UnrenderableOperation:
+        check("an over-tall confirmation screen is refused", True)
+
     check("unverified change is flagged to the owner",
           any("WARNING" in ln for ln in ch.render()))
 

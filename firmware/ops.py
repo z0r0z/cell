@@ -396,17 +396,22 @@ def parse(payload: dict) -> Operation:
     return op
 
 
-def render_for_display(op: Operation, width: int = DISPLAY_COLS,
-                       rows: int = DISPLAY_ROWS) -> list[str]:
-    """Render, refusing anything that does not fit the physical screen.
+# Lines the signer appends to every confirmation screen: a blank, the tier
+# being run, and why policy chose it. They are part of what the owner reads, so
+# the operation must be checked against the space that is LEFT, not against the
+# whole screen. Rendering to exactly 20 rows and then adding these silently
+# pushed the tier disclosure off the bottom.
+CONFIRM_FOOTER_ROWS = 3
 
-    A line that runs off a 240x240 display is a field the owner did not read.
-    Silently truncating it would defeat the entire point of rendering.
+
+def check_fits(lines: list[str], width: int = DISPLAY_COLS,
+               rows: int = DISPLAY_ROWS) -> list[str]:
+    """Refuse anything that does not fit the physical screen, exactly as shown.
+
+    Takes the FINAL composed screen, so nothing can be appended after the
+    check. A line that runs off a 240x240 display is a field the owner did not
+    read, and silently truncating it defeats the entire point of rendering.
     """
-    if not isinstance(op, ALLOWED):
-        raise UnrenderableOperation(
-            f"refusing {type(op).__name__}: not in the closed operation set")
-    lines = op.render()
     too_long = [ln for ln in lines if len(ln) > width]
     if too_long:
         raise UnrenderableOperation(
@@ -415,5 +420,20 @@ def render_for_display(op: Operation, width: int = DISPLAY_COLS,
         # Refusing beats scrolling. A field below the fold is a field the owner
         # may never have seen, and consent to what you did not see is not consent.
         raise UnrenderableOperation(
-            f"operation needs {len(lines)} lines, the display shows {rows}")
+            f"screen needs {len(lines)} lines, the display shows {rows}")
     return lines
+
+
+def render_for_display(op: Operation, width: int = DISPLAY_COLS,
+                       rows: int = DISPLAY_ROWS,
+                       reserve: int = 0) -> list[str]:
+    """Render one operation, refusing anything that will not fit.
+
+    `reserve` is rows the caller will add afterwards. The signer reserves
+    CONFIRM_FOOTER_ROWS for the tier lines it appends; leaving it at 0 checks
+    the operation alone, which is what the operation-set tests want.
+    """
+    if not isinstance(op, ALLOWED):
+        raise UnrenderableOperation(
+            f"refusing {type(op).__name__}: not in the closed operation set")
+    return check_fits(op.render(), width, max(0, rows - reserve))

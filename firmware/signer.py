@@ -191,7 +191,11 @@ class Signer:
         #    they spend a lancet, a cartridge, or ten minutes on it.
         self._step("render")
         try:
-            display = ops.render_for_display(req.operation)
+            # Reserve the rows the confirmation footer will occupy, so an
+            # operation cannot render to a full screen and then push the tier
+            # disclosure off the bottom.
+            display = ops.render_for_display(
+                req.operation, reserve=ops.CONFIRM_FOOTER_ROWS)
         except ops.UnrenderableOperation as e:
             raise Refused(f"Refused: {e}") from None
         if len(req.sighash) != 32:
@@ -210,6 +214,13 @@ class Signer:
         # 3. Confirm THIS transaction, before authenticating.
         self._step("confirm")
         shown = display + ["", f"requires {tier.name}", decision.reason]
+        # Validate what is ACTUALLY shown. The reason string comes from policy
+        # and an operation class the wallet layer is free to name, so its width
+        # is not knowable at render time.
+        try:
+            ops.check_fits(shown)
+        except ops.UnrenderableOperation as e:
+            raise Refused(f"Refused: confirmation screen does not fit: {e}") from None
         if not self._confirm(shown):
             raise Refused("Cancelled at confirmation.")
 
