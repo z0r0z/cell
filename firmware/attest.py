@@ -420,6 +420,58 @@ def _selftest() -> int:
     return 0 if ok else 1
 
 
+def export_vectors() -> dict:
+    """Independent-verifier fixture. Same inputs as _selftest's round-trip.
+
+    A coordinator that only round-trips its own pack() has proven nothing.
+    This is the record those implementations must accept.
+    """
+    sk = bytes.fromhex("00" * 31 + "03")
+    pk = schnorr_pubkey(sk)
+    fw = hashlib.sha256(b"firmware-v1").digest()
+    cal = hashlib.sha256(b"thresholds-A").digest()
+    live = hashlib.sha256(b"gate-scores-A").digest()
+    sh = hashlib.sha256(b"tx-A").digest()
+    a = attest(Tier.BLOOD, 42, sh, fw, cal, live,
+               lambda m: schnorr_sign(m, sk), pk)
+    return {
+        "format": "cell-attest-v1",
+        "comment": (
+            "Packed by firmware/attest.py from the self-test inputs. "
+            "secretKey is BIP-340 test vector 0 (public). Coordinators must "
+            "verify the blob; they must not re-sign it."
+        ),
+        "records": [
+            {
+                "label": "selftest-blood-42",
+                "secretKey": sk.hex(),
+                "tier": int(a.tier),
+                "counter": a.counter,
+                "sighash": a.sighash.hex(),
+                "fwHash": a.fw_hash.hex(),
+                "calHash": a.cal_hash.hex(),
+                "liveHash": a.live_hash.hex(),
+                "attestPub": a.attest_pub.hex(),
+                "blob": a.pack().hex(),
+            }
+        ],
+    }
+
+
 if __name__ == "__main__":
+    import argparse
+    import json
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="CELL attestation self-test")
+    parser.add_argument("--export-vectors", metavar="PATH",
+                        help="write the independent-verifier JSON fixture")
+    args = parser.parse_args()
+    if args.export_vectors:
+        path = Path(args.export_vectors)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(export_vectors(), indent=2) + "\n")
+        print(f"wrote {path}")
+        raise SystemExit(0)
     print("CELL attestation self-test\n")
     raise SystemExit(_selftest())

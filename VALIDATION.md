@@ -40,6 +40,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Cross-implementation | `embit` and `eth-account`, during development | Signatures byte-identical across four Bitcoin script types and six EVM chains. Neither package is a dependency |
 | Two Schnorr copies | `attest.py` vs `secp256k1.py` | Pinned to agree on 8 keys, so the standalone copy in `attest.py` cannot drift |
 | Attestation record | Pack/unpack round trip | 238 bytes, exact |
+| Independent-verifier vectors | `firmware/vectors/attest-v1.json` packed by `attest.py`, re-verified in CI | Blob unpacks and `verify()` accepts; file is stale if it disagrees with a live `export_vectors()` |
 | Attestation rejection | 8 negative cases | Wrong transaction, replayed counter, unknown firmware, unregistered calibration, swapped gate measurements, wrong signer, forged signature, wrong tier — all refused |
 | Malformed input | 6 hostile inputs | Truncated, empty, bad magic, bad version, unknown tier, all-zero — all return a verdict, none raise |
 | Quorum | 3-signer roster | Missing attestation fails; touch-tier attestation fails where blood is required |
@@ -77,6 +78,7 @@ input whose pass condition is a refusal.
 | Malformed encodings | Truncated, trailing bytes, bad magic, duplicate map key, pre-signed unsigned transaction — all refused |
 | The seed at rest | A wrong PIN, a tampered blob and a foreign chip all fail closed, with one message for all three |
 | Ethereum | Recovers to the displayed sender; chain id, nonce and worst-case fee displayed; calldata and unnamed chains refused; the chain id changes the digest |
+| Coordinator challenge | Nonce shown in full; attestation binds `SHA256(CELL/challenge/v1\|purpose\|nonce)`; spend-key Schnorr verifies; unknown purpose refused; Touch-default |
 | The gate still governs | A spend above the floor demands blood; a failed gate signs nothing; cancelling at the prompt signs nothing |
 
 Interoperability against published vectors is the meaningful result in both

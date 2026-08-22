@@ -155,7 +155,8 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/blood_gate.py` | Blood tier, six gates |
 | `firmware/touch_gate.py` | Touch tier, seven gates |
 | `firmware/ops.py` | The closed operation set and its renderer |
-| `firmware/wallet.py` | Provisioning, and the two signing entry points |
+| `firmware/vectors/attest-v1.json` | Independent-verifier fixture, packed by `attest.py` |
+| `firmware/wallet.py` | Provisioning, and the three signing entry points |
 | `firmware/psbt.py` | BIP-174: what the device recomputes rather than trusts |
 | `firmware/tx.py` | Transactions and all three sighash algorithms |
 | `firmware/eth.py` | RLP and EIP-1559, built from displayed fields |

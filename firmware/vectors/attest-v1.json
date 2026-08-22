@@ -1,0 +1,18 @@
+{
+  "format": "cell-attest-v1",
+  "comment": "Packed by firmware/attest.py from the self-test inputs. secretKey is BIP-340 test vector 0 (public). Coordinators must verify the blob; they must not re-sign it.",
+  "records": [
+    {
+      "label": "selftest-blood-42",
+      "secretKey": "0000000000000000000000000000000000000000000000000000000000000003",
+      "tier": 2,
+      "counter": 42,
+      "sighash": "126bf26abdfe3ca89fb546c084a4197e81535501fb33c62f6b90d1716d25a59c",
+      "fwHash": "12fa4a7e1d32f7d69677ba92b781565407eee58c44a0be1cdd9b9e76780633f4",
+      "calHash": "46f2bffc7ace1e453c765228ac4a2d008a462c4cd1f388dabd8a1a4866e0d0b7",
+      "liveHash": "a47bd405f7cccb66ca81c87f5fd87ae230b3835b2968f726bf74ae2c7453f6c0",
+      "attestPub": "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
+      "blob": "43454c4c0102000000000000002a126bf26abdfe3ca89fb546c084a4197e81535501fb33c62f6b90d1716d25a59c12fa4a7e1d32f7d69677ba92b781565407eee58c44a0be1cdd9b9e76780633f446f2bffc7ace1e453c765228ac4a2d008a462c4cd1f388dabd8a1a4866e0d0b7a47bd405f7cccb66ca81c87f5fd87ae230b3835b2968f726bf74ae2c7453f6c0f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f93b9ef1e482900d7dd9b8f617b13356ae923a606d01907695941b6c39ea384f71702739cf0bfdfff98bb234f676f4b341aafd3416940c6adcf1944ad3373b15bd"
+    }
+  ]
+}
