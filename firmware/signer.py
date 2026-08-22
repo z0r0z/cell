@@ -74,14 +74,26 @@ class SignResult:
     tier: Tier
     display: list[str] = field(default_factory=list)
 
-    def psbt_proprietary_field(self) -> tuple[bytes, bytes]:
-        """(key, value) for the BIP-174 proprietary field, prefix "CELL".
+    def psbt_proprietary(self) -> tuple[bytes, int, bytes]:
+        """(identifier, subtype, value) for the BIP-174 proprietary field.
+
+        Deliberately not a ready-made key. A BIP-174 proprietary key is
+
+            0xFC <compact len(identifier)> <identifier> <compact subtype> <keydata>
+
+        so the identifier is length-prefixed and cannot simply be concatenated
+        with the subtype. Handing back the parts and letting psbt.py build the
+        key keeps that encoding in one place. Returning bytes that look like a
+        key but are not one is how this was wrong before: Bitcoin Core read the
+        "C" of "CELL" as a 67-byte length, ran off the end of the map, and
+        rejected the whole PSBT rather than skipping the field it could not
+        parse. Our own parser accepted it, because it treats keys as opaque.
 
         Travels beside the PSBT and is stripped before broadcast. Publishing it
         on chain fingerprints the address as a CELL device and discloses how it
         was authorised, so that is a deliberate choice and never a default.
         """
-        return b"CELL" + bytes([attest.VERSION]), self.attestation.pack()
+        return attest.MAGIC, attest.VERSION, self.attestation.pack()
 
 
 def liveness_digest(tier: Tier, gate_attestation: dict) -> bytes:

@@ -100,9 +100,19 @@ def run() -> int:
           not attest.verify(res.attestation, s.se.attest_pubkey(), other,
                             min_counter=0, allowed_fw=[FW],
                             require=Tier.TOUCH).ok)
-    key, val = res.psbt_proprietary_field()
+    # Round-trip through the real PSBT encoder rather than eyeballing the
+    # bytes. The previous form of this check only asserted the key started
+    # with b"CELL", which a malformed key does too — and a malformed
+    # proprietary key makes Bitcoin Core reject the entire PSBT, not just skip
+    # the field, so "our parser reads it back" proves nothing on its own.
+    import psbt as psbtmod
+    ident, subtype, val = res.psbt_proprietary()
     check("psbt field carries a parseable record",
-          key.startswith(b"CELL") and attest.Attestation.unpack(val) == res.attestation)
+          attest.Attestation.unpack(val) == res.attestation)
+    key = psbtmod.proprietary_key(ident, subtype)
+    check("proprietary key is BIP-174 encoded",
+          key[0] == 0xFC and key[1] == len(ident) and
+          key[2:2+len(ident)] == ident and key[2+len(ident)] == subtype)
 
     # ---- the wrapping key is stable, and bound to PIN and device --------
     # RECOVERABILITY IS THE PROPERTY. A wrap key must open tomorrow the seed

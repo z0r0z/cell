@@ -345,11 +345,8 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
                            requested_tier=requested_tier), pin)
 
     if attach_attestation:
-        # `key` is the identifier followed by the record version, which is the
-        # BIP-174 subtype. They have to be handed over separately, because the
-        # encoding length-prefixes the identifier — see psbt.proprietary_key.
-        key, value = result.psbt_proprietary_field()
-        p.set_proprietary(key[:-1], key[-1], value)
+        identifier, subtype, value = result.psbt_proprietary()
+        p.set_proprietary(identifier, subtype, value)
 
     return SignedPSBT(psbt=p.serialize(),
                       attestation=result.attestation.pack(),
