@@ -4,7 +4,7 @@ A hardware wallet that requires a live pulse, or a drop of fresh blood, to autho
 
 Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, about $90 in parts. Public domain.
 
-<img src="diagrams/model-view.png" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
+<img src="diagrams/turntable.gif" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
 
 <sup>116.2 × 73.2 × 28.3 mm. The ring is the sensor port — a fingertip on it, or a cartridge under it. It is a bezel, not a control; nothing rotates.</sup>
 
@@ -14,7 +14,7 @@ Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, a
 python3 -m http.server -d viewer 8000     # then open localhost:8000/instrument.html
 ```
 
-Orbit it, and export OBJ or glTF straight from the viewer. `models/README.md` documents the pipeline and the coordinate convention.
+Orbit it, and export OBJ or glTF straight from the viewer. The turntable above is rendered from that same model by `tools/render_turntable.py`, so it cannot show something the geometry does not. `models/README.md` documents the pipeline and the coordinate convention.
 
 ## Status
 
@@ -160,6 +160,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `diagrams/` | Explainer, build sheet, dimensioned drawings |
 | `firmware/run_tests.py` | Every self-test in one run. What CI runs |
 | `tools/export_model.py` | Re-exports `instrument.obj` from `viewer/model.js` |
+| `tools/render_turntable.py` | Renders the turntable GIF/MP4 from the same model |
 | `tools/gen_mechanical.py` | Regenerates `diagrams/mechanical.svg` from the mesh |
 | `viewer/` | Parametric three.js model — the source `instrument.obj` is exported from |
 | `VALIDATION.md` | Verification status: what is tested, by what method |
