@@ -220,6 +220,7 @@ def docs_match_the_code() -> bool:
     readme = (root / "README.md").read_text()
     validation = (root / "VALIDATION.md").read_text()
     build = (root / "BUILD.md").read_text()
+    contributing = (root / "CONTRIBUTING.md").read_text()
 
     n_blood = len(calibrate.PANEL)
     n_touch = len(tg.PANEL)
@@ -256,6 +257,12 @@ def docs_match_the_code() -> bool:
     want("BUILD all-in total", build, f"${allin:.2f}")
     want("README reader cost", readme, f"${round(kits['Reader'])} of hardware")
     want("README consumables", readme, f"${round(kits['Reader consumable'])} of consumables")
+    # CONTRIBUTING quotes the reader kit too, and was the one file this suite
+    # did not read -- so it was the one file that went stale when the BOM
+    # moved. Any document that names a price has to be checked against the
+    # BOM, or it is only a matter of time.
+    want("CONTRIBUTING reader cost", contributing,
+         f"${round(kits['Reader'])} of hardware")
     return ok
 
 
