@@ -125,7 +125,7 @@ def main() -> int:
         k[:1] == bytes([psbtmod.IN_PARTIAL_SIG])
         for k in psbtmod.PSBT.parse(emitted).inputs[0]))
     check("...and the attestation",
-          psbtmod.PSBT.parse(emitted).get_proprietary(b"CELL\x01") is not None)
+          psbtmod.PSBT.parse(emitted).get_proprietary(b"CELL", 1) is not None)
 
     # ---- the ordering the design rests on -------------------------------
     print("\n ordering")

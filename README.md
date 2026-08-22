@@ -145,6 +145,8 @@ Every one of them is checked against the vectors published in the BIPs, RFC 6979
 
 Multisig has to be registered before it can be signed. That is not bureaucracy: without the co-signers on file, "is this output mine?" can only be answered as "does it contain a key of mine?", and an attacker who controls the coordinator can build a script holding one key of yours and the rest theirs. It hashes correctly, the wallet calls it change, and the balance moves somewhere you cannot spend alone. With the quorum registered the device rebuilds the exact script your co-signers produce and compares it byte for byte. `tools/provision.py multisig` does the registering.
 
+And `tools/regtest_e2e.py` asks the only question that settles anything on its own: Bitcoin Core funds an address this firmware derived, the firmware signs a PSBT spending it, and Core finalises, accepts and mines the result — p2wpkh, p2sh-p2wpkh, p2pkh, p2tr and p2wsh 2-of-3, on a private regtest chain. It found a real defect the first time it ran: the attestation was written into the PSBT with a malformed proprietary key, and Core rejected the whole document rather than skipping the field.
+
 `firmware/test_wallet.py` and `firmware/test_app.py` are the other half of the argument. They are a list of the ways hardware wallets have actually lost people's money — fee inflation through a lying witness UTXO, change substitution, a co-signer swapped out of a quorum, a key quoted at a path that does not derive it, sighash downgrades, calldata smuggled into a transfer, chain-id replay — each written as a hostile input, each of which must be refused.
 
 ## Keys and backup

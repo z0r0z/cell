@@ -166,6 +166,38 @@ silently.
 | **Taproot** | libsecp256k1 via `coincurve` — the implementation Bitcoin Core itself signs with | Our BIP-341 output key equals its `tweak_add`; it verifies our BIP-340 signature and we verify its own over the same digest; tampered, cross-transaction and untweaked-key signatures are all rejected. Script execution is still uncovered — no interpreter available implements it |
 | `app.load_device` | Built from a real provisioned directory and driven to its idle screen | Assembles; exercises `provision.load`, the account records and the display path |
 
+### Accepted by Bitcoin Core
+
+`tools/regtest_e2e.py`, against a private regtest chain with no peers. Not part
+of `run_tests.py` — it needs a Core binary CI has no business downloading —
+but it is the only check here that settles anything on its own authority.
+
+Core funds an address this firmware derived, the firmware signs a PSBT
+spending it through the whole unlock chain, and Core finalises, accepts and
+mines the result.
+
+| Script type | Result |
+|---|---|
+| p2wpkh | Paid, signed, parsed, finalised, **accepted and mined** |
+| p2sh-p2wpkh | Paid, signed, parsed, finalised, **accepted and mined** |
+| p2pkh | Paid, signed, parsed, finalised, **accepted and mined** |
+| **p2tr** | Paid, signed, parsed, finalised, **accepted and mined** — this is the taproot script execution nothing else could reach |
+| **p2wsh 2-of-3** | Paid, signed by two devices, parsed, finalised, **accepted and mined** |
+
+That the round trip completes means the derivation, the sighash, the
+signature, the witness serialisation, the PSBT encoding, the fee arithmetic
+and the standardness of the result are all correct *together*, which is a
+stronger claim than each being correct separately.
+
+**It found a real interop defect on the first run.** The attestation was
+written into the PSBT as `0xFC "CELL" 01`, which is not a BIP-174 proprietary
+key — the identifier must be length-prefixed. Core read the `C` as a 67-byte
+length, ran off the end of the map, and rejected the entire PSBT with a decode
+error rather than skipping the field it could not read. Every PSBT this device
+produced would have been unreadable to the coordinator that had to finalise
+it. No amount of round-tripping through our own parser would have shown it,
+because our parser treats the key as an opaque blob and never looks inside.
+
 ## Written but unverified
 
 | Component | Why | How to verify |
@@ -174,7 +206,6 @@ silently.
 | `firmware/display.py` | Needs the panel. Layout limits and library calls are covered; the SPI timing, the font metrics and the Y offset many 240x240 panels need are not | Any screen on a built device |
 | `firmware/buttons.py` | Needs the switches. Consent and debounce logic and the library calls are covered; whether 30 ms actually settles YOUR switches is not | Press each button on a built device |
 | `firmware/camera.py` | Needs the webcam. Collection, framing and the OpenCV calls are covered; whether a cheap lens focuses on a 240x240 panel is not | Scan a signed PSBT into a coordinator and back |
-| Segwit and taproot on a node | No interpreter available here supports witness execution | Broadcast one testnet transaction |
 | The ATECC608B config zone | The LimitedUse binding between slot 0 and Counter0 is what makes the attempt counter real, and no software can confirm it from outside | `se_atecc.py --probe`, then try eleven wrong PINs on a device you can afford to wipe |
 | `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
 | `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |

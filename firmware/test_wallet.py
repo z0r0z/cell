@@ -344,7 +344,7 @@ def main() -> int:
         check(f"{st}: change recognised as ours", res.display and any(
             "your wallet" in ln for ln in res.display))
         check(f"{st}: attestation rides in the PSBT",
-              signed.get_proprietary(b"CELL\x01") is not None)
+              signed.get_proprietary(b"CELL", 1) is not None)
 
 
     # ---- multisig: the quorum the attestation story depends on ---------

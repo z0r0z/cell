@@ -131,6 +131,29 @@ def _get_all(m: KVMap, keytype: int) -> dict[bytes, bytes]:
     return {k[1:]: v for k, v in m.items() if k and k[0] == keytype and len(k) > 1}
 
 
+def proprietary_key(identifier: bytes, subtype: int = 0,
+                    keydata: bytes = b"") -> bytes:
+    """A BIP-174 proprietary key.
+
+        0xFC <compact len(identifier)> <identifier> <compact subtype> <keydata>
+
+    The length prefix is the whole point and is easy to leave out, because
+    `0xFC` followed by a vendor string looks complete. It is not: a parser
+    reads the byte after 0xFC as the identifier's length, so `0xFC "CELL" 01`
+    tells it the identifier is 0x43 = 67 bytes long, and it runs off the end
+    of the map. Bitcoin Core rejects such a PSBT outright with a decode error
+    — it does not skip the field it cannot read — so an attestation written
+    this way makes the whole transaction unreadable to the coordinator that
+    has to finalise it.
+
+    This was found by handing a signed PSBT to a real node. No amount of
+    round-tripping through our own parser would have shown it, because our own
+    parser treats the key as an opaque blob and never looks inside.
+    """
+    return (bytes([PROPRIETARY]) + ser_compact(len(identifier)) + identifier
+            + ser_compact(subtype) + keydata)
+
+
 def _parse_derivation(val: bytes) -> tuple[bytes, list[int]]:
     if len(val) < 4 or (len(val) - 4) % 4:
         raise BadPSBT("malformed BIP32 derivation field")
@@ -489,21 +512,26 @@ class PSBT:
 
     # ---- proprietary fields, used to carry the attestation ----
 
-    def set_proprietary(self, key: bytes, value: bytes) -> None:
-        self.globals[bytes([PROPRIETARY]) + key] = value
+    def set_proprietary(self, identifier: bytes, subtype: int,
+                        value: bytes, keydata: bytes = b"") -> None:
+        self.globals[proprietary_key(identifier, subtype, keydata)] = value
 
-    def get_proprietary(self, key: bytes) -> bytes | None:
-        return self.globals.get(bytes([PROPRIETARY]) + key)
+    def get_proprietary(self, identifier: bytes, subtype: int = 0,
+                        keydata: bytes = b"") -> bytes | None:
+        return self.globals.get(proprietary_key(identifier, subtype, keydata))
 
-    def strip_proprietary(self, prefix: bytes = b"") -> None:
+    def strip_proprietary(self, identifier: bytes | None = None) -> None:
         """Remove proprietary fields before broadcast.
 
         The attestation must not reach the chain by default: it fingerprints
         the address as a CELL device and discloses how the spend was
         authorised.
         """
+        want = None if identifier is None else \
+            bytes([PROPRIETARY]) + ser_compact(len(identifier)) + identifier
         for k in [k for k in self.globals
-                  if k and k[0] == PROPRIETARY and k[1:].startswith(prefix)]:
+                  if k and k[0] == PROPRIETARY
+                  and (want is None or k.startswith(want))]:
             del self.globals[k]
 
     # ---- analysis ----

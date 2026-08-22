@@ -664,6 +664,17 @@ The file is one co-signer per line — `label fingerprint path xpub` — and it 
 
 **Why the ceremony.** Without the co-signers on file, the only question the device can answer is "does this script contain a key of mine?". A coordinator under an attacker's control can build a script holding exactly one key of yours and n-1 of theirs: it hashes correctly, the wallet calls it change, and the balance moves to an address you cannot spend without them. With the quorum registered the question becomes "does this equal the script my co-signers produce at the path it claims?", which is arithmetic. BIP-67 key ordering is recorded rather than guessed, because the wrong choice produces a different address instead of an error.
 
+### Proving it against a node
+
+`tools/regtest_e2e.py` runs the whole thing against Bitcoin Core on a private regtest chain: Core funds an address the firmware derived, the firmware signs a PSBT spending it, and Core finalises, accepts and mines the result. Every script type, taproot and 2-of-3 included.
+
+```bash
+bitcoind -regtest -daemon -datadir=/tmp/rt -txindex=1
+tools/regtest_e2e.py --bitcoin-dir /path/to/bitcoin-28.0/bin --datadir /tmp/rt
+```
+
+Worth doing before you fund anything, and worth doing again after any change to `psbt.py`, `tx.py` or `addresses.py`. It is the only check in this repo that answers on its own authority rather than by comparison, and it earned its place the first time it ran by finding a malformed BIP-174 proprietary key that made every PSBT this device produced unreadable to Core.
+
 ### Both PSBT dialects
 
 The device reads BIP-174 version 0 and BIP-370 version 2, and hands back whichever it was given — a v2 PSBT that came back as v0 is one a coordinator may not be able to finalise. Version 2 is rebuilt into the transaction its scattered fields describe and then verified by exactly the same code, so there is one set of rules about amounts, change and sighashes rather than two that could drift apart.
