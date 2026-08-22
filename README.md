@@ -18,11 +18,13 @@ Orbit it, and export OBJ or glTF straight from the viewer. The turntable above i
 
 ## Status
 
-**Rev 0.8.** The design is complete, the signing stack and the gate logic both self-test on every commit, and the blood reader is buildable today for $62 of hardware plus $31 of consumables.
+The design is complete and the firmware self-tests on every commit: 33 suites covering the signing stack against published test vectors, both liveness gates, and the whole device loop. Bitcoin Core accepts and mines what it signs.
+
+Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written and unverified against hardware — `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half.
 
 Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build — `calibrate.py` runs the spoof panel for both tiers, sets every threshold from your own samples, and writes a file the device loads. The touch panel is 15-second sessions, so that half is minutes of work. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
 
-You buy it as two kits. The reader kit is the blood reader alone — $62 of hardware plus $31 of lancets, film, tape and a sharps container — and a weekend's work proves the sensing before you spend anything on the wallet half. Read `SAFETY.md` first.
+Read `SAFETY.md` before the first build.
 
 ## What it does
 

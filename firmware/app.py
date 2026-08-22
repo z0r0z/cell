@@ -56,7 +56,6 @@ from se import PinLockout, SecureElement
 from wallet import Provisioning, WalletError
 
 PIN_LENGTH = 6
-VERSION = "0.8"
 
 
 class Abort(Exception):
@@ -118,11 +117,15 @@ class Device:
         body = [
             f"  wallet   {fp}",
             f"  network  {self.network}",
+            # The firmware hash rather than a version string: it is what
+            # co-signers register and what the attestation commits to, so it
+            # is the identifier worth being able to read off the screen.
+            f"  firmware {self.fw_hash[:4].hex()}",
             f"  quorums  {quorums} registered" if quorums else "  quorums  none",
         ]
         if hasattr(self.policy, "describe"):
             body.append(f"  tier     {self.policy.describe()}")
-        self._screen(f"CELL {VERSION}", body + [
+        self._screen("CELL", body + [
             "",
             "  CONFIRM  scan a transaction",
             "  UP       show a receiving address",

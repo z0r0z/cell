@@ -1,6 +1,6 @@
 # CELL — Build Specification
 
-Rev 0.8. Single device, $94.40 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
+Single device, $94.40 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
 
 The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm — and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
