@@ -224,6 +224,7 @@ misbehave and watching it refuse tests the property itself.
 | `firmware/buttons.py` | Needs the switches. Consent and debounce logic and the library calls are covered; whether 30 ms settles YOUR switches is not | `bench.py buttons` |
 | `firmware/camera.py` | Needs the webcam. Collection, framing and the OpenCV calls are covered; whether a cheap lens focuses on a 240x240 panel is not | Scan a signed PSBT into a coordinator and back |
 | The ATECC608B config zone | The ReqAuth binding on slot 0 is what makes the attempt counter real, and no software can read it back and be sure | `bench.py atecc --i-can-wipe-this-chip` |
+| **The duress PIN, on real hardware** | **Absent, not merely unverified.** `SoftSE` implements it and 19 tests cover it; `se_atecc.RealSecureElement` returns a plain bool and cannot express a second PIN. A device built today has NO duress protection, whatever the firmware tests say | A second PIN slot in the config zone, then `bench.py atecc`. Same region as the ReqAuth line above, and blocked behind it |
 | `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
 | `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |
 | Attestation key custody | The ATECC608B signs NIST P-256 only, so the secp256k1 attestation scalar is derived from a chip secret and exists in RAM while signing, rather than never leaving the chip | Stated in `se_atecc.py`; switch `attest.py` to P-256 if you need the stronger property |
@@ -270,6 +271,15 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
 "it works" moment, and it is reachable in a weekend.
 
 ## Not yet built
+
+- **Duress, on a built device.** `firmware/duress.py` is real and tested, but
+  only against `SoftSE`. The hardware driver returns a bool, so it cannot say
+  *which* PIN was entered, and the second seed blob is unreachable. This is
+  worth stating twice because the failure mode is the worst kind: someone
+  reads the tests, sees duress covered, and believes they are protected under
+  coercion when the device they built cannot do it. Closing it needs a second
+  PIN slot in the config zone, which is behind the same unprobed chip as the
+  ReqAuth binding below.
 
 - **The ATECC608B's ReqAuth binding.** `BUILD.md` §12 requires slot 0 to
   refuse to derive without a prior authorisation against the PIN slot. That is
