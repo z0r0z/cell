@@ -29,7 +29,7 @@ samples. That step is part of the build, not a caveat about it.
 | Operation set | 5 hostile payloads | Unknown type, bare hash, unknown field, missing field, non-object — all refused |
 | Display safety | Width and height limits | Destinations shown in full; anything that does not fit is refused, never truncated |
 | Secure element | 12 checks | Attempt debited before compare, wipe at 10, KDF context-bound and per-device |
-| Blood gates | 17 sample classes | Each rejected at the physically correct gate; all 6 gates exercised |
+| Blood gates | 18 sample classes | Each rejected at the physically correct gate; all 6 gates exercised |
 | Touch gates | 9 sample classes | Each rejected at the correct gate; all 7 gates exercised |
 | Calibration loop | Capture → sweep → load → re-verify | Thresholds written, loaded, and still separate the panel |
 | Touch calibration loop | Same, for the touch tier | Every touch threshold set from captured sessions; calibrated set still separates the panel |

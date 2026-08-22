@@ -130,7 +130,7 @@ Or individually:
 
 ```bash
 cd firmware
-python calibrate.py selftest --n 8     # blood tier, 6 gates, 17 sample classes
+python calibrate.py selftest --n 8     # blood tier, 6 gates, 18 sample classes
 python touch_gate.py                   # touch tier, 7 gates
 python policy.py                       # tier rules
 python attest.py                       # attestation, quorum, malformed input

@@ -203,10 +203,10 @@ Implementation in `firmware/policy.py`. It returns a reason alongside the tier s
 
 A signature carries no information about what gated the key, so "this was signed with blood" has to be a **separate claim signed by a different key**. Each device holds an attestation key, generated in the ATECC608B at provisioning and never rotated. You record its public half once, the way you record an xpub.
 
-`firmware/attest.py`. 206 bytes, fits in a QR:
+`firmware/attest.py`. 238 bytes, fits in a QR:
 
 ```
-magic 4 · version 1 · tier 1 · counter 8 · sighash 32 · fw_hash 32 · cal_hash 32 · pubkey 32 · sig 64
+magic 4 · version 1 · tier 1 · counter 8 · sighash 32 · fw_hash 32 · cal_hash 32 · live_hash 32 · pubkey 32 · sig 64
 ```
 
 Four fields carry the security, and leaving any of them out breaks it:
@@ -214,6 +214,7 @@ Four fields carry the security, and leaving any of them out breaks it:
 - **sighash** binds the claim to one transaction. Without it a blood attestation can be lifted onto any other signature.
 - **counter** is the device's monotonic counter. Without it an old blood attestation can be replayed for a new transaction.
 - **fw_hash** says which firmware made the claim, so a verifier can refuse builds it doesn't recognise.
+- **live_hash** is the gate's own measurements, compressed by `signer.liveness_digest()`. Without it the record says a tier passed but not on what evidence, so nothing ties the claim to a specific capture.
 - **cal_hash** says which *thresholds* it was comparing against. The firmware hash pins the code and nothing else; every limit the gate can reject on lives in a per-device JSON file, and two devices on identical firmware can hold calibrations a factor apart. `blood_gate.calibration_hash()` computes it over the threshold files actually in force, and hashes an `UNCALIBRATED` sentinel when there are none — so a device still on shipped defaults is distinguishable rather than unattestable, and a co-signer decides whether that is acceptable.
 
 **No timestamp.** The device is airgapped with no battery-backed clock, so it cannot honestly attest to time. The counter orders events; the coordinator's clock does the rest.

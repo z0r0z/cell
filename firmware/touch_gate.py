@@ -388,7 +388,11 @@ def features(red: np.ndarray, ir: np.ndarray,
 
 
 def selftest(n: int = 6) -> int:
-    print("Touch mode self-test — 6 gates, existing hardware.")
+    # Counted from a real run, never written down. A hardcoded gate count is
+    # wrong the first time a gate is added and nothing catches it.
+    n_gates = len(evaluate(*_synth("genuine", 0), TouchThresholds()).gates)
+    print(f"Touch mode self-test — {n_gates} gates, {len(PANEL)} classes, "
+          f"existing hardware.")
     print("Synthetic. Exercises the pipeline only; NOT calibration data.\n")
     print(f"{'class':<16}{'accepted':>10}   first failing gate")
     print("-" * 62)

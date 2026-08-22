@@ -639,7 +639,7 @@ def cmd_touch_roc(args):
 
 
 def cmd_selftest(args):
-    print("Synthetic self-test — 6 gates, 2 sensors.")
+    print(f"Synthetic self-test — 6 gates, 2 sensors, {len(PANEL)} classes.")
     print("Exercises the pipeline only. These are NOT calibration data.\n")
     rows = []
     for label in PANEL:
