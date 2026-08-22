@@ -78,7 +78,7 @@ def check_display() -> None:
               sig.parameters["height"].default != 240)
 
     try:
-        from PIL import Image, ImageDraw, ImageFont                # noqa: F401
+        from PIL import Image, ImageDraw
     except Exception:                                           # noqa: BLE001
         skip("Pillow drawing calls", "pip install pillow")
     else:

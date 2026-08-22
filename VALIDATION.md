@@ -13,7 +13,7 @@ samples. That step is part of the build, not a caveat about it.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — twenty-nine suites, no hardware required.
+`python firmware/run_tests.py` — thirty suites, no hardware required.
 
 ### The signing stack
 
