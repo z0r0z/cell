@@ -9,7 +9,7 @@ In order:
 
 ### 1. Spoof panel data from real hardware
 
-The reader kit is $60 of hardware plus $31 of consumables, and it produces the number this whole design
+The reader kit is $62 of hardware plus $31 of consumables, and it produces the number this whole design
 turns on: how cleanly the gate separates real blood from every fake. Every
 threshold in `firmware/blood_gate.py` is derived from published physics; panel
 data turns those into measured values with a stated confidence bound.
