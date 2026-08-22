@@ -18,13 +18,14 @@ samples. That step is part of the build, not a caveat about it.
 | Component | Method | Result |
 |---|---|---|
 | BIP-340 Schnorr | Published BIP-340 test vectors | Byte-exact match on pubkey and signature |
-| Attestation record | Pack/unpack round trip | 206 bytes, exact |
-| Attestation rejection | 7 negative cases | Wrong transaction, replayed counter, unknown firmware, unregistered calibration, wrong signer, forged signature, wrong tier — all refused |
+| Attestation record | Pack/unpack round trip | 238 bytes, exact |
+| Attestation rejection | 8 negative cases | Wrong transaction, replayed counter, unknown firmware, unregistered calibration, swapped gate measurements, wrong signer, forged signature, wrong tier — all refused |
 | Malformed input | 6 hostile inputs | Truncated, empty, bad magic, bad version, unknown tier, all-zero — all return a verdict, none raise |
 | Quorum | 3-signer roster | Missing attestation fails; touch-tier attestation fails where blood is required |
 | Tier policy | 12 cases | Escalation permitted, de-escalation refused, five locked classes enforced |
 | Unlock chain | 41 checks | Step order asserted against `EXPECTED_ORDER`; render before all, confirm before PIN, gate before unwrap |
-| Key binding | Differential | Changing the gate measurements or the transaction changes the wrapping key |
+| Key binding | Differential | Wrapping key is stable across captures and transactions, so the seed stays recoverable; changing the PIN or the device secret changes it |
+| Liveness in the record | Differential | The attestation commits to the gate measurements; a different capture attests a different hash |
 | Operation set | 5 hostile payloads | Unknown type, bare hash, unknown field, missing field, non-object — all refused |
 | Display safety | Width and height limits | Destinations shown in full; anything that does not fit is refused, never truncated |
 | Secure element | 12 checks | Attempt debited before compare, wipe at 10, KDF context-bound and per-device |

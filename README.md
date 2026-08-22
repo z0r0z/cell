@@ -91,13 +91,13 @@ Implementation in `firmware/policy.py`.
 
 ## Attestation
 
-A signature carries no information about what gated the key, so the tier is asserted separately. Each device holds an attestation key generated at provisioning, and signs a 206-byte record binding the tier to a specific sighash, a monotonic counter, a firmware hash and the hash of the calibration in force.
+A signature carries no information about what gated the key, so the tier is asserted separately. Each device holds an attestation key generated at provisioning, and signs a 238-byte record binding the tier to a specific sighash, a monotonic counter, a firmware hash, the calibration in force and the gate measurements the claim rests on.
 
 Co-signers register each other's attestation keys once, alongside the firmware and calibration hashes they will accept. After that, verifying that every member of a quorum signed at blood tier is a mechanical check, and a missing attestation counts as a failure rather than an abstention.
 
 The record travels beside the PSBT in a BIP-174 proprietary field and is stripped before broadcast, so it does not appear on chain.
 
-The record attests that a device holding this key ran the blood gate for this transaction. As with a TPM quote or a Secure Enclave receipt, that claim rests on the firmware and the tamper seal — so co-signers register firmware hashes alongside keys, and `verify()` refuses builds it does not recognise.
+The record attests that a device holding this key ran the blood gate for this transaction, and commits to the measurements it got. As with a TPM quote or a Secure Enclave receipt, that claim rests on the firmware and the tamper seal — so co-signers register firmware hashes alongside keys, and `verify()` refuses builds it does not recognise.
 
 Implementation in `firmware/attest.py`.
 
@@ -111,7 +111,7 @@ Liveness and identity are separate jobs, and the device does both with separate 
 
 ## Keys and backup
 
-The device holds a standard BIP39 seed, encrypted at rest and unwrapped only after the gate passes. Back it up on paper or steel as with any hardware wallet. If the device fails, restore to a Ledger, a Trezor or a replacement build.
+The device holds a standard BIP39 seed, encrypted at rest and unwrapped only after the gate passes. The unwrapping key comes from your PIN and the secure element's own secret, so the encrypted seed is inert on any other machine and recoverable on this one. Back it up on paper or steel as with any hardware wallet. If the device fails, restore to a Ledger, a Trezor or a replacement build.
 
 Both Bitcoin and Ethereum use secp256k1, so one key and one signing core serve both chains.
 

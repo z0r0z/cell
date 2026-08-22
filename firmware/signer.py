@@ -23,13 +23,24 @@ Three orderings are load-bearing and are asserted in the tests:
                                  them to authenticate and then read, which is
                                  how people sign the wrong thing.
 
-  GATE BEFORE UNWRAP.            The liveness result is an INPUT to the key
-                                 derivation, not a boolean checked beside it. A
-                                 branch can be patched around; a missing KDF
-                                 input cannot produce the key.
+  GATE BEFORE UNWRAP.            No sample, no seed. The chain refuses above
+                                 the unwrap step, and the order is asserted
+                                 against EXPECTED_ORDER rather than described
+                                 in prose, so a refactor that reorders it
+                                 fails loudly.
 
-That last one is the difference between a gate and a guard rail, and it is why
-`unwrap_context()` takes the liveness digest rather than a pass/fail flag.
+  MEASUREMENTS IN THE RECORD.    The attestation commits to the gate's actual
+                                 numbers, so "signed at blood tier" is a claim
+                                 a co-signer can check against one specific
+                                 capture — not a boolean, and not a promise
+                                 the device makes about itself.
+
+The wrapping key comes from stable inputs only: the PIN and the on-chip secret
+that never leaves the ATECC608B. That is what makes a seed blob copied off the
+SD card inert, and what makes the seed recoverable on the same device tomorrow.
+Liveness proves itself in the signed record, where a third party can verify it
+— see `unwrap_context()` and `liveness_digest()` for why that split is the one
+that holds.
 """
 
 from __future__ import annotations
@@ -74,15 +85,24 @@ class SignResult:
 
 
 def liveness_digest(tier: Tier, gate_attestation: dict) -> bytes:
-    """Compress a gate result into 32 bytes for the KDF.
+    """Compress a gate result into 32 bytes for the ATTESTATION.
 
-    The gate's own measurements go in — not merely "it passed" — so the
-    wrapping key is reachable only from a capture that actually produced them.
+    The gate's own measurements go in — not merely "it passed" — so the record
+    commits to the capture that actually produced them, and a co-signer can
+    pin a claim to one specific sample rather than to a boolean.
 
-    Note what is NOT here: this feeds key derivation, never a signing nonce.
-    A nonce derived from a biometric measurement leaks the private key. Field
-    entropy touches BIP-340 aux_rand only, where the construction degrades
-    gracefully even if an attacker controls it fully.
+    This deliberately does NOT feed key derivation. A wrapping key has to be
+    the same key tomorrow, and a liveness measurement is a fresh physical event
+    with no reproducibility at all — that is the entire point of the device.
+    Mixing it into the KDF produces a key that can never reopen the seed it
+    wrapped. A fuzzy extractor does not rescue this either: those need a
+    repeatable trait with bounded noise, and a clotting curve is a one-time
+    event, not a trait.
+
+    It never feeds a signing nonce either. A nonce derived from a biometric
+    measurement leaks the private key. Field entropy touches BIP-340 aux_rand
+    only, where the construction degrades gracefully even if an attacker
+    controls it fully.
     """
     parts = [tier.name.encode()]
     for k in sorted(gate_attestation.get("gate_scores", {})):
@@ -92,17 +112,32 @@ def liveness_digest(tier: Tier, gate_attestation: dict) -> bytes:
     return hashlib.sha256(b"|".join(parts)).digest()
 
 
-def unwrap_context(pin: str, live: bytes, sighash: bytes) -> bytes:
-    """Context for the seed-wrapping KDF.
+def unwrap_context(pin: str) -> bytes:
+    """Context for the seed-wrapping KDF. STABLE INPUTS ONLY.
 
-    Binds PIN, liveness and transaction together. Take any one away and the
-    derived key is different, so a seed blob copied off the SD card is inert
-    without a live body and the PIN.
+    The PIN, and through `SecureElement.kdf` the on-chip secret that never
+    leaves the ATECC608B. A seed blob copied off the SD card is inert without
+    both: the right PIN and that specific chip.
+
+    Nothing else may go in here, and two things that look tempting are wrong:
+
+      the liveness digest  changes on every capture, so the key that wrapped
+                           the seed could never unwrap it again
+      the sighash          changes on every transaction, and the signature
+                           already commits to it cryptographically — putting
+                           it here creates per-transaction key material that
+                           protects nothing and breaks recovery
+
+    Liveness is not key material. It is an authorisation on the release path,
+    enforced by the order of the unlock chain, and it is PROVEN to third
+    parties by the signed attestation, which commits to the gate measurements
+    via liveness_digest(). On a Pi with no secure boot that enforcement is a
+    firmware property, not a cryptographic one — the same trust boundary the
+    attestation already declares through the firmware hash and the tamper
+    seal. BUILD.md section 16.
     """
-    if len(live) != 32 or len(sighash) != 32:
-        raise ValueError("liveness digest and sighash must be 32 bytes")
-    return hashlib.sha256(b"CELL/unwrap/v1|" + hashlib.sha256(pin.encode()).digest()
-                          + b"|" + live + b"|" + sighash).digest()
+    return hashlib.sha256(b"CELL/unwrap/v1|"
+                          + hashlib.sha256(pin.encode()).digest()).digest()
 
 
 def zeroise(buf: bytearray) -> None:
@@ -193,10 +228,14 @@ class Signer:
         if not passed:
             raise Refused(gate_att.get("message", "Liveness gate rejected the sample."))
 
-        # 6. The gate result DERIVES the key. It is not a flag beside it.
+        # 6. Unwrap. The key comes from stable inputs only — PIN plus the
+        #    on-chip secret — because a key mixed with this capture's
+        #    measurements could never reopen the seed it wrapped. What the
+        #    gate gates is REACHING this step at all: the chain refuses above,
+        #    and EXPECTED_ORDER is asserted in the tests.
         self._step("unwrap")
         live = liveness_digest(tier, gate_att)
-        key = self.se.kdf(unwrap_context(pin, live, req.sighash))
+        key = self.se.kdf(unwrap_context(pin))
         seed = self._unwrap_seed(key)
 
         # 7. Sign, then zeroise on every path.
@@ -210,8 +249,10 @@ class Signer:
         # 8. Attest the tier, bound to this sighash and a fresh counter.
         self._step("attest")
         counter = self.se.increment_counter()
+        # The measurements travel in the record, so the claim is bound to one
+        # capture rather than to a boolean somebody could have flipped.
         att = attest.attest(tier, counter, req.sighash, self.fw_hash,
-                            self.cal_hash, self.se.attest_sign,
+                            self.cal_hash, live, self.se.attest_sign,
                             self.se.attest_pubkey())
 
         return SignResult(signature=signature, attestation=att, tier=tier,

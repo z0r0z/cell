@@ -15,7 +15,7 @@ import ops
 import signer
 from policy import Policy, Tier
 from se import MAX_PIN_ATTEMPTS, SoftSE
-from signer import Refused, SignRequest, Signer
+from signer import Refused, SignRequest, Signer, liveness_digest
 
 FW = hashlib.sha256(b"cell-fw-test").digest()
 CAL = hashlib.sha256(b"cell-thresholds-test").digest()
@@ -104,18 +104,41 @@ def run() -> int:
     check("psbt field carries a parseable record",
           key.startswith(b"CELL") and attest.Attestation.unpack(val) == res.attestation)
 
-    # ---- the liveness result must DERIVE the key ------------------------
+    # ---- the wrapping key is stable, and bound to PIN and device --------
+    # RECOVERABILITY IS THE PROPERTY. A wrap key must open tomorrow the seed
+    # it wrapped today, so it comes from stable inputs only. Mixing this
+    # capture's measurements or the sighash into it yields a key that can
+    # never reopen anything — the seed would be lost on the first signature.
     s2, log2 = make(gate=(True, {"gate_scores": {"G1": 0.99, "G6": 0.99}}))
     s2.se = s.se                                    # same device secret
-    s2.authorize_and_sign(SignRequest(spend, SIGHASH), PIN)
-    check("different gate measurements -> different wrapping key",
-          log["unwrap_key"] != log2["unwrap_key"])
+    res2 = s2.authorize_and_sign(SignRequest(spend, SIGHASH), PIN)
+    check("different capture -> SAME wrapping key (seed stays recoverable)",
+          log["unwrap_key"] == log2["unwrap_key"])
 
     s3, log3 = make()
     s3.se = s.se
     s3.authorize_and_sign(SignRequest(spend, other), PIN)
-    check("different transaction -> different wrapping key",
-          log["unwrap_key"] != log3["unwrap_key"])
+    check("different transaction -> SAME wrapping key",
+          log["unwrap_key"] == log3["unwrap_key"])
+
+    # ...and inert without the PIN or without this chip.
+    s6, log6 = make(se=SoftSE(pin="654321"))
+    s6.authorize_and_sign(SignRequest(spend, SIGHASH), "654321")
+    check("different PIN -> different wrapping key",
+          log["unwrap_key"] != log6["unwrap_key"])
+
+    s7, log7 = make()                               # fresh SoftSE secret
+    s7.authorize_and_sign(SignRequest(spend, SIGHASH), PIN)
+    check("different device secret -> different wrapping key",
+          log["unwrap_key"] != log7["unwrap_key"])
+
+    # ---- and liveness proves itself in the RECORD -----------------------
+    # The measurements are what the claim rests on, so they must reach the
+    # attestation and must not be interchangeable between captures.
+    check("attestation commits to the gate measurements",
+          res.attestation.live_hash == liveness_digest(res.tier, GATE_OK[1]))
+    check("a different capture attests a different measurement hash",
+          res2.attestation.live_hash != res.attestation.live_hash)
 
     # ---- refusals --------------------------------------------------------
     def refuses(label, fn, expect_substr=None):

@@ -616,16 +616,22 @@ Implemented in `firmware/signer.py`, with the step order asserted in the tests a
                  so power-cycling mid-attempt doesn't refund an attempt.
                  10 failures → wipe.
 5. gate          touch_gate or blood_gate, at the tier policy chose
-6. unwrap        KDF(slot_secret, H(pin ‖ liveness ‖ sighash)) → AES key
+6. unwrap        KDF(slot_secret, H(pin)) → AES key
 7. sign          seed into mlock()ed pages → derive → sign → zeroise
-8. attest        the attestation key signs the tier claim for this sighash
+8. attest        the attestation key signs the tier, the sighash, the
+                 firmware, the calibration and the gate measurements
 ```
 
 Three orderings carry the security, and reordering them breaks it even though the signature still verifies:
 
 - **Render before anything.** An operation the owner cannot read is refused before they spend a lancet on it.
 - **Confirm before PIN.** The owner approves *this* transaction, not "a transaction". Taking the PIN first teaches them to authenticate and then read, which is how people sign the wrong thing.
-- **Gate before unwrap, as an input.** The liveness measurements go *into* the key derivation, not into a boolean beside it. A branch can be patched around; a missing KDF input cannot produce the key.
+- **Gate before unwrap.** No sample, no seed: the chain refuses above step 6, and `EXPECTED_ORDER` is asserted in the tests rather than described in prose, so a reordering fails loudly.
+- **Measurements into the record.** The attestation commits to the gate's actual numbers via `liveness_digest()`, so "signed at blood tier" is checkable by a co-signer against one specific capture instead of being a boolean the device asserts about itself.
+
+**The wrapping key uses stable inputs only — the PIN and the on-chip secret.** This is what makes the seed recoverable: a key must open tomorrow the seed it wrapped today. Liveness measurements are a fresh physical event with no reproducibility, and the sighash changes every transaction, so mixing either into the KDF yields a key that can never reopen anything. Both are still bound tight, in the place where binding them is worth something: the signed attestation, which a third party can verify. The signature already commits to the sighash cryptographically, so nothing is lost by taking it out of the KDF.
+
+On a Pi Zero 2 W the gate ordering is enforced by firmware, on the same footing as the firmware hash and the tamper seal the attestation already declares. A CM4 with verified boot raises that floor when a build calls for it.
 
 `Signer` takes the display, the gate, the seed unwrap and the signing primitive as injected collaborators, so the SeedSigner fork supplies them without touching the chain.
 
@@ -729,7 +735,7 @@ Each milestone is independently testable and each will find something you didn't
 | 3 | Print 20 cartridges, measure white patches | <3% spread after normalisation. **Fix your printer here if not** |
 | 4 | Optical chamber light-tight | Clear channel <0.5% of LEDs-on at 10,000 lux |
 | 5 | **Spectrum of dye vs. your blood** | 415 nm separates them cleanly. This is the "it works" moment |
-| 6 | 600 s time series, both classes | Logistic fits blood; exponential fits dye better |
+| 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure — early D, late D, the drop and its direction — not on a curve fit |
 | 7 | **Spoof panel** — the Phase 1 finish line | ROC generated, thresholds set, documented. **Stop here and decide whether to continue** |
 | 8 | ATECC608B PIN counter | Increments on failure, survives power loss mid-attempt |
 | 9 | SeedSigner fork, testnet round trip | Coins move |
