@@ -32,6 +32,7 @@ samples. That step is part of the build, not a caveat about it.
 | Blood gates | 17 sample classes | Each rejected at the physically correct gate; all 6 gates exercised |
 | Touch gates | 9 sample classes | Each rejected at the correct gate; all 7 gates exercised |
 | Calibration loop | Capture → sweep → load → re-verify | Thresholds written, loaded, and still separate the panel |
+| Touch calibration loop | Same, for the touch tier | Every touch threshold set from captured sessions; calibrated set still separates the panel |
 | Enrolment invariant | Reference emitted by `enroll-reference` | Reproduces the G4 clamp mask; 415 nm stays excluded |
 | Hostile captures | 9 malformed captures | Zeros, NaNs, negative counts, short speckle — each rejected at a named gate, none raise |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |

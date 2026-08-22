@@ -158,6 +158,17 @@ class TouchSensor(ABC):
 PASSBAND_LO = 0.35
 PASSBAND_HI = 4.0
 
+# Minimum spacing between detected beats, as a rate. This is an ANALYSIS
+# parameter and deliberately NOT TouchThresholds.bpm_max, which is an accept
+# window. Using the accept threshold here couples the two: calibrating bpm_max
+# would change the peak spacing, which changes RMSSD, which is itself a
+# calibrated threshold — so a sweep fits the RMSSD window under one peak
+# detector and then judges it under another, and rejects every genuine session
+# it just fitted. Measured: it puts FRR at 100%. The detector should resolve
+# anything physiologically possible; T3 is what decides whether the rate is
+# acceptable.
+PEAK_MAX_BPM = 240.0
+
 
 def _bandpass(x: np.ndarray, fs: float,
               lo: float = PASSBAND_LO, hi: float = PASSBAND_HI) -> np.ndarray:
@@ -200,7 +211,7 @@ def ppg_features(red: np.ndarray, ir: np.ndarray, th: TouchThresholds,
     band_snr = float(spec[near].sum() / spec[band].sum())
 
     # beat-to-beat variability
-    peaks, _ = find_peaks(ac_red, distance=int(fs / (th.bpm_max / 60)))
+    peaks, _ = find_peaks(ac_red, distance=max(1, int(fs / (PEAK_MAX_BPM / 60))))
     peaks = peaks[(peaks > 0) & (peaks < len(ac_red) - 1)]
     if len(peaks) >= 4:
         y0, y1, y2 = ac_red[peaks - 1], ac_red[peaks], ac_red[peaks + 1]
@@ -337,6 +348,43 @@ def _synth(kind: str, seed: int = 0, th: TouchThresholds = TouchThresholds()):
 
 PANEL = ("genuine", "no_contact", "static_object", "pump_fake",
          "dye_fake", "motion", "too_slow", "too_fast", "slow_capture")
+
+
+# Every tunable touch threshold, with the feature it is compared against and
+# the direction of the comparison — the same contract blood_gate.TUNABLE
+# carries, so `calibrate.py touch` drives its sweep off this and adding a
+# threshold here is all it takes to bring it under calibration.
+#   "min" -> genuine must be >= the threshold
+#   "max" -> genuine must be <= the threshold
+#
+# fs, fs_min and duration_s are deliberately absent: they are properties of the
+# CAPTURE, not of the finger, and fitting them to your own sessions would set a
+# validity floor from the very data it is supposed to validate.
+TUNABLE = {
+    "dc_min":        ("dc_red",     "min"),
+    "dc_max":        ("dc_red",     "max"),
+    "perfusion_min": ("perfusion",  "min"),
+    "perfusion_max": ("perfusion",  "max"),
+    "bpm_min":       ("bpm",        "min"),
+    "bpm_max":       ("bpm",        "max"),
+    "band_snr_min":  ("band_snr",   "min"),
+    "rmssd_min_ms":  ("rmssd_ms",   "min"),
+    "rmssd_max_ms":  ("rmssd_ms",   "max"),
+    "r_ratio_min":   ("r_ratio",    "min"),
+    "r_ratio_max":   ("r_ratio",    "max"),
+}
+
+
+def features(red: np.ndarray, ir: np.ndarray,
+             th: "TouchThresholds | None" = None,
+             fs: float | None = None) -> dict:
+    """Every raw number the gates compare, with no thresholds applied.
+
+    Same separation of measurement from judgement that blood_gate.metrics()
+    makes, and for the same reason: a sweep needs the distribution of each
+    feature across the panel, not a pass/fail that has already collapsed it.
+    """
+    return ppg_features(red, ir, th or TouchThresholds(), fs)
 
 
 def selftest(n: int = 6) -> int:

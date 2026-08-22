@@ -98,6 +98,57 @@ def calibration_round_trip() -> bool:
     return True
 
 
+def touch_calibration_round_trip() -> bool:
+    """touch-capture -> touch-roc -> touch_thresholds.json -> load().
+
+    The touch tier authorises far more signatures than the blood tier, so its
+    calibration deserves the same guarantee: the numbers measured on your
+    hardware are the numbers the device runs.
+    """
+    sys.path.insert(0, str(HERE))
+    import calibrate                                       # noqa: E402
+    import touch_gate as tg                                # noqa: E402
+    import argparse, os                                    # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        work = Path(d)
+        calibrate.TOUCH_DATA = work / "touch_captures"
+        calibrate.TOUCH_DATA.mkdir()
+        th0 = tg.TouchThresholds()
+        for lab in calibrate.TOUCH_PANEL:
+            for seed in range(8):
+                red, ir, bore = tg._synth(lab, seed, th0)
+                calibrate.save_touch(calibrate.TOUCH_DATA / f"{lab}_{seed:04d}.npz",
+                                     red, ir, bore, lab, th0.fs)
+        cwd = Path.cwd()
+        try:
+            os.chdir(work)
+            rc = calibrate.cmd_touch_roc(argparse.Namespace(frr_budget=0.05, drift=0.0))
+        finally:
+            os.chdir(cwd)
+        if rc != 0:
+            return False
+        out = work / "touch_thresholds.json"
+        if not out.exists():
+            print("    touch-roc did not write touch_thresholds.json")
+            return False
+        th = tg.TouchThresholds.load(out)
+        if th == tg.TouchThresholds():
+            print("    touch_thresholds.json loaded but changed nothing")
+            return False
+        # The calibrated thresholds must still separate the panel. A threshold
+        # that is also an analysis parameter breaks exactly here: it is fitted
+        # under one detector and then judged under another.
+        for lab in calibrate.TOUCH_PANEL:
+            for seed in range(8):
+                red, ir, bore = tg._synth(lab, seed, th0)
+                acc = tg.evaluate(red, ir, bore, th, fs=th0.fs).accepted
+                if acc != (lab == "genuine"):
+                    print(f"    calibrated touch thresholds misclassify {lab}")
+                    return False
+    return True
+
+
 def main() -> int:
     failures = []
     for name, cmd in SUITES:
@@ -117,13 +168,24 @@ def main() -> int:
     if not good:
         failures.append(name)
 
+    name = "touch calibration round trip — capture, sweep, load"
+    print(f"\n=== {name} " + "=" * max(0, 60 - len(name)))
+    try:
+        good = touch_calibration_round_trip()
+    except Exception as e:                                   # noqa: BLE001
+        print(f"    raised {type(e).__name__}: {e}")
+        good = False
+    print("PASS" if good else "FAIL")
+    if not good:
+        failures.append(name)
+
     print("\n" + "=" * 66)
     if failures:
         print(f"FAIL — {len(failures)} suite(s):")
         for f in failures:
             print(f"  - {f}")
         return 1
-    print(f"PASS — {len(SUITES) + 1} suites.")
+    print(f"PASS — {len(SUITES) + 2} suites.")
     print("\nUnlock chain, gate logic, tier policy, attestation and the")
     print("calibration round trip all verified. Sensing thresholds are")
     print("calibrated to your hardware at first build — BUILD.md section 13.")

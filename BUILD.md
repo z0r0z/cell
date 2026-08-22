@@ -687,6 +687,20 @@ python calibrate.py roc                           # sets EVERY threshold, writes
 
 Target **FRR ≤ 5%** — a false reject costs one cartridge and one lancet. Bias hard toward rejecting; `--drift` exists to loosen the thresholds and defaults to 0.
 
+### Calibrating the touch tier
+
+The touch tier is the everyday default and authorises far more signatures than the blood tier ever will, so it gets the same treatment. Sessions are 15 seconds rather than 600, so the whole panel is minutes:
+
+```bash
+python calibrate.py touch-capture --label genuine        # ×30+, hold still
+python calibrate.py touch-capture --label pump_fake      # ×30+   ... etc
+python calibrate.py touch-roc                            # writes touch_thresholds.json
+```
+
+The panel is your fingertip, nothing on the ring, a static object, a mechanical pulsator, a dyed silicone finger, a moving finger, and out-of-range rates high and low. `touch_gate.TouchThresholds.load()` reads the file the sweep writes — put it beside `touch_gate.py` on the device, or the tier you use every day keeps running on shipped defaults.
+
+`fs`, `fs_min` and `duration_s` are deliberately not swept. They describe the capture rather than the finger, and fitting a validity floor to the very sessions it is meant to validate is circular. For the same reason the beat detector spaces peaks by a fixed physiological ceiling (`PEAK_MAX_BPM`) rather than by `bpm_max`: a number that is both an accept threshold and an analysis parameter gets fitted under one detector and judged under another, which puts FRR at 100%.
+
 **The FRR that `roc` prints is in-sample.** The thresholds were fitted to those same genuine captures, so it is optimistic by construction. The honest number comes from captures taken *after* calibration.
 
 ### Then put the file on the device

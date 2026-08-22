@@ -3,9 +3,11 @@
 The thresholds shipped in blood_gate.py are physically-reasoned starting
 points. They are NOT validated on your hardware. This tool fixes that.
 
-    python calibrate.py capture --label genuine        # record one sample
+    python calibrate.py capture --label genuine        # record one blood sample
     python calibrate.py enroll-reference               # build REFERENCE_OXYHB
     python calibrate.py roc                            # sweep + operating point
+    python calibrate.py touch-capture --label genuine  # record one 15 s session
+    python calibrate.py touch-roc                      # same, for the touch tier
     python calibrate.py selftest                       # synthetic, no hardware
 
 report() states the bound your sample size supports. By the rule of three,
@@ -31,6 +33,7 @@ from blood_gate import (
 )
 
 DATA = Path("captures")
+TOUCH_DATA = Path("touch_captures")
 
 # BUILD.md spoof panel. Anything not "genuine" must be rejected.
 PANEL = {
@@ -491,6 +494,146 @@ def report(n_accepted: int, n: int):
         print("  Not ready. Find which class passed and fix that gate.")
 
 
+# --------------------------------------------------------------------------
+# Touch tier
+#
+# The touch tier is the EVERYDAY default — it authorises far more signatures
+# than the blood tier ever will — so its thresholds deserve the same treatment
+# and the same file-on-the-device ending. Sessions are 15 s rather than 600 s,
+# so a full panel is minutes of work rather than an afternoon.
+# --------------------------------------------------------------------------
+
+TOUCH_PANEL = {
+    "genuine":       "Your own fingertip on the ring, still, 15 s",
+    "no_contact":    "Nothing on the ring",
+    "static_object": "Wood, a printed photo, a fingertip mould",
+    "pump_fake":     "Mechanical pulsator -- the RMSSD negative",
+    "dye_fake":      "Dyed silicone finger -- the ratio-of-ratios negative",
+    "motion":        "Your finger, moving or tapping",
+    "too_slow":      "Out-of-range rate, low",
+    "too_fast":      "Out-of-range rate, high",
+}
+
+
+def save_touch(path: Path, red, dark_ir, bore, label: str, fs: float) -> None:
+    np.savez_compressed(path, red=red, ir=dark_ir, bore=np.asarray(bore, float),
+                        label=np.array(label), fs=np.array(fs))
+
+
+def load_touch(path: Path) -> dict:
+    z = np.load(path, allow_pickle=False)
+    return {"red": z["red"], "ir": z["ir"], "bore": tuple(z["bore"]),
+            "label": str(z["label"]), "fs": float(z["fs"])}
+
+
+def cmd_touch_capture(args):
+    import touch_gate as tg
+    if args.label not in TOUCH_PANEL:
+        sys.exit(f"Unknown label. Valid: {', '.join(TOUCH_PANEL)}")
+    TOUCH_DATA.mkdir(exist_ok=True)
+    th = tg.TouchThresholds()
+    if args.synthetic:
+        red, ir, bore = tg._synth(args.label, args.seed, th)
+        fs = th.fs
+    else:
+        from hardware import RealTouchSensor          # provided by the device build
+        print(f"[{args.label}] {TOUCH_PANEL[args.label]}")
+        input(f"Press Enter, then hold still for {th.duration_s:.0f} s...")
+        red, ir, bore, fs = RealTouchSensor().read_ppg(th.duration_s)
+    n = len(list(TOUCH_DATA.glob(f"{args.label}_*.npz")))
+    path = TOUCH_DATA / f"{args.label}_{n:04d}.npz"
+    save_touch(path, red, ir, bore, args.label, fs)
+    res = tg.evaluate(red, ir, bore, th, fs=fs)
+    print(f"saved {path}")
+    for g in res.gates:
+        print("  ", g)
+    print(f"  => {'ACCEPT' if res.accepted else 'REJECT'}")
+
+
+def cmd_touch_roc(args):
+    import touch_gate as tg
+    caps: dict[str, list[dict]] = {}
+    for p in sorted(TOUCH_DATA.glob("*.npz")):
+        c = load_touch(p)
+        caps.setdefault(c["label"], []).append(c)
+    if "genuine" not in caps:
+        sys.exit("No genuine touch captures. Run: touch-capture --label genuine")
+
+    n_gen = len(caps["genuine"])
+    spoof_labels = [k for k in caps if k != "genuine"]
+    n_spoof = sum(len(caps[k]) for k in spoof_labels)
+    print(f"genuine n={n_gen}   spoof n={n_spoof} across {len(spoof_labels)} classes")
+    if n_gen < MIN_PER_CLASS:
+        print(f"WARNING: fewer than {MIN_PER_CLASS} genuine sessions. Indicative only.")
+    missing = [k for k in TOUCH_PANEL if k not in caps]
+    if missing:
+        print(f"WARNING: panel classes never captured: {', '.join(missing)}")
+
+    table: dict[str, dict[str, list]] = {}
+    for label, cs in caps.items():
+        for c in cs:
+            for k, v in tg.features(c["red"], c["ir"], fs=c["fs"]).items():
+                table.setdefault(k, {}).setdefault(label, []).append(v)
+
+    per_th = args.frr_budget / len(tg.TUNABLE)
+    chosen, diag = {}, []
+    for name, (feat, sense) in tg.TUNABLE.items():
+        per = table.get(feat, {})
+        gen = np.asarray(per.get("genuine", []))
+        parts = [np.asarray(per[c]) for c in spoof_labels if c in per]
+        spf = np.concatenate(parts) if parts else np.array([])
+        val, rejects, margin = _choose(gen, spf, sense, per_th, args.drift)
+        q = 1e-6
+        chosen[name] = (math.floor(val / q) * q if sense == "min"
+                        else math.ceil(val / q) * q)
+        diag.append((name, sense, val, rejects, margin, len(spf),
+                     getattr(tg.TouchThresholds(), name)))
+
+    print(f"\n  {'threshold':<18}{'sense':<6}{'shipped':>10}{'chosen':>12}"
+          f"{'catches':>11}{'margin':>10}")
+    print("  " + "-" * 68)
+    for name, sense, val, rej, margin, n_sp, shipped in diag:
+        m = "inf" if margin == float("inf") else f"{margin:.3f}"
+        print(f"  {name:<18}{sense:<6}{shipped:>10.3f}{val:>12.3f}"
+              f"{rej:>8}/{n_sp:<3}{m:>10}")
+
+    th = replace(tg.TouchThresholds(), **chosen)
+    acc = {lab: [tg.evaluate(c["red"], c["ir"], c["bore"], th, fs=c["fs"]).accepted
+                 for c in cs] for lab, cs in caps.items()}
+    frr = 1.0 - float(np.mean(acc["genuine"]))
+    n_fa = sum(sum(acc[c]) for c in spoof_labels)
+
+    print(f"\nOPERATING POINT   FRR = {frr*100:.1f}%   "
+          f"spoof acceptances = {n_fa}/{n_spoof}")
+    print("  In-sample, and optimistic by construction for the same reason the")
+    print("  blood sweep is: these are the sessions the thresholds were fitted to.")
+    report(n_fa, n_spoof)
+
+    print("\nPER-CLASS (accepted / n) -- every non-genuine row must read 0:")
+    for label in sorted(acc):
+        a, n = sum(acc[label]), len(acc[label])
+        want = (a == n) if label == "genuine" else (a == 0)
+        print(f"  {label:<16} {a:>3}/{n:<4}{'' if want else '   <-- LOOK AT THIS'}")
+
+    out = dict(chosen)
+    out.update({
+        "_comment": "Written by calibrate.py touch-roc. Loaded by "
+                    "touch_gate.TouchThresholds.load().",
+        "measured_frr": frr,
+        "measured_far": n_fa / max(n_spoof, 1),
+        "far_upper_bound_pct": (300.0 / n_spoof) if n_fa == 0 and n_spoof else None,
+        "n_genuine": n_gen,
+        "n_spoof": n_spoof,
+        "classes": sorted(caps),
+    })
+    Path("touch_thresholds.json").write_text(json.dumps(out, indent=2, sort_keys=True))
+    print("\nwrote touch_thresholds.json")
+    print("  touch_gate.TouchThresholds.load() reads it. Put it beside")
+    print("  touch_gate.py on the device, or the touch tier keeps signing on")
+    print("  shipped defaults — and the touch tier is the everyday one.")
+    return 0
+
+
 def cmd_selftest(args):
     print("Synthetic self-test — 6 gates, 2 sensors.")
     print("Exercises the pipeline only. These are NOT calibration data.\n")
@@ -552,6 +695,14 @@ def main():
                         "only if measured FRR is unusable, then re-check that "
                         "the panel still reads 0 everywhere.")
     r.set_defaults(fn=cmd_roc)
+    tc = sub.add_parser("touch-capture"); tc.add_argument("--label", required=True)
+    tc.add_argument("--synthetic", action="store_true")
+    tc.add_argument("--seed", type=int, default=0)
+    tc.set_defaults(fn=cmd_touch_capture)
+    tr = sub.add_parser("touch-roc")
+    tr.add_argument("--frr-budget", type=float, default=0.05)
+    tr.add_argument("--drift", type=float, default=0.0)
+    tr.set_defaults(fn=cmd_touch_roc)
     s = sub.add_parser("selftest"); s.add_argument("--n", type=int, default=20)
     s.set_defaults(fn=cmd_selftest)
     a = p.parse_args()

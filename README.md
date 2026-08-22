@@ -20,7 +20,7 @@ Orbit it, and export OBJ or glTF straight from the viewer. The turntable above i
 
 **Rev 0.6.** The design is complete, the gate logic self-tests on every commit, and the blood reader is buildable today for about $60.
 
-Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build — `calibrate.py` runs the spoof panel, sets every threshold from your own samples, and writes a file the device loads. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
+Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build — `calibrate.py` runs the spoof panel for both tiers, sets every threshold from your own samples, and writes a file the device loads. The touch panel is 15-second sessions, so that half is minutes of work. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
 
 Build it in two phases. Phase 1 is the blood reader alone, $60 and a weekend, and it proves the sensing before you spend anything on the wallet half. Read `SAFETY.md` first.
 
@@ -148,13 +148,13 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `BUILD.md` | Hardware specification: parts, wiring, optics, cartridge, firmware, calibration |
 | `BOM.csv` | Bill of materials with sourcing notes |
 | `firmware/blood_gate.py` | Blood tier, six gates |
-| `firmware/touch_gate.py` | Touch tier, six gates |
+| `firmware/touch_gate.py` | Touch tier, seven gates |
 | `firmware/ops.py` | The closed operation set and its renderer |
 | `firmware/signer.py` | The unlock chain: policy, confirm, PIN, gate, sign, attest |
 | `firmware/se.py` | Secure element interface and a software stub for tests |
 | `firmware/policy.py` | Tier selection and escalation rules |
 | `firmware/attest.py` | Tier attestation and quorum verification |
-| `firmware/calibrate.py` | Spoof-panel harness and synthetic self-test |
+| `firmware/calibrate.py` | Spoof-panel harness for both tiers, and the synthetic self-test |
 | `firmware/hardware.py` | Sensor drivers. Untested; includes a bring-up checklist |
 | `models/` | Enclosure mesh, coordinate convention, regeneration |
 | `diagrams/` | Explainer, build sheet, dimensioned drawings |
