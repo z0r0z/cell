@@ -60,8 +60,27 @@ class SecureElement(ABC):
     def kdf(self, context: bytes) -> bytes:
         """Derive 32 bytes from the on-chip secret and `context`.
 
-        `context` binds the wrapping key to the PIN and the liveness result, so
-        a seed blob lifted off the SD card is useless without both.
+        `context` binds the wrapping key to the PIN, so a seed blob lifted off
+        the SD card is useless without both the PIN and this chip.
+
+        MUST REQUIRE A SUCCESSFUL verify_pin FIRST, AND CONSUME IT.
+
+        This is not defence in depth, it is the only thing standing between a
+        stolen device and the seed. The attempt counter protects verify_pin;
+        if the derive can be called without it, an attacker never calls
+        verify_pin at all. They call kdf once per candidate PIN and try the
+        result against the encrypted seed — AES-GCM's tag tells them when they
+        are right — and a six-digit PIN is 10^6 tries with nothing debited.
+
+        Single use, not session-scoped: one PIN verification authorises one
+        unwrap. Otherwise one legitimate verification leaves the derive open to
+        unlimited calls, which is the same hole with a smaller window.
+
+        ON THE ATECC608B this is slot configuration, not firmware: the slot
+        holding the wrapping secret is configured to require prior
+        authorisation, so the derive is physically unreachable without a
+        CheckMac that debited the counter. A build that skips that config has
+        a device whose PIN counter does nothing. BUILD.md section 12.
         """
 
     @abstractmethod
@@ -90,6 +109,9 @@ class _State:
     pin_attempts_used: int = 0
     op_counter: int = 0
     wiped: bool = False
+    # Set by a successful verify_pin, consumed by one kdf. Never persisted:
+    # a power cycle must not leave a derive authorised.
+    pin_authorised: bool = False
 
 
 class SoftSE(SecureElement):
@@ -124,6 +146,7 @@ class SoftSE(SecureElement):
         ok = hmac.compare_digest(hashlib.sha256(pin.encode()).digest(), self._pin_hash)
         if ok:
             self._st.pin_attempts_used = 0
+            self._st.pin_authorised = True
         elif self.attempts_remaining() == 0:
             self.wipe()
             raise PinLockout("attempt counter exhausted; device wiped")
@@ -132,6 +155,12 @@ class SoftSE(SecureElement):
     def kdf(self, context: bytes) -> bytes:
         if self._st.wiped:
             raise PinLockout("device is wiped")
+        # Modelled here so the unlock chain is tested against the rule the real
+        # part enforces in silicon. Without it the tests would pass on a device
+        # whose PIN counter can be walked around.
+        if not self._st.pin_authorised:
+            raise PinLockout("kdf requires a successful verify_pin first")
+        self._st.pin_authorised = False          # single use
         return hmac.new(self._secret, context, hashlib.sha256).digest()
 
     def attest_sign(self, digest: bytes) -> bytes:
@@ -152,6 +181,7 @@ class SoftSE(SecureElement):
     def wipe(self) -> None:
         self._secret = os.urandom(32)      # old wrapping key is unrecoverable
         self._st.wiped = True
+        self._st.pin_authorised = False
 
 
 def _selftest() -> int:
@@ -174,9 +204,38 @@ def _selftest() -> int:
     checks.append(("attempt debited before compare",
                    se2.attempts_remaining() == before - 1))
 
+    # A derive must be UNREACHABLE without spending an attempt. This is the
+    # property that makes the counter mean anything: if kdf answers without a
+    # PIN verification, an attacker skips verify_pin entirely and brute-forces
+    # the PIN against the encrypted seed, 10^6 tries, nothing debited.
+    se_g = SoftSE(pin="123456")
+    try:
+        se_g.kdf(b"ctx")
+        checks.append(("kdf without a PIN verification refuses", False))
+    except PinLockout:
+        checks.append(("kdf without a PIN verification refuses", True))
+    se_g.verify_pin("000000")                       # a FAILED verification
+    try:
+        se_g.kdf(b"ctx")
+        checks.append(("a failed PIN does not authorise a derive", False))
+    except PinLockout:
+        checks.append(("a failed PIN does not authorise a derive", True))
+    se_g.verify_pin("123456")
+    se_g.kdf(b"ctx")                                # consumes the authorisation
+    try:
+        se_g.kdf(b"ctx")
+        checks.append(("one PIN verification authorises exactly one derive", False))
+    except PinLockout:
+        checks.append(("one PIN verification authorises exactly one derive", True))
+
+    def kdf_of(se, ctx, pin="123456"):
+        """Verify then derive. The chain always does both; the tests must too."""
+        se.verify_pin(pin)
+        return se.kdf(ctx)
+
     # Exhausting the counter wipes, and a wiped device cannot derive keys.
     se3 = SoftSE(pin="123456")
-    k_before = se3.kdf(b"ctx")
+    k_before = kdf_of(se3, b"ctx")
     wiped = False
     for _ in range(MAX_PIN_ATTEMPTS + 2):
         try:
@@ -191,14 +250,15 @@ def _selftest() -> int:
     except PinLockout:
         checks.append(("wiped device refuses kdf", True))
 
-    # The wrapping key must depend on the context, or the PIN and the liveness
-    # result contribute nothing to it.
+    # The wrapping key must depend on the context, or the PIN contributes
+    # nothing to it, and must be stable, or the seed is unrecoverable.
     se4 = SoftSE(pin="123456")
-    checks.append(("kdf is context-bound", se4.kdf(b"a") != se4.kdf(b"b")))
-    checks.append(("kdf is deterministic", se4.kdf(b"a") == se4.kdf(b"a")))
-    checks.append(("kdf differs per device", se4.kdf(b"a") != SoftSE().kdf(b"a")))
+    checks.append(("kdf is context-bound", kdf_of(se4, b"a") != kdf_of(se4, b"b")))
+    checks.append(("kdf is deterministic", kdf_of(se4, b"a") == kdf_of(se4, b"a")))
+    checks.append(("kdf differs per device",
+                   kdf_of(se4, b"a") != kdf_of(SoftSE(pin="123456"), b"a")))
     checks.append(("wipe destroys the wrapping key",
-                   SoftSE(pin="1").kdf(b"x") != k_before))
+                   kdf_of(SoftSE(pin="123456"), b"x") != k_before))
 
     # Counter must advance, for attestation anti-replay.
     se5 = SoftSE()
@@ -207,7 +267,7 @@ def _selftest() -> int:
 
     for label, good in checks:
         ok &= good
-        print(f"  {label:<38}{'PASS' if good else 'FAIL'}")
+        print(f"  {label:<52}{'PASS' if good else 'FAIL'}")
     print("\n" + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
