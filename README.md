@@ -59,7 +59,7 @@ Three further gates confirm that the sample returns light at all, that it scatte
 
 ### Motion: is it alive
 
-A stored sample fails on an asymmetry in how blood can be kept. Blood that can be stored has been anticoagulated and does not clot in the chamber. Blood that was not anticoagulated has already clotted and cannot be poured into a well. The exception is citrate, which is reversible with calcium and which `BUILD.md` §16 states in full: the gate defeats replay of a stored sample, not a prepared attacker who already holds your blood, your device and your PIN.
+A stored sample fails on an asymmetry in how blood can be kept. Blood that can be stored has been anticoagulated and does not clot in the chamber. Blood that was not anticoagulated has already clotted and cannot be poured into a well. `BUILD.md` §16 gives the exception and the scope.
 
 The device tests for this by measuring motion rather than colour. Under laser illumination, a liquid suspension of red cells produces a speckle pattern that changes continuously as the cells move. As fibrin forms it locks the cells in place and the pattern becomes static. A camera samples the pattern for ten minutes and measures the frame-to-frame correlation.
 
@@ -139,7 +139,7 @@ python attest.py                       # attestation, quorum, malformed input
 Each spoof class fails at the physically correct gate, and the self-test fails
 if any gate stops being exercised by at least one class.
 
-The `edta` row is the interesting one: anticoagulated tube blood is chemically identical to fresh blood and passes every colour test, then fails at motion arrested because it does not clot in the chamber. This is the claim the design rests on, and `BUILD.md` §16 states its limit — EDTA is not practically reversible, citrate is, so a recalcified citrated sample passes. The gate raises the cost of replay from a tube in a fridge to a prepared attack by someone who already holds your blood, your device and your PIN.
+The `edta` row is the interesting one: anticoagulated tube blood is chemically identical to fresh blood and passes every colour test, then fails at motion arrested because it does not clot in the chamber. That is the claim the design rests on, and it turns replay from a tube in a fridge into an attack that needs your blood, your device and your PIN together. `BUILD.md` §16 draws the exact line.
 
 ## Repository layout
 
