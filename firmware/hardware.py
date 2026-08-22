@@ -88,6 +88,16 @@ class RealSensorHead(SensorHead):
         # VERIFY: pick ATIME/ASTEP so the 630/680 channels land at 40-70% of
         # full scale on a white patch. The 415 channel WILL sit near zero on
         # blood — that is expected and handled by the clamp in blood_gate.
+        #
+        # AND VERIFY THE NOISE FLOOR, which the fill level above does not
+        # constrain. robustness.py bisects it: G4 is the gate with the least
+        # slack in the whole design, and it gives way once read noise reaches
+        # ~0.1% of full scale. That is a property of the DARK channels — on
+        # blood, 445 nm sits at a few hundred counts, so absolute noise there
+        # dominates the spectral shape long before it troubles 630/680.
+        # Measure it: 100 reads of a static target, and take the standard
+        # deviation of the 445 channel. If it is above ~65 counts, raise the
+        # integration time or average more reads before trusting a spectrum.
         self._set_integration(ATIME_CHEM, ASTEP_CHEM)
         self.spec.gain = 8
 
@@ -296,6 +306,9 @@ if __name__ == "__main__":
     for i, step in enumerate([
         "i2cdetect finds the AS7341 at 0x39",
         "White LEDs on: 630/680 channels land at 40-70% of full scale on a white card",
+        "100 reads of a static target: the 445 channel's standard deviation is "
+        "under ~65 counts. This is the tightest budget in the design — see "
+        "robustness.py",
         "LEDs off: all channels at the dark floor. If not, the chamber leaks light",
         "Laser on with a cartridge seated: camera sees speckle, contrast K > 0.3",
         "Autocorrelate one frame: central peak spans 3-5 px",

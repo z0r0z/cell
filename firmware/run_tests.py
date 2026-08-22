@@ -74,6 +74,8 @@ SUITES = [
      [sys.executable, "test_signer.py"]),
     ("gate robustness — enrolment invariant, hostile captures",
      [sys.executable, "test_gate_robustness.py"]),
+    ("drift margins — what the normalisation actually cancels",
+     [sys.executable, "robustness.py", "--quick"]),
 ]
 
 
