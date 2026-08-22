@@ -24,6 +24,8 @@
 
   <path d="M328,158 L328,214 L316,214 L316,158 Z" fill="#2A2926" stroke="#4A4A46"/>
   <path d="M352,158 L352,214 L364,214 L364,158 Z" fill="#2A2926" stroke="#4A4A46"/>
+  <path d="M276,228 L291,228 L314,200" stroke="#8A8B8F" stroke-width="0.7" fill="none"/>
+  <circle cx="314" cy="198" r="1.6" fill="#8A8B8F"/>
   <text x="176" y="232" font-size="9.5" fill="#8A8B8F">aperture Ø3.0 × 6.0</text>
   <text x="176" y="245" font-size="9.5" fill="#8A8B8F">matte black</text>
 
@@ -60,11 +62,11 @@
   <path d="M310,260 L310,276 L370,276 L370,260" fill="#6E1420" stroke="#4A0E14"/>
   <text x="340" y="272" font-size="9" font-weight="700" text-anchor="middle" fill="#E8E4DE">BLOOD</text>
   <rect x="248" y="256" width="26" height="5" fill="#fff" stroke="#8A8B8F"/>
-  <text x="261" y="303" font-size="9" text-anchor="middle" fill="#8A8B8F">white ref</text>
+  <path d="M268,296 L268,268" stroke="#8A8B8F" stroke-width="0.7" fill="none"/><circle cx="268" cy="266" r="1.6" fill="#8A8B8F"/><text x="248" y="303" font-size="9" text-anchor="middle" fill="#8A8B8F">white ref</text>
   <text x="466" y="284" font-size="10" fill="#8A8B8F">cartridge, white PETG</text>
 
   <line x1="288" y1="158" x2="288" y2="254" stroke="#8A8B8F" stroke-width="1" marker-start="url(#d2)" marker-end="url(#d1)"/>
-  <text x="280" y="210" font-size="10.5" font-weight="600" text-anchor="end" fill="#D8D2C8">9.0</text>
+  <text x="276" y="196" font-size="10.5" font-weight="600" text-anchor="end" fill="#D8D2C8">9.0</text>
   <line x1="236" y1="322" x2="340" y2="322" stroke="#8A8B8F" stroke-width="1" marker-start="url(#d2)" marker-end="url(#d1)"/>
   <text x="288" y="316" font-size="10.5" font-weight="600" text-anchor="middle" fill="#D8D2C8">12.0</text>
 
