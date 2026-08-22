@@ -12,9 +12,9 @@ holding:
     declining at any point signs nothing and says so
     every refusal is a screen the owner can read, never a traceback
 
-The last one is not decoration. A device that drops to a traceback in front
-of somebody holding a lancet has failed at the only job it has, so the loop is
-driven with hostile input and asserted to keep its footing.
+A device that drops to a traceback in front of somebody holding a lancet has
+failed at the only job it has, so the loop is driven with hostile input and
+asserted to keep its footing.
 """
 
 from __future__ import annotations

@@ -5,7 +5,7 @@ in trust: *given a key I derived myself, what would the output script look
 like?* Every change check in psbt.py is that comparison. Rendering an address
 for the display is the secondary job.
 
-Bech32 vs bech32m matters and is not cosmetic. BIP-350 changed the checksum
+Bech32 and bech32m are not interchangeable. BIP-350 changed the checksum
 constant for witness version 1 and above after a flaw was found in the
 original; a taproot address encoded with the v0 constant is a valid-looking
 string that no node will accept, and funds sent to it are gone. So the

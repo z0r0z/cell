@@ -8,8 +8,8 @@
    unnormalised. Emit a unit-normalised vector instead and every entry falls
    below the clamp, the mask silently widens to all eight channels, and the
    415 nm channel (identical for every dark sample, by construction) drags
-   every cosine toward 1. That is not a hypothetical: it shipped, and it cost
-   the deoxyHb margin the gate exists to hold.
+   every cosine toward 1. It shipped, and it cost the deoxyHb margin the gate
+   exists to hold.
 
 2. HOSTILE CAPTURES REJECT, THEY DO NOT RAISE. The unlock chain fails closed
    either way — an exception propagates and no key is derived — but a raise

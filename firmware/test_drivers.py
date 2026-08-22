@@ -22,10 +22,10 @@ objects that have no business being test dependencies. Run it in an
 environment where they ARE present and it compares what the drivers call
 against what the libraries actually expose.
 
-It is worth the file because this is not hypothetical. The first version of
-`se_atecc.py` called `atcab_checkmac` with six arguments where the binding
-takes five, and read the data zone using the lock-zone constant, which names a
-different region entirely. Both would have reached a built device.
+The first version of `se_atecc.py` called `atcab_checkmac` with six arguments
+where the binding takes five, and read the data zone using the lock-zone
+constant, which names a different region entirely. Both would have reached a
+built device.
 """
 
 from __future__ import annotations

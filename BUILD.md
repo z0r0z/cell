@@ -126,7 +126,7 @@ The signal is close to binary. This is why the liveness gate measures motion rat
 
 Published coagulation indices disagree about whether clotting is exponential, sigmoid, or something else. The test does not need to know. It asks three things:
 
-The frames are spatially high-passed before they are correlated. That is not cosmetic: real lensless speckle rides on a strongly non-uniform beam envelope which is *identical* frame to frame, and correlating raw frames measures the envelope rather than the speckle — enough to hold the correlation above 0.5 while the speckle is fully boiling, which fails Gate 5 on genuine blood. Each frame is high-passed independently; subtracting a temporal mean instead would invert the gate, because a frozen field minus its own mean is pure noise and decorrelates perfectly.
+The frames are spatially high-passed before they are correlated. Real lensless speckle rides on a strongly non-uniform beam envelope which is *identical* frame to frame, and correlating raw frames measures the envelope rather than the speckle — enough to hold the correlation above 0.5 while the speckle is fully boiling, which fails Gate 5 on genuine blood. Each frame is high-passed independently; subtracting a temporal mean instead would invert the gate, because a frozen field minus its own mean is pure noise and decorrelates perfectly.
 
 1. **Did it start moving freely?** `D(early) ≥ 0.60`
 2. **Did it stop?** `D(late) ≤ 0.25`
@@ -291,7 +291,7 @@ Two consequences of that rule are worth stating outright, because both look like
 
 **Every Ethereum field is displayed.** The chain id, the nonce and `gas_limit × max_fee_per_gas` are on the confirmation screen next to the amount. They are what the signature commits to, so they are what the owner is asked to approve. An unrecognised chain id is a refusal rather than a number nobody can evaluate — a signature that does not pin the chain replays on every other EVM network the owner holds funds on.
 
-This is a scope decision, not a limitation. Make it deliberately.
+Make this scope decision deliberately.
 
 ### Dual chain is nearly free
 

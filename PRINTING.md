@@ -32,7 +32,7 @@ Ten parts. Nothing needs supports.
 | M2.5 heat-set inserts | 6, plus a soldering iron with an insert tip |
 
 **PETG, not PLA.** PLA creeps under screw preload and softens in a hot car.
-This is not a preference.
+The bosses lose their grip and the optical chamber stops being light-tight.
 
 **The white spool is a measuring instrument.** Every cartridge carries the
 white reference patch that every reading is normalised against, so print the

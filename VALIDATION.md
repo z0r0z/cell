@@ -7,7 +7,7 @@ and `BUILD.md` is the specification.
 Instruments are calibrated to their hardware before use. CELL is no different:
 the thresholds ship as physics-derived defaults, and `calibrate.py` replaces
 them with values measured on your own optics, your own printer and your own
-samples. That step is part of the build, not a caveat about it.
+samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ---
 

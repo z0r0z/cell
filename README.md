@@ -4,8 +4,6 @@ A hardware wallet that requires a live pulse, or a drop of fresh blood, to autho
 
 Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, $94.40 of hardware. Public domain.
 
-The device itself does not wear out. The blood tier spends one lancet and one printed cartridge per signature, and $31 buys about a hundred of those — refills are pennies from a pharmacy. The touch tier, which is the everyday default, spends nothing at all.
-
 <img src="diagrams/turntable.gif" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
 
 <sup>116.2 × 73.2 × 28.3 mm. The ring is the sensor port — a fingertip on it, or a cartridge under it. It is a bezel, not a control; nothing rotates.</sup>
@@ -47,7 +45,7 @@ Touch is the everyday default. Blood is a mode the user enters deliberately.
 
 A button press costs nothing, so malware, an automated script and a deliberate human decision all produce an identical signal. A physical act that is rate-limited by the body separates them: one drop of blood is one signature, and no amount of capital compresses that.
 
-Sealing an agreement in blood is not a novelty. The practice appears across cultures that had no contact with each other, for the same reason each time. A mark anyone can make proves nothing; a mark that costs something proves intent.
+Sealing an agreement in blood recurs across cultures that had no contact with each other, for the same reason each time. A mark anyone can make proves nothing; a mark that costs something proves intent.
 
 ## The blood gate
 
@@ -145,7 +143,7 @@ The wallet half is implemented here rather than delegated, because the gate has 
 
 Every one of them is checked against the vectors published in the BIPs, RFC 6979 and the EIPs — not against its own output. The signatures are also compared byte for byte with `embit` and `eth-account` across every script type and six chains, and then handed to independent code that has to be *satisfied* rather than merely agree: `python-bitcointx`'s script interpreter runs p2pkh, bare multisig, p2wpkh, p2sh-p2wpkh and p2wsh under the flags a node applies, and libsecp256k1 — the implementation Bitcoin Core signs with — checks the taproot key and signature. None of those packages is a dependency; `firmware/test_consensus.py` skips without them.
 
-Multisig has to be registered before it can be signed. That is not bureaucracy: without the co-signers on file, "is this output mine?" can only be answered as "does it contain a key of mine?", and an attacker who controls the coordinator can build a script holding one key of yours and the rest theirs. It hashes correctly, the wallet calls it change, and the balance moves somewhere you cannot spend alone. With the quorum registered the device rebuilds the exact script your co-signers produce and compares it byte for byte. `tools/provision.py multisig` does the registering.
+Multisig has to be registered before it can be signed. Without the co-signers on file, "is this output mine?" can only be answered as "does it contain a key of mine?", and an attacker who controls the coordinator can build a script holding one key of yours and the rest theirs. It hashes correctly, the wallet calls it change, and the balance moves somewhere you cannot spend alone. With the quorum registered the device rebuilds the exact script your co-signers produce and compares it byte for byte. `tools/provision.py multisig` does the registering.
 
 And `tools/regtest_e2e.py` asks the only question that settles anything on its own: Bitcoin Core funds an address this firmware derived, the firmware signs a PSBT spending it, and Core finalises, accepts and mines the result — p2wpkh, p2sh-p2wpkh, p2pkh, p2tr and p2wsh 2-of-3, on a private regtest chain. It found a real defect the first time it ran: the attestation was written into the PSBT with a malformed proprietary key, and Core rejected the whole document rather than skipping the field.
 
@@ -249,6 +247,8 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 <img src="diagrams/build-sheet.svg" alt="Build sheet: parts, optical head, cartridge" width="100%">
 
 `BUILD.md` §2 splits the build into two kits, and every row of `BOM.csv` says which kit it belongs to. The reader kit is $62 of hardware plus $31 of consumables: a Pi, a spectrometer, a laser, a camera, a printed chamber, cartridges, and the lancets and film to run them. It has no security requirements because it signs nothing, and it answers the only question that determines whether the rest is worth building. The wallet kit adds the signing half for a further $32.80.
+
+A touch signature costs nothing to make. A blood signature spends a lancet, an alcohol pad, a PET window and a printed cartridge — about twenty cents, restocked from any pharmacy. Nothing in the device is consumed by either, and nothing on the bill of materials has a shelf life.
 
 Ten parts are printed, all from `python3 tools/gen_printables.py`, all checked before they are written. `PRINTING.md` is the runbook — what to print in what order, what to check off each stage, and the post-processing the device does not work without.
 

@@ -11,7 +11,7 @@ can be replayed against recorded data. This file is the real implementation.
 Install:
     pip install adafruit-circuitpython-as7341 picamera2 numpy
 
-The cartridge reads at TWO STOPS, and the order is not cosmetic. Push to the
+The cartridge reads at TWO STOPS, in this order. Push to the
 first click and the printed white patch is under the aperture: that is where
 read_white_reference() and read_dark() must happen. Push past the detent to the
 second stop and the well is under the aperture, for the sample and the speckle

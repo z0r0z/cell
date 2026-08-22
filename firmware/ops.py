@@ -18,9 +18,9 @@ So the operation set is CLOSED. Four spending shapes, all renderable:
     EthereumSpend  an EIP-1559 transfer, with the chain, nonce and fee cap
 
 Everything else is refused, including generic EVM calldata and bare hashes.
-This is a scope decision, not a missing feature — see BUILD.md section 5.
+This is a scope decision — see BUILD.md section 5.
 
-The renderer is the security control here, not a UI nicety. Every field that
+The renderer is the security control here. Every field that
 changes what the signature authorises appears in the rendered text, so what the
 owner confirms and what the device signs cannot diverge. `render()` on a class
 that forgot a field is a bug of the same severity as a signing bug.
@@ -81,8 +81,8 @@ def wrap_full(value: str, width: int, indent: str = "           ") -> list[str]:
     address is the single field most worth attacking, so it gets shown whole
     even though it costs two lines of a twenty-line screen.
 
-    If the result does not fit the display, render_for_display refuses — which
-    is the correct outcome, not a reason to start truncating.
+    If the result does not fit the display, render_for_display refuses rather
+    than truncating.
     """
     room = max(1, width - len(indent))
     return [indent + value[i:i + room] for i in range(0, len(value), room)]
@@ -165,7 +165,7 @@ class BitcoinSpend:
             if self.change_is_ours:
                 lines.append(f"  change   {format_btc(self.change_sats)} -> your wallet")
             else:
-                # Not a footnote. This is the failure the owner must catch.
+                # The failure the owner must catch, given its own lines.
                 lines.append(f"  change   {format_btc(self.change_sats)}")
                 lines.append("  WARNING  change to an address this")
                 lines.append("           wallet cannot prove it owns:")

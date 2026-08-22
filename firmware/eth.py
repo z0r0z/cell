@@ -204,7 +204,7 @@ class EthTransaction:
 def sign(tx: EthTransaction, seckey: bytes) -> tuple[int, int, int]:
     """Returns (r, s, y_parity). Verifies before returning.
 
-    The recovery check is not ceremony: Ethereum verifies by recovering the
+    Ethereum verifies by recovering the
     sender from the signature, so a wrong parity byte produces a transaction
     that is valid-looking and credited to an address nobody controls.
     """
