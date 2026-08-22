@@ -28,6 +28,10 @@ SUITES = [
      [sys.executable, "policy.py"]),
     ("attestation — BIP-340 vectors, quorum, malformed input",
      [sys.executable, "attest.py"]),
+    ("secure element — PIN counter, KDF binding, wipe",
+     [sys.executable, "se.py"]),
+    ("unlock chain — step order, refusals, key binding",
+     [sys.executable, "test_signer.py"]),
 ]
 
 
@@ -118,9 +122,9 @@ def main() -> int:
             print(f"  - {f}")
         return 1
     print(f"PASS — {len(SUITES) + 1} suites.")
-    print("\nGate logic, tier policy, attestation format and the calibration")
-    print("round trip all verified. Thresholds are calibrated to your hardware")
-    print("at first build — BUILD.md section 13.")
+    print("\nUnlock chain, gate logic, tier policy, attestation and the")
+    print("calibration round trip all verified. Sensing thresholds are")
+    print("calibrated to your hardware at first build — BUILD.md section 13.")
     return 0
 
 

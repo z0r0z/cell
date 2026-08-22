@@ -13,7 +13,7 @@ samples. That step is part of the build, not a caveat about it.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — five suites, no hardware required.
+`python firmware/run_tests.py` — seven suites, no hardware required.
 
 | Component | Method | Result |
 |---|---|---|
@@ -23,6 +23,11 @@ samples. That step is part of the build, not a caveat about it.
 | Malformed input | 6 hostile inputs | Truncated, empty, bad magic, bad version, unknown tier, all-zero — all return a verdict, none raise |
 | Quorum | 3-signer roster | Missing attestation fails; touch-tier attestation fails where blood is required |
 | Tier policy | 12 cases | Escalation permitted, de-escalation refused, five locked classes enforced |
+| Unlock chain | 41 checks | Step order asserted against `EXPECTED_ORDER`; render before all, confirm before PIN, gate before unwrap |
+| Key binding | Differential | Changing the gate measurements or the transaction changes the wrapping key |
+| Operation set | 5 hostile payloads | Unknown type, bare hash, unknown field, missing field, non-object — all refused |
+| Display safety | Width and height limits | Destinations shown in full; anything that does not fit is refused, never truncated |
+| Secure element | 12 checks | Attempt debited before compare, wipe at 10, KDF context-bound and per-device |
 | Blood gates | 16 sample classes | Each rejected at the physically correct gate; all 6 gates exercised |
 | Touch gates | 9 sample classes | Each rejected at the correct gate; all 7 gates exercised |
 | Calibration loop | Capture → sweep → load → re-verify | Thresholds written, loaded, and still separate the panel |
@@ -74,8 +79,13 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
 
 ## Not yet built
 
-- **The wallet layer.** `BUILD.md` §12 specifies forking SeedSigner and
-  inserting the gate before `sign()`. Phase 2 work.
+- **Chain encoding and the UI.** `firmware/signer.py` is the unlock chain and
+  the closed operation set, with the secure element, the gate, the policy and
+  the attestation wired together and tested. What remains is PSBT
+  serialisation, BIP32 derivation, the ST7789 screen and QR transport —
+  `BUILD.md` §12 specifies forking SeedSigner for exactly that, and `Signer`
+  takes them as injected collaborators so the fork plugs in without touching
+  the chain.
 - **Long dormancy.** The sealed REFERENCE and NULL cartridges exist to catch
   optics drift over a year in a drawer; they are checked at every pre-flight.
 - **Population-scale false-reject rate.** Clotting time moves with hydration,

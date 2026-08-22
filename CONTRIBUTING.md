@@ -62,11 +62,23 @@ attacking:
 
 ### 4. The wallet layer
 
-`BUILD.md` §12 specifies forking [SeedSigner](https://github.com/SeedSigner/seedsigner)
-and inserting the gate before `sign()` — a mature airgapped Pi Zero signer that
-already solves animated-QR PSBT, the ST7789 UI, `embit` Bitcoin logic and a
-hardened read-only image. You are adding a gate, not building a wallet. Use
-`embit`; a hand-rolled PSBT parser is how change-address bugs happen.
+The unlock chain, the closed operation set and the renderer are written and
+tested — `firmware/signer.py`. `Signer` takes four collaborators by injection:
+
+```python
+Signer(se, policy, fw_hash,
+       confirm,      # (lines) -> bool      CONFIRM on GPIO26
+       run_gate,     # (Tier)  -> (ok, att) touch_gate / blood_gate
+       unwrap_seed,  # (key)   -> bytearray AES-GCM open of the stored seed
+       sign_digest)  # (seed, sighash) -> bytes
+```
+
+What is left is supplying real ones: PSBT serialisation, BIP32 derivation, the
+ST7789 screen and QR transport. `BUILD.md` §12 specifies forking
+[SeedSigner](https://github.com/SeedSigner/seedsigner) for that — a mature
+airgapped Pi Zero signer that already solves animated-QR PSBT, the UI, `embit`
+Bitcoin logic and a hardened read-only image. Use `embit`; a hand-rolled PSBT
+parser is how change-address bugs happen.
 
 ## What this project does not need
 

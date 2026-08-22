@@ -1,0 +1,345 @@
+"""CELL operation set — what the device is willing to sign, and how it says so.
+
+The rule this file exists to enforce:
+
+    IF THE DEVICE CANNOT RENDER AN OPERATION AS A SENTENCE A HUMAN CAN READ,
+    IT DOES NOT SIGN IT.
+
+A device that displays `0x9a3f...` and asks for blood is worse than one that
+refuses, because it converts a deliberate physical act into a rubber stamp on
+something the owner cannot evaluate. The blood gate proves a human chose to
+sign. That proof is worth nothing if the human could not tell what they chose.
+
+So the operation set is CLOSED. Three shapes, all renderable:
+
+    BitcoinSpend   amount, destination, fee, and where the change goes
+    NoteSpend      a confidential note, its amount, the recipient owner
+    DirectTransfer a transfer to a named pubkey on either chain
+
+Everything else is refused, including generic EVM calldata and bare hashes.
+This is a scope decision, not a missing feature — see BUILD.md section 5.
+
+The renderer is the security control here, not a UI nicety. Every field that
+changes what the signature authorises appears in the rendered text, so what the
+owner confirms and what the device signs cannot diverge. `render()` on a class
+that forgot a field is a bug of the same severity as a signing bug.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+
+
+class UnrenderableOperation(Exception):
+    """Raised when an operation cannot be shown to the owner in full.
+
+    Always a refusal to sign. Never downgrade this to a warning: the whole
+    value of the gate is that the person who bled understood the transaction.
+    """
+
+
+# --------------------------------------------------------------------------
+# Amount formatting
+#
+# Displayed amounts are the thing the owner checks hardest, so they are
+# formatted exactly and never rounded. A truncated amount on screen is a
+# signature on a number the owner did not read.
+# --------------------------------------------------------------------------
+
+SATS_PER_BTC = 100_000_000
+WEI_PER_ETH = 10**18
+
+# ST7789 240x240 with a 6x12 font is 40 columns by 20 rows. Both are hard
+# limits: a line that overflows is a field the owner did not read, and a screen
+# that scrolls is a field they may not have scrolled to.
+DISPLAY_COLS = 40
+DISPLAY_ROWS = 20
+
+
+def format_btc(sats: int) -> str:
+    if sats < 0:
+        raise ValueError("negative amount")
+    whole, frac = divmod(sats, SATS_PER_BTC)
+    return f"{whole}.{frac:08d} BTC"
+
+
+def format_eth(wei: int) -> str:
+    if wei < 0:
+        raise ValueError("negative amount")
+    whole, frac = divmod(wei, WEI_PER_ETH)
+    return f"{whole}.{frac:018d}".rstrip("0").rstrip(".") + " ETH" if frac else f"{whole} ETH"
+
+
+def wrap_full(value: str, width: int, indent: str = "           ") -> list[str]:
+    """Show a value IN FULL, wrapped across lines. Never abbreviated.
+
+    Abbreviation is where address substitution lives. Showing `bc1qxy...k4h9`
+    means an attacker only has to match the visible ends, and prefix grinding
+    is cheap enough that people have lost funds to exactly this. A destination
+    address is the single field most worth attacking, so it gets shown whole
+    even though it costs two lines of a twenty-line screen.
+
+    If the result does not fit the display, render_for_display refuses — which
+    is the correct outcome, not a reason to start truncating.
+    """
+    room = max(1, width - len(indent))
+    return [indent + value[i:i + room] for i in range(0, len(value), room)]
+
+
+def truncate_middle(s: str, keep: int = 8) -> str:
+    """Shorten an opaque identifier — a note commitment, never an address.
+
+    Only for values the owner cannot meaningfully verify character by character
+    anyway. Anything the owner must check against another screen gets
+    wrap_full().
+    """
+    return s if len(s) <= 2 * keep + 3 else f"{s[:keep]}...{s[-keep:]}"
+
+
+# --------------------------------------------------------------------------
+# The operation set
+# --------------------------------------------------------------------------
+
+
+@runtime_checkable
+class Operation(Protocol):
+    """Every operation renders itself in full and names its policy class."""
+
+    def op_class(self) -> str:
+        """Policy class, e.g. "tx.send". See policy.ALWAYS_BLOOD."""
+
+    def amount_for_policy(self) -> int:
+        """Value moved, in the smallest unit of its chain, for the tier floor."""
+
+    def render(self) -> list[str]:
+        """Lines to display. Must include every field that changes what the
+        signature authorises."""
+
+
+@dataclass(frozen=True)
+class BitcoinSpend:
+    """A Bitcoin spend the owner can check line by line.
+
+    `change_is_ours` is carried explicitly and displayed. A change output the
+    wallet cannot prove it owns is the classic way to lose a balance while the
+    displayed 'amount' looks correct, so an unverified change output is shown
+    as a warning line rather than quietly folded into the fee.
+    """
+
+    amount_sats: int
+    destination: str
+    fee_sats: int
+    change_sats: int = 0
+    change_address: str = ""
+    change_is_ours: bool = True
+
+    def op_class(self) -> str:
+        return "tx.send"
+
+    def amount_for_policy(self) -> int:
+        return self.amount_sats
+
+    def render(self) -> list[str]:
+        if not self.destination:
+            raise UnrenderableOperation("spend has no destination address")
+        if self.amount_sats < 0 or self.fee_sats < 0 or self.change_sats < 0:
+            raise UnrenderableOperation("negative amount, fee or change")
+        lines = ["SEND BITCOIN",
+                 f"  amount   {format_btc(self.amount_sats)}",
+                 "  to"]
+        lines += wrap_full(self.destination, DISPLAY_COLS)
+        lines.append(f"  fee      {format_btc(self.fee_sats)}")
+        if self.change_sats:
+            if self.change_is_ours:
+                lines.append(f"  change   {format_btc(self.change_sats)} -> your wallet")
+            else:
+                # Not a footnote. This is the failure the owner must catch.
+                lines.append(f"  change   {format_btc(self.change_sats)}")
+                lines.append("  WARNING  change to an address this")
+                lines.append("           wallet cannot prove it owns:")
+                lines += wrap_full(self.change_address or "(none given)", DISPLAY_COLS)
+        lines.append(f"  TOTAL    {format_btc(self.amount_sats + self.fee_sats)}")
+        return lines
+
+
+@dataclass(frozen=True)
+class NoteSpend:
+    """A confidential note spend.
+
+    The note commitment is opaque by construction, so it is shown as a short
+    identifier and the fields the owner can actually evaluate — amount and
+    recipient owner — are shown in full.
+    """
+
+    note_id: str
+    amount: int
+    recipient_owner: str
+    asset: str = "BTC"
+
+    def op_class(self) -> str:
+        return "note.spend"
+
+    def amount_for_policy(self) -> int:
+        return self.amount
+
+    def render(self) -> list[str]:
+        if not self.note_id or not self.recipient_owner:
+            raise UnrenderableOperation("note spend missing note or recipient")
+        if self.amount < 0:
+            raise UnrenderableOperation("negative amount")
+        amt = format_btc(self.amount) if self.asset == "BTC" else f"{self.amount} {self.asset}"
+        # The note commitment is opaque by construction — there is nothing for
+        # the owner to check it against, so it is abbreviated. The recipient
+        # owner is a key they CAN check, so it is shown whole.
+        lines = ["SPEND CONFIDENTIAL NOTE",
+                 f"  note     {truncate_middle(self.note_id, 6)}",
+                 f"  amount   {amt}",
+                 "  owner"]
+        return lines + wrap_full(self.recipient_owner, DISPLAY_COLS)
+
+
+@dataclass(frozen=True)
+class DirectTransfer:
+    """A transfer to a pubkey on either chain.
+
+    The device holds no gas and builds no transaction; it authorises a transfer
+    and the companion submits it. There is no nonce here and no calldata,
+    because there is nothing for the device to reason about that it could not
+    also display.
+    """
+
+    amount: int
+    recipient_pubkey: str
+    chain: str = "BTC"
+
+    def op_class(self) -> str:
+        return "tx.send"
+
+    def amount_for_policy(self) -> int:
+        return self.amount
+
+    def render(self) -> list[str]:
+        if self.chain not in ("BTC", "ETH"):
+            raise UnrenderableOperation(f"unknown chain {self.chain!r}")
+        if not self.recipient_pubkey:
+            raise UnrenderableOperation("transfer has no recipient")
+        if self.amount < 0:
+            raise UnrenderableOperation("negative amount")
+        amt = format_btc(self.amount) if self.chain == "BTC" else format_eth(self.amount)
+        return ([f"TRANSFER ({self.chain})", f"  amount   {amt}", "  to"]
+                + wrap_full(self.recipient_pubkey, DISPLAY_COLS))
+
+
+@dataclass(frozen=True)
+class PolicyChange:
+    """A change to the tier floor. Blood-locked in both directions.
+
+    Rendered with the old and new value side by side, because "raise the floor"
+    and "lower the floor" are the same screen otherwise, and one of them is an
+    attack.
+    """
+
+    old_blood_above: int | None
+    new_blood_above: int | None
+    old_locked: frozenset[str] = frozenset()
+    new_locked: frozenset[str] = frozenset()
+
+    def op_class(self) -> str:
+        return "policy.change"
+
+    def amount_for_policy(self) -> int:
+        return 0
+
+    @staticmethod
+    def _floor(v: int | None) -> str:
+        return "no amount limit" if v is None else f"blood above {format_btc(v)}"
+
+    def render(self) -> list[str]:
+        lines = ["CHANGE SIGNING POLICY",
+                 f"  from     {self._floor(self.old_blood_above)}",
+                 f"  to       {self._floor(self.new_blood_above)}"]
+        added = sorted(self.new_locked - self.old_locked)
+        removed = sorted(self.old_locked - self.new_locked)
+        for op in added:
+            lines.append(f"  lock     {op}")
+        for op in removed:
+            lines.append(f"  UNLOCK   {op}")
+        loosening = (
+            (self.old_blood_above is None and self.new_blood_above is not None)
+            or (self.old_blood_above is not None and self.new_blood_above is not None
+                and self.new_blood_above > self.old_blood_above)
+            or bool(removed)
+        )
+        # The direction is the whole security question. "Fewer operations need
+        # blood" is the attacker's goal, so it gets the emphatic line.
+        lines.append("  effect   " + ("LOOSENS: fewer need blood"
+                                      if loosening else
+                                      "TIGHTENS: more need blood"))
+        return lines
+
+
+# Every operation the device will sign. Anything not on this list is refused
+# before it reaches the renderer, so an unknown type cannot reach the key by
+# arriving with a render() method that returns something plausible.
+ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, PolicyChange)
+
+
+def parse(payload: dict) -> Operation:
+    """Build an operation from a decoded QR payload, or refuse.
+
+    Refusal is the default: an unknown `type`, an unknown field, or a field of
+    the wrong type all raise. A permissive parser that ignores what it does not
+    understand is how a device ends up signing a field it never displayed.
+    """
+    if not isinstance(payload, dict):
+        raise UnrenderableOperation("payload is not an object")
+    kind = payload.get("type")
+    table = {
+        "btc_spend": BitcoinSpend,
+        "note_spend": NoteSpend,
+        "transfer": DirectTransfer,
+        "policy_change": PolicyChange,
+    }
+    if kind not in table:
+        raise UnrenderableOperation(
+            f"refusing unknown operation {kind!r}. This device signs "
+            f"{', '.join(sorted(table))} and nothing else.")
+    cls = table[kind]
+    fields = {k: v for k, v in payload.items() if k != "type"}
+    known = set(cls.__dataclass_fields__)
+    unknown = set(fields) - known
+    if unknown:
+        # A field the device does not understand is a field it cannot display,
+        # and therefore a field the owner cannot consent to.
+        raise UnrenderableOperation(
+            f"refusing {kind}: unknown field(s) {', '.join(sorted(unknown))}")
+    try:
+        op = cls(**fields)
+    except TypeError as e:
+        raise UnrenderableOperation(f"refusing {kind}: {e}") from None
+    op.render()          # refuse now, not after the owner has bled
+    return op
+
+
+def render_for_display(op: Operation, width: int = DISPLAY_COLS,
+                       rows: int = DISPLAY_ROWS) -> list[str]:
+    """Render, refusing anything that does not fit the physical screen.
+
+    A line that runs off a 240x240 display is a field the owner did not read.
+    Silently truncating it would defeat the entire point of rendering.
+    """
+    if not isinstance(op, ALLOWED):
+        raise UnrenderableOperation(
+            f"refusing {type(op).__name__}: not in the closed operation set")
+    lines = op.render()
+    too_long = [ln for ln in lines if len(ln) > width]
+    if too_long:
+        raise UnrenderableOperation(
+            f"line does not fit the {width}-column display: {too_long[0]!r}")
+    if len(lines) > rows:
+        # Refusing beats scrolling. A field below the fold is a field the owner
+        # may never have seen, and consent to what you did not see is not consent.
+        raise UnrenderableOperation(
+            f"operation needs {len(lines)} lines, the display shows {rows}")
+    return lines

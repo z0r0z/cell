@@ -149,6 +149,9 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `BOM.csv` | Bill of materials with sourcing notes |
 | `firmware/blood_gate.py` | Blood tier, six gates |
 | `firmware/touch_gate.py` | Touch tier, six gates |
+| `firmware/ops.py` | The closed operation set and its renderer |
+| `firmware/signer.py` | The unlock chain: policy, confirm, PIN, gate, sign, attest |
+| `firmware/se.py` | Secure element interface and a software stub for tests |
 | `firmware/policy.py` | Tier selection and escalation rules |
 | `firmware/attest.py` | Tier attestation and quorum verification |
 | `firmware/calibrate.py` | Spoof-panel harness and synthetic self-test |

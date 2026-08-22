@@ -585,16 +585,28 @@ Raspberry Pi OS Lite 64-bit
 
 ### Unlock chain
 
+Implemented in `firmware/signer.py`, with the step order asserted in the tests against `signer.EXPECTED_ORDER`.
+
 ```
-1. cartridge present ∧ white/black refs in tolerance
-2. transaction rendered on screen, CONFIRM pressed
-3. PIN → ATECC608B CheckMac
-     counter increments BEFORE verify, so power-cycling
-     mid-attempt doesn't reset it. 10 failures → wipe.
-4. blood_gate.authorize() → all six gates pass
-5. ATECC608B.KDF(slot_secret, H(pin ‖ blood_attest)) → AES key
-6. seed decrypted into mlock()ed pages → derive → sign → explicit_bzero()
+1. render        refuse anything unrenderable, before anything else
+2. policy        the DEVICE picks the tier; the operation never does
+3. confirm       CONFIRM on GPIO26, showing this exact transaction
+4. PIN           ATECC608B CheckMac. Counter increments BEFORE verify,
+                 so power-cycling mid-attempt doesn't refund an attempt.
+                 10 failures → wipe.
+5. gate          touch_gate or blood_gate, at the tier policy chose
+6. unwrap        KDF(slot_secret, H(pin ‖ liveness ‖ sighash)) → AES key
+7. sign          seed into mlock()ed pages → derive → sign → zeroise
+8. attest        the attestation key signs the tier claim for this sighash
 ```
+
+Three orderings carry the security, and reordering them breaks it even though the signature still verifies:
+
+- **Render before anything.** An operation the owner cannot read is refused before they spend a lancet on it.
+- **Confirm before PIN.** The owner approves *this* transaction, not "a transaction". Taking the PIN first teaches them to authenticate and then read, which is how people sign the wrong thing.
+- **Gate before unwrap, as an input.** The liveness measurements go *into* the key derivation, not into a boolean beside it. A branch can be patched around; a missing KDF input cannot produce the key.
+
+`Signer` takes the display, the gate, the seed unwrap and the signing primitive as injected collaborators, so the SeedSigner fork supplies them without touching the chain.
 
 The seed is exposed in RAM for milliseconds. This is the cost of using a $6 gate chip rather than a secure element that signs internally, and of having a conventional backup path.
 

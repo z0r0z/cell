@@ -1,0 +1,248 @@
+"""Unlock chain tests — the order of operations, and what it refuses.
+
+The interesting assertions here are about SEQUENCE, not just outcome. A chain
+that produces a correct signature while taking the PIN before showing the
+transaction is broken even though the signature verifies, so the step trace is
+checked against signer.EXPECTED_ORDER rather than against prose.
+"""
+
+from __future__ import annotations
+
+import hashlib
+
+import attest
+import ops
+import signer
+from policy import Policy, Tier
+from se import MAX_PIN_ATTEMPTS, SoftSE
+from signer import Refused, SignRequest, Signer
+
+FW = hashlib.sha256(b"cell-fw-test").digest()
+PIN = "123456"
+SIGHASH = hashlib.sha256(b"tx-under-test").digest()
+
+GATE_OK = (True, {"gate_scores": {"G1": 0.15, "G6": 0.02}})
+GATE_FAIL = (False, {"message": "Rejected at G6 motion arrested."})
+
+
+def make(pol=None, confirm=True, gate=GATE_OK, se=None, seed=b"\x11" * 32):
+    """A signer wired to instrumented collaborators."""
+    log = {"confirmed_with": None, "gate_tier": None, "unwrap_key": None,
+           "seed_at_sign": None, "seed_after": None}
+
+    def _confirm(lines):
+        log["confirmed_with"] = lines
+        return confirm
+
+    def _gate(tier):
+        log["gate_tier"] = tier
+        return gate
+
+    def _unwrap(key):
+        log["unwrap_key"] = key
+        # Real builds AES-GCM-open the stored seed with `key`. A bytearray so
+        # zeroise() has something it can actually clear.
+        return bytearray(hashlib.sha256(key + seed).digest())
+
+    def _sign(seed_buf, sighash):
+        log["seed_at_sign"] = bytes(seed_buf)
+        log["seed_after"] = seed_buf          # same object, checked after
+        return attest.schnorr_sign(sighash, bytes(seed_buf))
+
+    s = Signer(se or SoftSE(pin=PIN), pol or Policy(), FW,
+               _confirm, _gate, _unwrap, _sign)
+    return s, log
+
+
+def run() -> int:
+    ok = True
+    results = []
+
+    def check(label, cond):
+        nonlocal ok
+        ok &= bool(cond)
+        results.append((label, bool(cond)))
+
+    spend = ops.BitcoinSpend(amount_sats=250_000, destination="bc1qexampledest0000",
+                             fee_sats=1_200)
+
+    # ---- the happy path, and the ORDER it happened in --------------------
+    s, log = make()
+    res = s.authorize_and_sign(SignRequest(spend, SIGHASH), PIN)
+    check("signs a renderable operation", len(res.signature) == 64)
+    check("step order matches EXPECTED_ORDER", s.trace == signer.EXPECTED_ORDER)
+    check("confirm ran before pin",
+          s.trace.index("confirm") < s.trace.index("pin"))
+    check("render ran before everything", s.trace[0] == "render")
+    check("gate ran before unwrap",
+          s.trace.index("gate") < s.trace.index("unwrap"))
+    check("seed zeroised after signing", set(log["seed_after"]) == {0})
+    check("owner saw the amount",
+          any("0.00250000 BTC" in ln for ln in log["confirmed_with"]))
+    check("owner saw the destination",
+          any("bc1qexam" in ln for ln in log["confirmed_with"]))
+    check("owner saw the required tier",
+          any("requires TOUCH" in ln for ln in log["confirmed_with"]))
+
+    # ---- the attestation is real and bound to this transaction ----------
+    v = attest.verify(res.attestation, s.se.attest_pubkey(), SIGHASH,
+                      min_counter=0, allowed_fw=[FW], require=Tier.TOUCH)
+    check("attestation verifies", v.ok)
+    other = hashlib.sha256(b"another-tx").digest()
+    check("attestation refuses a different tx",
+          not attest.verify(res.attestation, s.se.attest_pubkey(), other,
+                            min_counter=0, allowed_fw=[FW],
+                            require=Tier.TOUCH).ok)
+    key, val = res.psbt_proprietary_field()
+    check("psbt field carries a parseable record",
+          key.startswith(b"CELL") and attest.Attestation.unpack(val) == res.attestation)
+
+    # ---- the liveness result must DERIVE the key ------------------------
+    s2, log2 = make(gate=(True, {"gate_scores": {"G1": 0.99, "G6": 0.99}}))
+    s2.se = s.se                                    # same device secret
+    s2.authorize_and_sign(SignRequest(spend, SIGHASH), PIN)
+    check("different gate measurements -> different wrapping key",
+          log["unwrap_key"] != log2["unwrap_key"])
+
+    s3, log3 = make()
+    s3.se = s.se
+    s3.authorize_and_sign(SignRequest(spend, other), PIN)
+    check("different transaction -> different wrapping key",
+          log["unwrap_key"] != log3["unwrap_key"])
+
+    # ---- refusals --------------------------------------------------------
+    def refuses(label, fn, expect_substr=None):
+        try:
+            fn()
+            check(label, False)
+        except Refused as e:
+            check(label, expect_substr is None or expect_substr in str(e))
+
+    s4, _ = make(gate=GATE_FAIL)
+    refuses("liveness failure refuses",
+            lambda: s4.authorize_and_sign(SignRequest(spend, SIGHASH), PIN),
+            "G6")
+    check("no attestation after a failed gate", "attest" not in s4.trace)
+    check("no unwrap after a failed gate", "unwrap" not in s4.trace)
+
+    s5, _ = make(confirm=False)
+    refuses("cancelling at confirm refuses",
+            lambda: s5.authorize_and_sign(SignRequest(spend, SIGHASH), PIN))
+    check("no PIN taken when cancelled", "pin" not in s5.trace)
+
+    s6, _ = make()
+    refuses("wrong PIN refuses",
+            lambda: s6.authorize_and_sign(SignRequest(spend, SIGHASH), "999999"),
+            "Wrong PIN")
+    check("no gate run on a wrong PIN", "gate" not in s6.trace)
+
+    # de-escalation: the attack policy.py exists to stop, through the chain
+    s7, _ = make(pol=Policy(blood_above=100_000))
+    big = ops.BitcoinSpend(amount_sats=5_000_000, destination="bc1qbig0000000000",
+                           fee_sats=500)
+    refuses("de-escalation refused end to end",
+            lambda: s7.authorize_and_sign(
+                SignRequest(big, SIGHASH, requested_tier=Tier.TOUCH), PIN),
+            "Refused")
+    check("no confirm shown for a refused tier", "confirm" not in s7.trace)
+
+    # escalation is always allowed, and is what gets attested
+    s8, log8 = make()
+    r8 = s8.authorize_and_sign(
+        SignRequest(spend, SIGHASH, requested_tier=Tier.BLOOD), PIN)
+    check("owner may escalate", r8.tier is Tier.BLOOD)
+    check("gate ran at the escalated tier", log8["gate_tier"] is Tier.BLOOD)
+    check("attestation records BLOOD", r8.attestation.tier is Tier.BLOOD)
+
+    # policy.change is blood-locked no matter what policy says
+    s9, log9 = make(pol=Policy(blood_above=None))
+    pc = ops.PolicyChange(old_blood_above=None, new_blood_above=10_000_000)
+    s9.authorize_and_sign(SignRequest(pc, SIGHASH), PIN)
+    check("policy change forced to BLOOD", log9["gate_tier"] is Tier.BLOOD)
+    check("policy change shows its direction",
+          any("LOOSENS" in ln or "TIGHTENS" in ln
+              for ln in log9["confirmed_with"]))
+
+    # ---- unrenderable operations never reach the key ---------------------
+    class Sneaky:
+        """Has the right shape but is not in the closed set."""
+        def op_class(self): return "tx.send"
+        def amount_for_policy(self): return 0
+        def render(self): return ["LOOKS FINE"]
+
+    s10, _ = make()
+    refuses("operation outside the closed set refused",
+            lambda: s10.authorize_and_sign(SignRequest(Sneaky(), SIGHASH), PIN),
+            "closed operation set")
+    check("nothing ran past render", s10.trace == ["render"])
+
+    s11, _ = make()
+    # An absurd destination is shown IN FULL, so it overruns the 20-row screen
+    # and is refused. It is never quietly abbreviated to fit.
+    wide = ops.BitcoinSpend(amount_sats=1, fee_sats=1, destination="x" * 900)
+    refuses("operation too tall for the display refused",
+            lambda: s11.authorize_and_sign(SignRequest(wide, SIGHASH), PIN))
+
+    # The destination must appear in full, never abbreviated — this is the
+    # field address-substitution attacks target.
+    addr = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+    shown = "".join(ops.render_for_display(
+        ops.BitcoinSpend(amount_sats=1, fee_sats=1, destination=addr)))
+    check("destination shown in full, not abbreviated",
+          addr in shown.replace(" ", "") and "..." not in shown)
+
+    s12, _ = make()
+    refuses("short sighash refused",
+            lambda: s12.authorize_and_sign(SignRequest(spend, b"\x00" * 31), PIN))
+
+    # ---- PIN lockout wipes ------------------------------------------------
+    se_lock = SoftSE(pin=PIN)
+    s13, _ = make(se=se_lock)
+    for _ in range(MAX_PIN_ATTEMPTS):
+        try:
+            s13.authorize_and_sign(SignRequest(spend, SIGHASH), "000000")
+        except Refused:
+            pass
+    refuses("device wipes after repeated wrong PINs",
+            lambda: s13.authorize_and_sign(SignRequest(spend, SIGHASH), PIN),
+            "wiped")
+
+    # ---- parser refuses what it does not understand -----------------------
+    for label, payload in [
+        ("unknown operation type", {"type": "evm_call", "data": "0x9a3f"}),
+        ("bare hash", {"type": "raw", "digest": "00" * 32}),
+        ("unknown field on a known type",
+         {"type": "btc_spend", "amount_sats": 1, "destination": "bc1q",
+          "fee_sats": 1, "memo": "surprise"}),
+        ("missing required field", {"type": "btc_spend", "amount_sats": 1}),
+        ("not an object", ["btc_spend", 1]),
+    ]:
+        try:
+            ops.parse(payload)
+            check(f"parser refuses: {label}", False)
+        except ops.UnrenderableOperation:
+            check(f"parser refuses: {label}", True)
+
+    good = ops.parse({"type": "btc_spend", "amount_sats": 100, "fee_sats": 2,
+                      "destination": "bc1qgood0000"})
+    check("parser accepts a well-formed spend", isinstance(good, ops.BitcoinSpend))
+
+    # unverified change must be shown as a warning, never folded away
+    ch = ops.BitcoinSpend(amount_sats=1000, fee_sats=10, destination="bc1qdest0",
+                          change_sats=500, change_address="bc1qunknown",
+                          change_is_ours=False)
+    check("unverified change is flagged to the owner",
+          any("WARNING" in ln for ln in ch.render()))
+
+    print(f"{'check':<52}{'result':>8}")
+    print("-" * 60)
+    for label, good_ in results:
+        print(f"  {label:<50}{'PASS' if good_ else 'FAIL':>8}"
+              + ("" if good_ else "   <-- UNEXPECTED"))
+    print("-" * 60)
+    print(f"{len(results)} checks. " + ("PASS" if ok else "FAIL"))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())
