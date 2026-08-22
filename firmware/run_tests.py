@@ -69,7 +69,7 @@ SUITES = [
      [sys.executable, "test_drivers.py"]),
     ("consensus — an independent interpreter runs our scripts",
      [sys.executable, "test_consensus.py"]),
-    ("blood tier — 6 gates, 17 sample classes",
+    ("blood tier — 6 gates, 18 sample classes",
      [sys.executable, "calibrate.py", "selftest", "--n", "8"]),
     ("touch tier — 7 gates, 9 sample classes",
      [sys.executable, "touch_gate.py"]),
@@ -232,6 +232,14 @@ def docs_match_the_code() -> bool:
         if needle not in text:
             print(f"    {label}: expected to find {needle!r}")
             ok = False
+
+    # This runner's own suite labels, which nothing checked until one of them
+    # spent a while claiming 17 classes for a panel of 18. A test runner that
+    # misdescribes the test it is running is a small lie in the one place a
+    # reader is most likely to trust.
+    here = (root / "firmware" / "run_tests.py").read_text()
+    want("run_tests blood label", here, f"6 gates, {n_blood} sample classes")
+    want("run_tests touch label", here, f"7 gates, {n_touch} sample classes")
 
     want("README blood panel", readme, f"{n_blood} sample classes")
     want("VALIDATION blood panel", validation, f"{n_blood} sample classes")

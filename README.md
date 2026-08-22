@@ -204,6 +204,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/tx.py` | Transactions and all three sighash algorithms |
 | `firmware/eth.py` | RLP and EIP-1559, built from displayed fields |
 | `firmware/secp256k1.py` | The curve both chains sign on |
+| `firmware/hashes.py` | RIPEMD-160 and Keccak-256, because the standard library will not |
 | `firmware/bip32.py` / `bip39.py` | HD derivation and the mnemonic |
 | `firmware/addresses.py` | bech32/bech32m, script types, EIP-55 |
 | `firmware/seedstore.py` | The seed at rest |
@@ -215,14 +216,20 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/test_app.py` | The whole device, driven end to end with fakes |
 | `firmware/se_atecc.py` | ATECC608B driver. Unverified until probed on hardware |
 | `firmware/test_wallet.py` | End to end, and every footgun we could name |
+| `firmware/test_se_atecc.py` | The chip driver's arithmetic, against a fake chip |
+| `firmware/test_curve.py` | The fast scalar multiplies against the definition they replaced |
+| `firmware/test_drivers.py` | Do we call the hardware libraries correctly |
+| `firmware/test_consensus.py` | An independent interpreter runs our scripts |
 | `tools/provision.py` | Choose a seed, wrap it, record the watch-only accounts |
 | `tools/cell.service` | The systemd unit that starts the loop at boot |
+| `tools/regtest_e2e.py` | Sign with the firmware, make Bitcoin Core accept it |
 | `firmware/signer.py` | The unlock chain: policy, confirm, PIN, gate, sign, attest |
 | `firmware/se.py` | Secure element interface and a software stub for tests |
 | `firmware/policy.py` | Tier selection and escalation rules |
 | `firmware/attest.py` | Tier attestation and quorum verification |
 | `firmware/calibrate.py` | Spoof-panel harness for both tiers, and the synthetic self-test |
 | `firmware/hardware.py` | Sensor drivers. Untested; includes a bring-up checklist |
+| `contracts/` | On-chain verification of the attestation record, and the registry |
 | `models/` | Enclosure mesh, coordinate convention, regeneration |
 | `models/print/` | The ten printable STLs and their generated manifest |
 | `diagrams/` | Explainer, build sheet, dimensioned drawings |
@@ -241,7 +248,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 
 <img src="diagrams/build-sheet.svg" alt="Build sheet: parts, optical head, cartridge" width="100%">
 
-`BUILD.md` §2 splits the build into two kits, and every row of `BOM.csv` says which kit it belongs to. The reader kit is $62 of hardware plus $31 of consumables: a Pi, a spectrometer, a laser, a camera, a printed chamber, cartridges, and the lancets and film to run them. It has no security requirements because it signs nothing, and it answers the only question that determines whether the rest is worth building. The wallet kit adds the signing half for a further $31.
+`BUILD.md` §2 splits the build into two kits, and every row of `BOM.csv` says which kit it belongs to. The reader kit is $62 of hardware plus $31 of consumables: a Pi, a spectrometer, a laser, a camera, a printed chamber, cartridges, and the lancets and film to run them. It has no security requirements because it signs nothing, and it answers the only question that determines whether the rest is worth building. The wallet kit adds the signing half for a further $32.80.
 
 Ten parts are printed, all from `python3 tools/gen_printables.py`, all checked before they are written. `PRINTING.md` is the runbook — what to print in what order, what to check off each stage, and the post-processing the device does not work without.
 
