@@ -73,12 +73,16 @@ Signer(se, policy, fw_hash,
        sign_digest)  # (seed, sighash) -> bytes
 ```
 
-What is left is supplying real ones: PSBT serialisation, BIP32 derivation, the
-ST7789 screen and QR transport. `BUILD.md` §12 specifies forking
-[SeedSigner](https://github.com/SeedSigner/seedsigner) for that — a mature
-airgapped Pi Zero signer that already solves animated-QR PSBT, the UI, `embit`
-Bitcoin logic and a hardened read-only image. Use `embit`; a hand-rolled PSBT
-parser is how change-address bugs happen.
+Those are supplied now — `firmware/wallet.py` for the seed and the signing,
+`firmware/app.py` for the loop, and the modules under it for PSBT, BIP-32 and
+the screen. `BUILD.md` §12 explains why they were written here rather than
+taken from [SeedSigner](https://github.com/SeedSigner/seedsigner), and
+SeedSigner is still the reference worth reading for the parts this repo does
+not solve. What is left is review: a hand-rolled PSBT parser is how
+change-address bugs happen, which is why this one is checked against published
+vectors, against two independent implementations, and against a real node in
+`tools/regtest_e2e.py`. Another pair of eyes on it is the most useful thing
+you can bring.
 
 ## What this project does not need
 

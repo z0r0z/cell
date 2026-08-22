@@ -25,3 +25,4 @@ Reader consumable,Consumable,Adhesive,3M 300LSE double-sided 0.05mm,1,9.00,9.00,
 Reader consumable,Consumable,Sharps container,1 litre,1,6.00,6.00,"MANDATORY. Used cartridges and lancets are biohazard, not household trash."
 Wallet,Enclosure,Test cartridges,"REFERENCE + NULL, printed once and sealed",2,0.00,0.00,Pre-flight drift check. REFERENCE must pass spectral gates and fail Gate 5 (it cannot move). NULL must fail Gate 1 on the bright side.
 Wallet,I/O,Camera (QR),Cheap USB webcam,1,8.00,8.00,The Pi Zero has one CSI port and speckle has it. QR decoding tolerates auto-exposure.
+Wallet,I/O,USB OTG adapter,micro-USB male to USB-A female,1,2.00,2.00,The Pi Zero's ports are micro-USB. Without this the QR webcam physically cannot be plugged in.

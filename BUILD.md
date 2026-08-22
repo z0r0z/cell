@@ -1,6 +1,6 @@
 # CELL — Build Specification
 
-Rev 0.8. Single device, $92.40 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
+Rev 0.8. Single device, $94.40 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
 
 The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm — and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
@@ -81,9 +81,9 @@ It answers the question that determines whether the rest is worth building: does
 | USB-C breakout, power only | 2 |
 | M2.5 screws + heat-set inserts, M2 display screws | 2.80 |
 
-Fork SeedSigner, insert the gate before `sign()`, then do the airgap hardening: radios disabled, antenna trace cut, read-only rootfs.
+The signing firmware is in this repository — see §12. Build it, provision a seed, then do the airgap hardening: radios disabled, antenna trace cut, read-only rootfs.
 
-**Full device: $92.40 of hardware,** plus $31.00 of consumables that last hundreds of uses. $123.40 all in.
+**Full device: $94.40 of hardware,** plus $31.00 of consumables that last hundreds of uses. $125.40 all in.
 
 ---
 
@@ -619,6 +619,71 @@ Verify: `iw dev` empty, `hciconfig` empty. Desolder USB D+/D− or use a data-bl
 
 ## 12. Firmware
 
+### From a blank SD card to a running device
+
+Do this on the bench, with the case open, before the seed exists. Every step
+has a check, because a step that silently half-worked is worse than one that
+failed.
+
+**1. Flash the card.** Raspberry Pi Imager, *Raspberry Pi OS Lite (64-bit)*.
+In the gear menu set a hostname, enable SSH with a password, set a user — and
+**do not configure wifi**. You will remove networking entirely later; you only
+need it long enough to install packages.
+
+**2. Enable the buses.** `sudo raspi-config` → Interface Options → enable
+**I2C**, **SPI** and **Legacy Camera**/**Camera** as your image offers. Reboot.
+
+```bash
+ls /dev/i2c-1 /dev/spidev0.0        # both must exist
+i2cdetect -y 1                      # 0x39 AS7341, 0x60 ATECC608B once wired
+```
+
+**3. Install what the firmware needs.**
+
+```bash
+sudo apt update && sudo apt install -y python3-numpy python3-scipy \
+     python3-cryptography python3-opencv python3-gpiozero python3-pil \
+     i2c-tools git
+sudo pip3 install --break-system-packages cryptoauthlib qrcode \
+     adafruit-circuitpython-as7341 adafruit-circuitpython-rgb-display
+```
+
+`picamera2` ships with Raspberry Pi OS. Nothing else is needed: the signing
+stack has no third-party dependency.
+
+**4. Put the firmware on the device and prove it runs there.**
+
+```bash
+git clone <your fork> ~/cell && cd ~/cell
+python3 firmware/run_tests.py
+```
+
+All suites must pass **on the Pi**, not only on your laptop. This takes a few
+minutes on a Zero 2 W. It is the cheapest possible check that the card, the
+Python and the install are sound, and it runs before any key exists.
+
+**5. Check the hardware answers.** With the sensor head and the gate chip
+wired per §11:
+
+```bash
+python3 firmware/se_atecc.py --probe     # after the zones are locked
+python3 firmware/app.py --dir /boot/cell --console
+```
+
+The console runner drives the real loop against stub hardware, so you can walk
+the screens before trusting the panel.
+
+**6. Calibrate.** §13, in full. Do not skip to provisioning — the thresholds
+the device ships with are physics-derived starting points, not your optics.
+
+**7. Provision.** §12, *Provisioning*, below. Write the words on paper, and do
+the restore drill in the build order before you fund anything.
+
+**8. Harden, then seal.** §11's radio removal and antenna cut, the read-only
+rootfs, `cell.service`, and only then the tamper seal. In that order: a sealed
+case you have to reopen because a package was missing is a seal that no longer
+means anything.
+
 ### Wallet layer
 
 The signing stack is in `firmware/`, not delegated. That was a reversal: the earlier plan was to fork [SeedSigner](https://github.com/SeedSigner/seedsigner) and add a gate to it, on the reasoning that writing your own PSBT parser is how you lose money to a change-address bug. That reasoning is still correct, and it is exactly why the parser here is written the way it is — but the gate turned out not to be separable. The tier decision needs the amount. The confirmation screen needs the change ownership. The attestation binds to the sighash. All three want the transaction already parsed, and a signer that hands those out through a plugin boundary is a signer whose security properties live on both sides of that boundary.
@@ -746,7 +811,7 @@ Before it reports success it re-reads the blob through the same path signing use
 
 Then lock the ATECC608B's config and data zones. `se_atecc.py` refuses to run against an unlocked chip: an unlocked chip's slots can still be read or rewritten, which gives every appearance of security and none of it.
 
-You diverge in one place: SeedSigner is stateless and re-derives from a seed you type each time. You store an encrypted seed and gate its decryption.
+One design difference is worth naming, because it is where the gate lives. SeedSigner is stateless: it re-derives from a seed you type in each time, so there is nothing on the device to gate. CELL stores the seed encrypted and gates its decryption, which is what lets a liveness proof stand between an attacker and a key that is already there.
 
 ### Stack
 
@@ -755,13 +820,22 @@ Raspberry Pi OS Lite 64-bit
   ├─ read-only rootfs (raspi-config → Performance → Overlay FS)
   ├─ purge wpa_supplicant, dhcpcd, avahi, ssh
   └─ python3
-       ├─ embit                                  (PSBT, descriptors, taproot)
-       ├─ adafruit-circuitpython-as7341
-       ├─ adafruit-circuitpython-mlx90614
+       ├─ cryptography                           (AES-256-GCM, seed at rest)
+       ├─ numpy, scipy                           (gates 5–6)
+       ├─ adafruit-circuitpython-as7341          (spectrometer)
+       ├─ picamera2                              (speckle capture)
        ├─ cryptoauthlib                          (ATECC608B)
-       ├─ numpy, scipy                           (curve fitting, gates 5–6)
-       └─ blood_gate.py
+       ├─ adafruit-circuitpython-rgb-display,
+       │  pillow, qrcode, gpiozero, opencv       (screen, buttons, QR)
+       └─ firmware/                              (the signing stack itself:
+                                                  secp256k1, BIP-32/39, PSBT,
+                                                  RLP — no third party)
 ```
+
+The signing stack has no third-party dependency at all. `cryptography` is used
+for one thing, AES-GCM on the seed blob, because hand-rolling AES is the wrong
+thing to be clever about. Everything else in `firmware/` is pure Python
+checked against published test vectors.
 
 ### Unlock chain
 
@@ -771,9 +845,9 @@ Implemented in `firmware/signer.py`, with the step order asserted in the tests a
 1. render        refuse anything unrenderable, before anything else
 2. policy        the DEVICE picks the tier; the operation never does
 3. confirm       CONFIRM on GPIO26, showing this exact transaction
-4. PIN           ATECC608B CheckMac. Counter increments BEFORE verify,
-                 so power-cycling mid-attempt doesn't refund an attempt.
-                 10 failures → wipe.
+4. PIN           ATECC608B HMAC against a verifier written at provisioning.
+                 Counter increments BEFORE the compare, so power-cycling
+                 mid-attempt doesn't refund an attempt. 10 failures → wipe.
 5. gate          touch_gate or blood_gate, at the tier policy chose
 6. unwrap        KDF(slot_secret, H(pin)) → AES key
 7. sign          seed into mlock()ed pages → derive → sign → zeroise
@@ -794,7 +868,7 @@ Three orderings carry the security, and reordering them breaks it even though th
 
 On a Pi Zero 2 W the gate ordering is enforced by firmware, on the same footing as the firmware hash and the tamper seal the attestation already declares. A CM4 with verified boot raises that floor when a build calls for it.
 
-`Signer` takes the display, the gate, the seed unwrap and the signing primitive as injected collaborators, so the SeedSigner fork supplies them without touching the chain.
+`Signer` takes the display, the gate, the seed unwrap and the signing primitive as injected collaborators. `firmware/wallet.py` supplies them for real and `firmware/app.py` drives the whole loop, neither touching the order of the chain.
 
 The seed is exposed in RAM for milliseconds. This is the cost of using a $6 gate chip rather than a secure element that signs internally, and of having a conventional backup path.
 
@@ -912,11 +986,13 @@ A sequence of checks, not a schedule — with the parts in front of you this is 
 | 5 | **Spectrum of dye vs. your blood** | 415 nm separates them cleanly. This is the "it works" moment |
 | 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure — early D, late D, the drop and its direction — not on a curve fit |
 | 7 | **Spoof panel** — the reader is done | ROC generated, thresholds set, documented. **This is the result the whole design rests on** |
-| 8 | ATECC608B PIN counter | Increments on failure, survives power loss mid-attempt |
-| 9 | SeedSigner fork, testnet round trip | Coins move |
-| 10 | Blood gate in front of `sign()` | Testnet tx signed only after a real sample |
-| 11 | Seal the REFERENCE and NULL cartridges, record baselines | Both behave per §2 |
-| 12 | Restore drill | Wipe the device, restore the seed from your paper backup, spend again |
+| 8 | ATECC608B configured, zones locked, PIN counter live | `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
+| 9 | Firmware installed, `run_tests.py` green on the Pi | 32 suites pass on the device itself, not just your laptop |
+| 10 | Provisioned, and the backup written down | `provision.py` re-reads its own seed; you have the words on paper |
+| 11 | Regtest round trip | `tools/regtest_e2e.py` — Core accepts and mines what the device signed |
+| 12 | Testnet round trip, gate in the loop | Coins move, and only after a real sample |
+| 13 | Seal the REFERENCE and NULL cartridges, record baselines | Both behave per §2 |
+| 14 | Restore drill | Wipe the device, restore the seed from your paper backup, spend again |
 
 
 Milestone 12 is not optional. A backup you've never restored from is not a backup.

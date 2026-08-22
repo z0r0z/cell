@@ -254,13 +254,14 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
 
 ## Not yet built
 
-- **Chain encoding and the UI.** `firmware/signer.py` is the unlock chain and
-  the closed operation set, with the secure element, the gate, the policy and
-  the attestation wired together and tested. What remains is PSBT
-  serialisation, BIP32 derivation, the ST7789 screen and QR transport —
-  `BUILD.md` §12 specifies forking SeedSigner for exactly that, and `Signer`
-  takes them as injected collaborators so the fork plugs in without touching
-  the chain.
+- **The ATECC608B's ReqAuth binding.** `BUILD.md` §12 requires slot 0 to
+  refuse to derive without a prior authorisation against the PIN slot. That is
+  the rule that makes the attempt counter mean anything: without it an
+  attacker never calls `verify_pin`, they call the derive once per candidate
+  PIN and let AES-GCM's tag tell them when they are right. It is configuration
+  rather than code, this firmware cannot read it back, and the firmware-side
+  check in `se_atecc.py` is the weaker stand-in. Confirm it on a built device
+  by spending eleven wrong PINs on one you can afford to wipe.
 - **Long dormancy.** The sealed REFERENCE and NULL cartridges exist to catch
   optics drift over a year in a drawer; they are checked at every pre-flight.
 - **Population-scale false-reject rate.** Clotting time moves with hydration,

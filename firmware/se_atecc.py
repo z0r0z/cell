@@ -97,18 +97,34 @@ SHA_MODE_TARGET_TEMPKEY = 0x00
 # looks identical from software and provides none of the guarantees.
 CONFIG_REQUIREMENTS = """\
 Slot 0 (wrapping)    IsSecret, no clear read, no write after data-zone lock,
-                     usable only as an HMAC key, LimitedUse bound to Counter0
+                     HMAC key use only, ReqAuth -> AuthKey = slot 2,
+                     LimitedUse bound to Counter0
 Slot 1 (attestation) IsSecret, no clear read, HMAC key use only
-Slot 2 (PIN key)     IsSecret, no clear read, HMAC key use only
+Slot 2 (PIN key)     IsSecret, no clear read, the AuthKey slot 0 points at.
+                     Its secret is derived from the PIN at provisioning, so a
+                     host that knows the PIN can satisfy it and one that does
+                     not cannot.
 Slot 3 (baseline)    clear read, write allowed (a public 4-byte counter value)
 Slot 4 (verifier)    clear read, write allowed, written once at provisioning
 Counter0             attached to slot 0's LimitedUse, so a use costs a count
 Counter1             free-running, for attestation anti-replay
 Both zones           LOCKED before the device holds funds
 
-The LimitedUse binding on slot 0 is the one that matters most and the one this
-file cannot verify: without it, the attempt counter is enforced only by the
-code above, which an attacker replacing the firmware would simply not run.
+TWO BINDINGS, AND THEY DO DIFFERENT JOBS. LimitedUse on Counter0 makes every
+derive cost a count, which is a rate limit. ReqAuth against slot 2 makes a
+derive impossible without a prior successful authorisation, which is the
+actual PIN check. BUILD.md section 12 calls the second one the most important
+line of configuration in the build and it is right: without it an attacker
+never calls verify_pin at all. They call the derive once per candidate PIN and
+test each result against the encrypted seed, where AES-GCM's tag tells them
+when they have it. Six digits is 10^6 tries with nothing debited.
+
+WHAT THIS FIRMWARE ENFORCES ON ITS OWN IS WEAKER THAN THAT. verify_pin below
+compares an HMAC the chip computed against a verifier, and _pin_authorised is
+a flag in RAM. Both are firmware, and firmware is what an attacker replaces.
+The silicon-enforced version of the same rule is the ReqAuth binding, and it
+is configuration this file cannot read back or verify -- see VALIDATION.md,
+which carries it as open until somebody confirms it on a built device.
 """
 
 
