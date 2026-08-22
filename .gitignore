@@ -12,3 +12,9 @@ thresholds.json
 
 # transfer artefacts
 *.zip
+
+# scratch pages written by tools/render_turntable.py and tools/export_model.py
+# while headless Chrome drives the viewer. Removed on exit, but a killed run
+# leaves one behind and it must never be committed.
+viewer/__turntable.html
+viewer/__export.html

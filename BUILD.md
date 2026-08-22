@@ -410,6 +410,16 @@ Four features in total. Two of them matter more than their size suggests:
 
 **No black reference feature.** The dark reading is taken at the *same position as the white patch with the LEDs off* — dark current plus any ambient leak, for free. That removes a printed feature from every cartridge, and the light-tightness test in §8 is what validates the assumption.
 
+### Printing them
+
+```bash
+python3 tools/gen_printables.py     # -> models/print/*.stl
+```
+
+Every printed part except the two enclosure shells comes out of that generator, dimensioned from the constants in this section: the cartridge, the pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the slot baffle, and a jig for cutting the PET windows. It validates each mesh before writing it — every shell closed, consistently wound, positive in volume — and exits non-zero rather than hand a slicer something it would have to guess at. `models/print/MANIFEST.md` lists orientation, settings and the dimensions it had to derive. The shells still come from the viewer export; that stays the one source for anything with an outside surface.
+
+**Length: 45 mm gives 7.4 mm of grip, not 13.4.** The three numbers above do not all hold at once. The well needs clearance ahead of it — 6.0 mm from the tip to the moat wall — so a cartridge whose well reaches the read spot has gone 37.6 mm in, and 7.4 mm is what is left to hold. For the full 13.4 mm, set `CART_L = 51.0` in the generator and regenerate. Either works; they are not interchangeable in the slot, so pick one before printing a batch.
+
 **Windows:** cut 12 × 10 mm rectangles from 0.1 mm transparency film. Tape one edge to the cartridge body with 3M 300LSE so it flips up to load and down to close. Handle by the edges — a fingerprint on the window is a calibration error.
 
 ---
@@ -469,6 +479,14 @@ A second, independent optical path in the same chamber.
 
 ## 10. Enclosure
 
+**Printing the shells:**
+
+```bash
+python3 tools/gen_enclosure.py      # -> models/print/shell_lower.stl, shell_upper.stl
+```
+
+The viewer model is an appearance model — solid extrusions, with the openings drawn as dark boxes rather than cut out of anything. Slice it and you get a brick. `tools/gen_enclosure.py` is the source for the inside: 2.4 mm wall, the part line at 11.4 with a tongue and groove, the four openings actually removed, six M2.5 insert bosses, rails the Pi slides in on, and the light-tight skirt around the optical chamber. It re-checks the envelope against the figures below on every run, and re-checks that the thing can still be assembled — cartridge path, blind vents, Pi bay, sensor port, part line. Both files are parametric; the checks are what keep them describing one instrument.
+
 **`viewer/model.js` is the parametric source of the enclosure.** It builds the geometry; `models/instrument.obj` is an export from it, and `diagrams/mechanical.svg` is generated from that export by `tools/gen_mechanical.py`. The chain is one-way:
 
 ```
@@ -505,10 +523,12 @@ Edit the model, re-export, re-run the generator. CI fails if the drawing and the
 
 | Part | Material | Layer | Perimeters | Infill | Special |
 |---|---|---|---|---|---|
-| Shells | PETG black | 0.16 | 4 | 25% | |
+| Shells | PETG black | 0.16 | 4 | 25% | Part line down, no supports |
 | Optical chamber | PETG black | 0.12 | 6 | 40% | Paint interior matte black |
 | Aperture tube | PETG black | 0.12 | 4 | 100% | Paint interior matte black |
 | Cartridge | PETG **white** | 0.15 | 3 | 100% | **Ironing ON** — only the white patch surface matters |
+
+`tools/gen_printables.py` emits every part in this table except the shells, already at these settings — see `models/print/MANIFEST.md`.
 
 PETG, not PLA — PLA creeps under screw preload and softens in a hot car. The oxblood elements (seam, ring, bezel, ticks) are a second filament or a paint fill; the model separates them as distinct objects with their own materials, so a multi-material printer can take them straight.
 

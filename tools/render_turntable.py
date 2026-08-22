@@ -55,6 +55,7 @@ PAGE = """<!DOCTYPE html>
 <script type="module">
 const SIZE = %(size)d, FRAMES = %(frames)d, ELEV = %(elev)f, GAIN = %(gain)f;
 const TILT_MAX = %(tilt)f, TILT_MIN = %(tilt_min)f, SS = %(ss)f;
+const OUT = %(size)d;
 
 async function post(path, body, kind) {
   await fetch(path, {method:'POST', headers: kind ? {'X-Frame': kind} : {}, body});
@@ -74,7 +75,12 @@ async function run() {
   // Stop the stage driving its own loop; we step the camera by hand.
   renderer.setAnimationLoop(null);
   controls.autoRotate = false;
-  renderer.setPixelRatio(SS);         // supersample, then let ffmpeg downscale
+  // Supersample in GL, then downsample HERE rather than in ffmpeg. Rendering
+  // at SS x and shrinking is the antialiasing that matters: SwiftShader has no
+  // hardware MSAA, so edges and the fine index ticks alias badly at 1:1.
+  // Doing the shrink in the browser also keeps the frame files small — a
+  // full-resolution PNG per frame is what filled the disk last time.
+  renderer.setPixelRatio(SS);
   renderer.setSize(SIZE, SIZE, false);
   cam.aspect = 1; cam.updateProjectionMatrix();
 
@@ -160,14 +166,47 @@ async function run() {
   yaw.position.y += -minY;
   yaw.updateMatrixWorld(true);
 
+  // Downsample chain. Halving repeatedly beats one big drawImage: a single
+  // 3:1 shrink point-samples and reintroduces the aliasing the supersample was
+  // meant to remove, which shows up first on the 60 index ticks.
+  const grab = document.createElement('canvas');
+  const gctx = grab.getContext('2d');
+  const step = document.createElement('canvas');
+  const sctx = step.getContext('2d');
+  for (const c of [gctx, sctx]) { c.imageSmoothingEnabled = true;
+                                  c.imageSmoothingQuality = 'high'; }
+
   for (let i = 0; i < FRAMES; i++) {
     const t = i / FRAMES;
     spin.rotation.y = t * Math.PI * 2;
     tilt.rotation.x = tiltAt(t);
     yaw.updateMatrixWorld(true);
     renderer.render(scene, cam);
-    // toDataURL in the same task as render(), before the compositor swaps.
-    const url = renderer.domElement.toDataURL('image/png');
+
+    // Copy out synchronously, in the same task as render(), before the
+    // compositor swaps the drawing buffer.
+    const gl = renderer.domElement;
+    grab.width = gl.width; grab.height = gl.height;
+    gctx.drawImage(gl, 0, 0);
+
+    let src = grab, w = gl.width;
+    while (w > OUT * 2) {
+      const h = Math.max(OUT, Math.round(w / 2));
+      step.width = h; step.height = h;
+      sctx.clearRect(0, 0, h, h);
+      sctx.drawImage(src, 0, 0, h, h);
+      const keep = document.createElement('canvas');
+      keep.width = h; keep.height = h;
+      keep.getContext('2d').drawImage(step, 0, 0);
+      src = keep; w = h;
+    }
+    const out = document.createElement('canvas');
+    out.width = OUT; out.height = OUT;
+    const octx = out.getContext('2d');
+    octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
+    octx.drawImage(src, 0, 0, OUT, OUT);
+
+    const url = out.toDataURL('image/png');
     await post('/__frame', url.slice(url.indexOf(',') + 1), String(i).padStart(4,'0'));
   }
   await post('/__done', 'ok');
@@ -201,20 +240,50 @@ def main() -> int:
     ap.add_argument("--gain", type=float, default=1.22,
                 help="studio lighting multiplier. The shell is black PETG by "
                      "design; too much here turns it silver and loses the identity.")
-    ap.add_argument("--supersample", type=float, default=2.0,
+    ap.add_argument("--supersample", type=float, default=2.5,
                     help="render scale before downsampling. 2.0 is crisp but "
                          "doubles render time and on-disk frame size; 1.5 is "
                          "close and much cheaper on a long spin.")
-    ap.add_argument("--gif-fps", type=int, default=15,
-                    help="GIF frame rate. Lower than the MP4 on purpose: a "
-                         "slow spin needs a long duration, and every GIF frame "
-                         "is a full 256-colour image.")
+    ap.add_argument("--gif-dither", default="bayer:bayer_scale=5",
+                    help="GIF dither. bayer is ordered and reads as texture; "
+                         "sierra2_4a scatters pixels and reads as grain on a "
+                         "dark subject.")
+    ap.add_argument("--gif-fps", type=int, default=None,
+                    help="GIF frame rate. Defaults to --fps, i.e. no "
+                         "resampling. See the checks in main(): GIF timing is "
+                         "quantised to centiseconds, so only some rates are "
+                         "even possible and only some decimations are uniform.")
     ap.add_argument("--gif-size", type=int, default=440,
                     help="GIF width. Kept below --size on purpose: a 256-colour "
                          "GIF of a long slow spin gets large fast, and the MP4 "
                          "is the one worth posting anyway.")
-    ap.add_argument("--timeout", type=int, default=600)
+    ap.add_argument("--timeout", type=int, default=3600,
+                    help="seconds to wait for the render. Software "
+                         "rasterisation runs about 5 s/frame at 1440px, so a "
+                         "240-frame spin needs ~20 min — the old 600 s default "
+                         "killed good renders four fifths of the way through.")
     args = ap.parse_args()
+
+    if args.gif_fps is None:
+        args.gif_fps = args.fps
+
+    # Two independent ways a GIF turns janky, both invisible until you watch it:
+    #
+    # 1. GIF stores per-frame delay in CENTISECONDS. A rate that does not
+    #    divide 100 cannot be represented — 15 fps wants 6.67 cs and gets 7,
+    #    which is really 14.3 fps and uneven frame to frame.
+    #
+    # 2. Resampling from the source rate drops frames. That is only smooth if
+    #    the ratio is a whole number: 20 -> 10 drops every other frame and
+    #    looks fine, while 15 -> 12 drops one in five on an irregular cadence
+    #    and visibly stutters.
+    if 100 % args.gif_fps:
+        print(f"  warning: {args.gif_fps} fps does not divide 100, so GIF frame "
+              f"delays cannot be even. Use 10, 20, 25 or 50.")
+    if args.fps % args.gif_fps:
+        print(f"  warning: {args.fps} -> {args.gif_fps} fps is not a whole-number "
+              f"decimation, so frames drop on an uneven cadence and the GIF "
+              f"will stutter. Use a divisor of {args.fps}.")
 
     if not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found — needed to assemble the GIF.")
@@ -223,13 +292,13 @@ def main() -> int:
     if not chrome:
         sys.exit("No Chrome or Chromium found.")
 
-    # Frames are large (one PNG per frame at 2x supersampling) and a failed
-    # or timed-out run used to leave the whole directory behind. A handful of
-    # aborted renders is enough to fill a disk, so cleanup is registered
-    # before anything can fail.
-    frames_dir = Path(tempfile.mkdtemp(prefix="cell-frames-"))
+    # Frames NEVER touch the disk. They stream from the browser straight into
+    # ffmpeg's stdin, which writes the MP4 incrementally; the GIF is then made
+    # from that MP4. Buffering 240 PNGs first needed ~200 MB of scratch and was
+    # the thing that kept failing a long render on a nearly-full volume — and
+    # it failed as an opaque "Failed to fetch" in the page, because the frame
+    # POST is what actually hits ENOSPC.
     profile = Path(tempfile.mkdtemp(prefix="cell-chrome-"))
-    atexit.register(shutil.rmtree, frames_dir, True)
     atexit.register(shutil.rmtree, profile, True)
     atexit.register((VIEWER / "__turntable.html").unlink, True)
     # atexit does NOT run on SIGTERM, which is exactly how a long render dies
@@ -246,6 +315,29 @@ def main() -> int:
     status = {"msg": "timed out"}
     count = {"n": 0}
 
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    mp4 = out.with_suffix(".mp4")
+    # Encode to a scratch path and move into place only once every frame has
+    # arrived. Streaming straight to the destination means a run that dies at
+    # frame 154 leaves a truncated clip sitting where the good one was — which
+    # is worse than failing, because it looks like output.
+    stage_dir = Path(tempfile.mkdtemp(prefix="cell-stage-"))
+    atexit.register(shutil.rmtree, stage_dir, True)
+    mp4_tmp = stage_dir / "out.mp4"
+    # Frames already arrive at output resolution, so no rescale — every extra
+    # resample is quality thrown away. crf 16 and preset slow because a
+    # near-black subject with soft gradients is what x264 spends bits worst on.
+    enc = subprocess.Popen(
+        ["ffmpeg", "-y", "-loglevel", "error",
+         "-f", "image2pipe", "-framerate", str(args.fps), "-i", "-",
+         "-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "slow",
+         "-crf", "16", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+         str(mp4_tmp)],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL)
+    atexit.register(lambda: enc.poll() is None and enc.kill())
+
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=str(VIEWER), **kw)
@@ -254,8 +346,9 @@ def main() -> int:
             n = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(n)
             if self.path == "/__frame":
-                idx = self.headers.get("X-Frame", "0000")
-                (frames_dir / f"f{idx}.png").write_bytes(base64.b64decode(body))
+                # The page awaits each POST, so frames arrive in order and can
+                # go straight down the pipe.
+                enc.stdin.write(base64.b64decode(body))
                 count["n"] += 1
                 print(f"\r  frame {count['n']}/{args.frames}", end="", flush=True)
             elif self.path == "/__done":
@@ -287,39 +380,40 @@ def main() -> int:
     (VIEWER / "__turntable.html").unlink(missing_ok=True)
     shutil.rmtree(profile, ignore_errors=True)
 
+    try:
+        enc.stdin.close()
+    except BrokenPipeError:
+        pass
+    enc.wait(timeout=300)
+
     if status["msg"] != "ok":
         sys.exit(f"render failed: {status['msg']}")
     if count["n"] < args.frames:
         sys.exit(f"only {count['n']}/{args.frames} frames arrived")
+    if enc.returncode != 0:
+        sys.exit(f"ffmpeg exited {enc.returncode}")
 
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    pal = frames_dir / "palette.png"
-    # One global palette over every frame. A per-frame palette makes a dark,
-    # softly-shaded body shimmer as the quantiser changes its mind each frame.
+    # GIF from the finished MP4. One global palette over the whole clip:
+    # a per-frame palette makes a dark, softly shaded body shimmer as the
+    # quantiser changes its mind each frame.
+    pal = stage_dir / "palette.png"
+    gif_tmp = stage_dir / "out.gif"
     vf = (f"fps={args.gif_fps},scale={args.gif_size}:-1:flags=lanczos,"
           f"format=rgb24")
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
-                    "-framerate", str(args.fps), "-i", str(frames_dir / "f%04d.png"),
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp4_tmp),
                     "-vf", f"{vf},palettegen=max_colors=256:stats_mode=full",
                     str(pal)], check=True)
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
-                    "-framerate", str(args.fps), "-i", str(frames_dir / "f%04d.png"),
+    # Ordered bayer dither: error diffusion scatters isolated pixels across
+    # smooth gradients, which on a near-black body reads as film grain.
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp4_tmp),
                     "-i", str(pal), "-lavfi",
-                    f"{vf}[x];[x][1:v]paletteuse=dither=sierra2_4a",
-                    "-loop", "0", str(out)], check=True)
+                    f"{vf}[x];[x][1:v]paletteuse=dither={args.gif_dither}",
+                    "-loop", "0", str(gif_tmp)], check=True)
 
-    # An MP4 alongside it: X re-encodes GIFs anyway, and video posts keep more
-    # detail on a dark subject than a 256-colour GIF can.
-    mp4 = out.with_suffix(".mp4")
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
-                    "-framerate", str(args.fps), "-i", str(frames_dir / "f%04d.png"),
-                    "-vf", f"fps={args.fps},scale={args.size}:-2:flags=lanczos,"
-                           f"format=yuv420p",
-                    "-c:v", "libx264", "-crf", "18", "-movflags", "+faststart",
-                    str(mp4)], check=True)
+    # Both are complete: publish together, so the pair can never disagree.
+    shutil.move(str(mp4_tmp), str(mp4))
+    shutil.move(str(gif_tmp), str(out))
 
-    shutil.rmtree(frames_dir, ignore_errors=True)
     print(f"wrote {out}  ({out.stat().st_size/1e6:.2f} MB)")
     print(f"wrote {mp4}  ({mp4.stat().st_size/1e6:.2f} MB)")
     return 0

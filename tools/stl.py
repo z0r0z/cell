@@ -38,6 +38,20 @@ def write_stl(path, tris, header=b"cell"):
     return len(tris)
 
 
+def snap(tris, places=6):
+    """Round vertices onto a common grid and drop degenerates.
+
+    Circles evaluated at theta=0 and theta=2*pi differ in the last bit, which
+    leaves a hairline seam that reads as a hole to a slicer. Rounding closes it.
+    """
+    out = []
+    for tri in tris:
+        t = tuple(tuple(round(v, places) + 0.0 for v in p) for p in tri)
+        if len(set(t)) == 3 and _area2(t) > 1e-18:
+            out.append(t)
+    return out
+
+
 def quad(a, b, c, d):
     """Two triangles for a planar quad wound a-b-c-d."""
     return [(a, b, c), (a, c, d)]
@@ -56,29 +70,6 @@ def box(x0, y0, z0, x1, y1, z1):
     t += quad((x1, y1, z0), (x0, y1, z0), (x0, y1, z1), (x1, y1, z1))      # +Y
     t += quad((x0, y1, z0), (x0, y0, z0), (x0, y0, z1), (x0, y1, z1))      # -X
     return t
-
-
-def tube(cx, cy, z0, z1, r_out, r_in, n=96):
-    """Hollow cylinder, open at both ends -- a lens tube."""
-    lo_o, hi_o = _ring(cx, cy, r_out, z0, n), _ring(cx, cy, r_out, z1, n)
-    lo_i, hi_i = _ring(cx, cy, r_in, z0, n), _ring(cx, cy, r_in, z1, n)
-    t = _wall(lo_o, hi_o)
-    t += _wall(hi_i, lo_i)                       # bore, normals inward
-    t += _annulus(hi_i, hi_o, up=True)
-    t += _annulus(lo_i, lo_o, up=False)
-    return t
-
-
-def _rect_ray(cx, cy, x0, y0, x1, y1, theta):
-    """Where the ray from (cx,cy) at `theta` leaves the rectangle."""
-    dx, dy = math.cos(theta), math.sin(theta)
-    ts = []
-    if abs(dx) > 1e-12:
-        ts.append(((x1 if dx > 0 else x0) - cx) / dx)
-    if abs(dy) > 1e-12:
-        ts.append(((y1 if dy > 0 else y0) - cy) / dy)
-    s = min(ts)
-    return (cx + dx * s, cy + dy * s)
 
 
 def lathe(profile, n=96, cx=0.0, cy=0.0):
@@ -122,7 +113,7 @@ def tube(cx, cy, z0, z1, r_out, r_in, n=96, flange_r=None, flange_h=0.0):
                 (r_out, z0 + flange_h), (r_out, z1), (r_in, z1)]
     else:
         prof = [(r_in, z0), (r_out, z0), (r_out, z1), (r_in, z1)]
-    return lathe(prof[::-1], n, cx, cy)
+    return snap(lathe(prof[::-1], n, cx, cy))
 
 
 def _rect_ray(cx, cy, x0, y0, x1, y1, theta):
@@ -144,40 +135,51 @@ def slab_with_pocket(x0, y0, x1, y1, t, pocket=None, n=192):
 
     pocket = dict(cx, cy, r_well, d_well, r_moat, d_moat), or None.
     """
-    shell = box(x0, y0, 0, x1, y1, t)
-    top_face = quad((x0, y0, t), (x1, y0, t), (x1, y1, t), (x0, y1, t))
-    tris = [tr for tr in shell if tr not in top_face]
-
     if pocket is None:
-        return tris + top_face
+        return snap(box(x0, y0, 0, x1, y1, t))
 
     cx, cy = pocket["cx"], pocket["cy"]
     rw, dw = pocket["r_well"], pocket["d_well"]
     rm, dm = pocket["r_moat"], pocket["d_moat"]
 
-    outer = [_rect_ray(cx, cy, x0, y0, x1, y1, TAU * i / n) + (t,)
-             for i in range(n)]
-    rim = [(cx + rm * math.cos(TAU * i / n), cy + rm * math.sin(TAU * i / n), t)
-           for i in range(n)]
-    for i in range(n):                                   # top face, holed
-        j = (i + 1) % n
-        tris += quad(outer[i], outer[j], rim[j], rim[i])
+    # One perimeter polygon serves the top face, the side walls and the base,
+    # so all three agree edge for edge. The rectangle's own corners are added
+    # to the sample angles, otherwise the polygon cuts them off.
+    angles = [TAU * i / n for i in range(n)]
+    for corner in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
+        angles.append(math.atan2(corner[1] - cy, corner[0] - cx) % TAU)
+    angles = sorted(set(angles))
+    m = len(angles)
 
-    # pocket walls and floors, lathed as one inward-facing surface
+    per = [_rect_ray(cx, cy, x0, y0, x1, y1, a) for a in angles]
+    rim = [(cx + rm * math.cos(a), cy + rm * math.sin(a), t) for a in angles]
+
+    tris = []
+    for i in range(m):                                   # top face, holed
+        j = (i + 1) % m
+        tris += quad(per[i] + (t,), per[j] + (t,), rim[j], rim[i])
+    for i in range(m):                                   # side walls
+        j = (i + 1) % m
+        tris += quad(per[i] + (0.0,), per[j] + (0.0,),
+                     per[j] + (t,), per[i] + (t,))
+    base = (cx, cy, 0.0)                                 # base, fanned
+    for i in range(m):
+        j = (i + 1) % m
+        tris.append((base, per[j] + (0.0,), per[i] + (0.0,)))
+
+    # pocket walls and floors, one inward-facing surface of revolution
     prof = [(rm, t), (rm, t - dm), (rw, t - dm), (rw, t - dw), (0.0, t - dw)]
-    pocket_tris = []
     for i in range(len(prof) - 1):
         r0, z0 = prof[i]
         r1, z1 = prof[i + 1]
-        for k in range(n):
-            a0, a1 = TAU * k / n, TAU * (k + 1) / n
+        for k in range(m):
+            a0, a1 = angles[k], angles[(k + 1) % m] + (TAU if k == m - 1 else 0)
             p00 = (cx + r0 * math.cos(a0), cy + r0 * math.sin(a0), z0)
             p01 = (cx + r0 * math.cos(a1), cy + r0 * math.sin(a1), z0)
             p10 = (cx + r1 * math.cos(a0), cy + r1 * math.sin(a0), z1)
             p11 = (cx + r1 * math.cos(a1), cy + r1 * math.sin(a1), z1)
-            pocket_tris += quad(p00, p01, p11, p10)
-    tris += [tr for tr in pocket_tris if _area2(tr) > 1e-18]
-    return tris
+            tris += quad(p00, p01, p11, p10)
+    return snap(tris)
 
 
 # --------------------------------------------------------------------------
@@ -226,6 +228,12 @@ def sdf_mesh(f, bounds, pitch):
     around it. Manifold by construction.
     """
     (bx0, by0, bz0), (bx1, by1, bz1) = bounds
+    # Nudge the lattice off round numbers. A sample landing exactly on a flat
+    # face gives f == 0, which counts as outside and pinches the surface into a
+    # non-manifold edge; no real geometry sits at an irrational offset.
+    bx0 -= pitch * 0.1373
+    by0 -= pitch * 0.0917
+    bz0 -= pitch * 0.0531
     nx = int(math.ceil((bx1 - bx0) / pitch)) + 1
     ny = int(math.ceil((by1 - by0) / pitch)) + 1
     nz = int(math.ceil((bz1 - bz0) / pitch)) + 1

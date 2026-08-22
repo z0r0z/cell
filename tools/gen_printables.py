@@ -3,10 +3,9 @@
 
     python3 tools/gen_printables.py           # -> models/print/*.stl + MANIFEST.md
 
-The enclosure shells are NOT generated here -- they come out of the parametric
-viewer (`tools/export_model.py`), which stays the single source for anything
-with an outside surface. This file covers the parts that live inside the
-instrument or get consumed by it, and whose dimensions BUILD.md fixes:
+This file covers the parts that live inside the instrument or get consumed by
+it, and calls `tools/gen_enclosure.py` for the two shells, so one command
+produces everything printable:
 
     cartridge            BUILD.md section 8
     cartridge_reference  section 8 / BOM (pre-flight REFERENCE)
@@ -15,6 +14,7 @@ instrument or get consumed by it, and whose dimensions BUILD.md fixes:
     optical_head         section 9  -- DERIVED, see MANIFEST
     slot_baffle          section 9
     window_jig           section 8 (cutting aid, not part of the instrument)
+    shell_lower/upper    section 10, via tools/gen_enclosure.py
 
 Every dimension that BUILD.md states appears below as a named constant. Every
 dimension it does not state is marked DERIVED in the manifest.
@@ -72,7 +72,11 @@ def _cartridge_body(with_pocket=True):
                       r_well=WELL_D / 2, d_well=WELL_DEPTH,
                       r_moat=MOAT_D / 2, d_moat=MOAT_DEPTH)
     tris = stl.slab_with_pocket(0, 0, CART_L, CART_W, CART_T, pocket)
-    tris += stl.box(INSERT_DEPTH - 2.0, 0, 0, CART_L, CART_W, GRIP_T)
+    # Stop rib: its leading face at INSERT_DEPTH lands the well on the read
+    # spot. Inset from every edge and sunk 1 mm into the slab, so the two
+    # solids overlap in volume without sharing a face -- coincident faces are
+    # what makes a slicer guess.
+    tris += stl.box(INSERT_DEPTH, 1.0, 1.0, CART_L - 2.0, CART_W - 1.0, GRIP_T)
     return tris
 
 
@@ -87,11 +91,9 @@ def cartridge_null():
 
 def aperture_tube():
     """3 mm bore, 6 mm long, with a seating flange. Paint the bore matte black."""
-    tris = stl.tube(0, 0, 0, APERTURE_LEN, APERTURE_BORE / 2 + 1.5,
-                    APERTURE_BORE / 2)
-    tris += stl.tube(0, 0, 0, 1.0, APERTURE_BORE / 2 + 3.5,
-                     APERTURE_BORE / 2 + 1.5)
-    return tris
+    return stl.tube(0, 0, 0, APERTURE_LEN, APERTURE_BORE / 2 + 1.5,
+                    APERTURE_BORE / 2, flange_r=APERTURE_BORE / 2 + 3.5,
+                    flange_h=1.0)
 
 
 def slot_baffle():
@@ -106,7 +108,7 @@ def slot_baffle():
                          (SLOT_W / 2, t, SLOT_H / 2))
         return max(solid, -cut)
     return stl.sdf_mesh(f, ((-w / 2 - 1, -t / 2 - 1, -1),
-                            (w / 2 + 1, t / 2 + 1, h + 1)), 0.4)
+                            (w / 2 + 1, t / 2 + 1, h + 1)), 0.3)
 
 
 def window_jig():
@@ -134,12 +136,15 @@ def optical_head():
     R = HEAD_DIA / 2
 
     def bore_from(angle_deg, azimuth_deg, radius, dia, length=60.0):
-        """A bore aimed at the origin, arriving `angle_deg` off vertical."""
+        """A bore aimed at the sample spot, arriving `angle_deg` off vertical.
+
+        `radius` is documentation only -- the component's stated distance from
+        the spot. The bore itself runs the full block, so the part sits at
+        whatever standoff its own footprint allows.
+        """
         a = math.radians(angle_deg)
         az = math.radians(azimuth_deg)
         d = (math.sin(a) * math.cos(az), math.sin(a) * math.sin(az), math.cos(a))
-        start = [d[i] * radius / max(math.sin(a), 1e-6) if i < 2 else 0
-                 for i in range(3)]
         entry = (d[0] * length, d[1] * length, d[2] * length)
         return lambda p: stl.sd_capsule_axis(p, (0, 0, 0), entry, dia / 2)
 
@@ -162,7 +167,7 @@ def optical_head():
             d = max(d, -cut(p))
         return d
 
-    return stl.sdf_mesh(f, ((-R - 1, -R - 1, -1), (R + 1, R + 1, top + 1)), 0.5)
+    return stl.sdf_mesh(f, ((-R - 2, -R - 2, -2), (R + 2, R + 2, top + 2)), 0.35)
 
 
 PARTS = [
@@ -176,16 +181,72 @@ PARTS = [
 ]
 
 
+def validate(name, tris):
+    """Every shell closed, consistently wound, and positive in volume.
+
+    Checked per connected component, because a part may legitimately be more
+    than one shell -- the cartridge is a slab plus a stop rib that overlap in
+    volume, which a slicer unions. What is never legitimate is an open shell
+    or an inverted one: the slicer will print it anyway and quietly invent
+    whatever surface it thinks is missing.
+    """
+    import collections
+    parent = {}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for i, tri in enumerate(tris):
+        parent.setdefault(i, i)
+        for v in tri:
+            parent.setdefault(v, v)
+            union(i, v)
+
+    shells = collections.defaultdict(list)
+    for i, tri in enumerate(tris):
+        shells[find(i)].append(tri)
+
+    total = 0.0
+    for shell in shells.values():
+        edges = collections.Counter()
+        vol = 0.0
+        for a, b, c in shell:
+            for u, v in ((a, b), (b, c), (c, a)):
+                edges[(u, v) if u < v else (v, u)] += 1
+            vol += (a[0] * (b[1] * c[2] - b[2] * c[1])
+                    - a[1] * (b[0] * c[2] - b[2] * c[0])
+                    + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0
+        bad = sum(1 for n in edges.values() if n != 2)
+        if bad:
+            raise SystemExit("%s: shell with %d non-manifold edges" % (name, bad))
+        if vol <= 0:
+            raise SystemExit("%s: shell volume %.1f -- normals inverted"
+                             % (name, vol))
+        total += vol
+    return total
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rows = []
     for name, fn, note in PARTS:
         tris = fn()
+        vol = validate(name, tris)
         path = os.path.join(OUT, name + ".stl")
         stl.write_stl(path, tris, header=("cell " + name).encode())
-        rows.append((name, len(tris), os.path.getsize(path), note))
-        print("%-20s %7d tris  %8.1f kB" % (name, len(tris),
-                                            os.path.getsize(path) / 1024))
+        rows.append((name, len(tris), vol, note))
+        print("%-20s %7d tris  %9.1f mm3  %8.1f kB"
+              % (name, len(tris), vol, os.path.getsize(path) / 1024))
+    import gen_enclosure
+    rows += gen_enclosure.generate()
     _manifest(rows)
 
 
@@ -193,22 +254,77 @@ def _manifest(rows):
     p = os.path.join(OUT, "MANIFEST.md")
     with open(p, "w") as fh:
         fh.write("# Printed parts\n\n")
-        fh.write("Generated by `tools/gen_printables.py`. Do not hand-edit the "
-                 "STLs -- regenerate.\n\nThe enclosure shells are not here: "
-                 "they come from `tools/export_model.py`, which stays the "
-                 "single source for anything with an outside surface.\n\n")
-        fh.write("| Part | Triangles | Print settings |\n|---|---|---|\n")
-        for name, n, _sz, note in rows:
-            fh.write("| `%s.stl` | %d | %s |\n" % (name, n, note))
+        fh.write("Generated by `tools/gen_printables.py`, which builds the "
+                 "internal and consumable parts itself and calls "
+                 "`tools/gen_enclosure.py` for the two shells. Do not "
+                 "hand-edit the STLs -- regenerate.\n\n")
+        fh.write("| Part | Triangles | Shell volume | Print settings |\n|---|---|---|---|\n")
+        for name, n, vol, note in rows:
+            fh.write("| `%s.stl` | %d | %.1f mm3 | %s |\n" % (name, n, vol, note))
         fh.write("""
+## Two sources, one instrument
+
+`viewer/model.js` owns the instrument's OUTSIDE: it is what the turntable
+renders and what `gen_mechanical.py` measures. It is an appearance model --
+solid extrusions, with the openings drawn as dark boxes rather than cut out of
+anything. Slicing it gives you a brick.
+
+`tools/gen_enclosure.py` owns the INSIDE: wall, part line, tongue and groove,
+real openings, insert bosses, the rails the Pi slides in on, and the
+light-tight skirt around the optical chamber.
+
+Two parametric sources is the drift `models/README.md` warns about, so the
+seam between them is checked rather than trusted. `check_envelope()` fails the
+build if the assembled shells stop matching the documented envelope, and
+`check_fit()` fails it if the inside stops being assemblable -- see below.
+
+## What the fit checks cover
+
+Watertight is not the same as buildable. Every generation run probes the five
+ways this enclosure can be wrong without looking wrong:
+
+* the cartridge path, across the full width and thickness of the cartridge,
+  from the front face to the read spot;
+* every vent, which must still have material behind it;
+* the Pi bay, sampled at 1 mm through the corridor a 65 x 30 board sweeps
+  plus its headroom;
+* the sensor port, across the 3 mm spot the aperture tube defines;
+* the part line, where no point may be solid in both shells at once.
+
+Each check is tested against a deliberate break, so it is known to bite. Three
+real conflicts were found this way and are fixed in the geometry: two insert
+bosses standing inside the Pi's footprint, a dish recess as deep as the
+ceiling it was cut into (so the dish opened straight through to the interior),
+and vent pockets deeper than the wall is thick.
+
+## Mesh accuracy
+
+`cartridge`, `cartridge_null` and `aperture_tube` are analytic: circles are
+192- and 96-gon approximations, everything else is exact.
+
+`optical_head`, `slot_baffle` and `window_jig` are isosurfaced at a 0.35, 0.3
+and 0.25 mm grid respectively, because their bores enter walls at an angle and
+that needs real CSG. Expect edges rounded by roughly half the grid pitch. That
+is under the print's own tolerance for a clearance bore, but do not take a
+critical dimension off those three meshes -- take it from the constants at the
+top of `tools/gen_printables.py`.
+
+Every part is checked before it is written: each shell closed, consistently
+wound, positive in volume. The generator exits non-zero rather than emit a
+mesh that fails. Shell volumes in the table above are summed per shell, so the
+cartridge's figure double-counts where the stop rib is sunk into the slab.
+
 ## Orientation
 
 Cartridge: well-side up, on the bed, no supports. The well floor and the white
 patch must both be top surfaces or ironing does nothing for them.
 
-Aperture tube and optical head: bore axis vertical, no supports. The 45 deg
-and 30 deg bores self-support at those angles; the camera bore at 20 deg off
-vertical does not need support either.
+Aperture tube: flange down. The flange seats on top of the optical head and
+the barrel drops through the 6 mm bore, so the tube hangs at the standoff
+rather than being glued at it.
+
+Optical head: open face down on the bed, no supports. Every bore is 30 deg or
+more off horizontal and self-supports.
 
 ## Dimensions taken from BUILD.md
 
@@ -225,6 +341,35 @@ window 12 x 10 x 0.1 PET; travel 31.6; aperture 3.0 dia x 6.0; sensor standoff
 * **Bore diameters** 5.4 (5 mm LED), 6.4 (6 mm laser), 8.0 (camera).
 * **Optical head block** 46 mm dia x 12 mm, 2.4 wall. Fits the 47.2 dish. The
   angles and standoffs are BUILD.md's; the block carrying them is not.
+
+## Derived for the enclosure -- review before printing
+
+BUILD.md section 10 dimensions the outside. Everything structural is this
+generator's invention, and all of it is a constant at the top of
+`tools/gen_enclosure.py`:
+
+* **2.4 wall, 2.0 floor and ceiling**; a 1.2 x 2.0 tongue on the lower shell
+  into a groove in the upper, 0.15 clearance.
+* **Six M2.5 insert bosses**, Ø6 outer, Ø3.6 x 6 insert hole, with Ø2.8
+  clearance and a Ø4.8 head counterbore in the upper shell. Six plus the two
+  front fasteners is the eight the BOM buys.
+* **Pi rails at 7.0**, a 1.8 slot 30 mm deep, entered through the rear bay.
+  The board cannot sit on the cartridge plane at 14.9 -- that is inside the
+  optical chamber -- so it lives under the skirt with 4.8 mm of headroom.
+* **Optical chamber skirt**, Ø50 x 2.4 wall, hanging 12 mm off the deck
+  underside, slotted where the cartridge crosses it.
+* **Vents cut 1.6 deep, not 3.0.** Section 10's figure was safe in a solid
+  body and is 0.6 mm past the inside face of a 2.4 mm wall. Blind is the
+  point: one through-hole and the 415 nm gate stops working.
+* **Display ledge and four posts**, Ø4 with a Ø1.8 pilot. The window follows
+  the model at 49.7 x 37.7, which is larger than a 1.3 in module -- fit a
+  bezel or shrink the window to suit the screen you actually buy.
+
+## Filament
+
+About 55 cm3 of black PETG for the two shells and 8 cm3 for the optical parts
+-- near enough 80 g, against the 90 g the BOM budgets. A cartridge is 1.6 cm3,
+so the 30 g white spool is roughly fifteen of them.
 
 ## Length note -- a real conflict in section 8
 

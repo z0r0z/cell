@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Instrument — 3D study</title>
+<link rel="icon" href="./favicon.svg">
 <script type="importmap">
 {
   "imports": {
@@ -32,12 +33,22 @@
     position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(66% 62% at 44% 44%, rgba(0,0,0,0) 38%, rgba(0,0,0,0.42) 76%, rgba(0,0,0,0.74) 100%);
   }
+  .repo {
+    position: absolute; left: 16px; bottom: 16px;
+    font: 12px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    letter-spacing: 0.02em;
+    color: rgba(240,238,230,0.42);
+    text-decoration: none;
+    padding: 6px 2px;
+  }
+  .repo:hover, .repo:focus-visible { color: rgba(240,238,230,0.86); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <three-d-stage name="instrument"></three-d-stage>
   <div class="vignette"></div>
+  <a class="repo" href="https://github.com/z0r0z/cell" target="_blank" rel="noopener">github.com/z0r0z/cell</a>
 </div>
 <script src="./three-d-stage.js"></script>
 <script type="module" src="./model.js"></script>

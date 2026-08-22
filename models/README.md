@@ -42,6 +42,22 @@ silent 58 mm error that will not look wrong on screen.
 
 ---
 
+## The printed parts
+
+`models/print/` holds the parts that are *not* enclosure: the cartridge, the
+pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the
+slot baffle, the window jig, and both enclosure shells. `python3
+tools/gen_printables.py` builds all nine.
+
+The shells are the one place the one-way chain above does not tell the whole
+story. `model.js` owns the outside and is an appearance model: its shells are
+solid, and its openings are dark boxes rather than volume removed. The inside
+— wall, part line, bosses, rails, optical chamber — comes from
+`tools/gen_enclosure.py`. Two parametric sources is exactly the drift this
+file warns about, so the seam is checked on every run rather than trusted:
+the assembled shells must match the documented envelope, and the assembly
+checks must pass. See `models/print/MANIFEST.md`.
+
 ## Regenerating
 
 `tools/export_model.py` drives headless Chrome against the real viewer, so the
