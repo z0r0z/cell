@@ -54,7 +54,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Touch gates | 9 sample classes | Each rejected at the correct gate; all 7 gates exercised |
 | Calibration loop | Capture → sweep → load → re-verify | Thresholds written, loaded, and still separate the panel |
 | Touch calibration loop | Same, for the touch tier | Every touch threshold set from captured sessions; calibrated set still separates the panel |
-| Enrolment invariant | Reference emitted by `enroll-reference` | Reproduces the G4 clamp mask; 415 nm stays excluded |
+| Enrolment invariant | Reference written by `enroll-reference` | Reproduces the G4 clamp mask; 415 nm stays excluded; the enrolled vector is the one gate 4 compares against, and a genuine capture still passes under it |
 | Hostile captures | 9 malformed captures | Zeros, NaNs, negative counts, short speckle — each rejected at a named gate, none raise |
 | Drift invariance | LED aging, gain drift, ambient leak, beam envelope | Gate scores do not move: the white patch divides the first two out, the dark read subtracts the third, the spatial high-pass removes the fourth |
 | Speckle physics | Ornstein-Uhlenbeck field, exposure-integrated | Reproduces frozen and liquid limits; exposure, frame interval and grain each swept against the G5/G6 thresholds |

@@ -311,10 +311,20 @@ def cmd_enroll_reference(args):
     ref_unit = ref / np.linalg.norm(ref)
     spread = float(np.mean([np.linalg.norm(v - ref_unit) for v in unit]))
 
-    print("Replace REFERENCE_OXYHB in blood_gate.py with:\n")
-    print("REFERENCE_OXYHB = np.array([")
-    print("    " + ", ".join(f"{x:.4f}" for x in ref))
-    print("], dtype=float)\n")
+    # Written into thresholds.json rather than printed for a human to paste
+    # into blood_gate.py. Hand-editing source to calibrate means the firmware
+    # hash changes when your optics do, so co-signers would have to re-register
+    # a build for what is a calibration; it also puts an unchecked copy-paste
+    # between the measurement and the device.
+    out = Path(args.out) if getattr(args, "out", None) else \
+        Path("thresholds.json")
+    blob = json.loads(out.read_text()) if out.exists() else {}
+    blob["reference_oxyhb"] = [round(float(x), 4) for x in ref]
+    blob["reference_n"] = len(vecs)
+    blob["reference_spread"] = round(spread, 4)
+    out.write_text(json.dumps(blob, indent=2, sort_keys=True) + "\n")
+    print(f"reference_oxyhb written to {out}\n")
+    print("    " + ", ".join(f"{x:.4f}" for x in ref) + "\n")
     print(f"n={len(vecs)}  mean intra-class spread={spread:.4f}")
     n_clamped = int(np.sum(ref >= A_MAX - 1e-9))
     print(f"channels at the absorbance clamp: {n_clamped} "
@@ -688,7 +698,9 @@ def main():
     c = sub.add_parser("capture"); c.add_argument("--label", required=True)
     c.add_argument("--synthetic", action="store_true"); c.add_argument("--seed", type=int, default=0)
     c.set_defaults(fn=cmd_capture)
-    sub.add_parser("enroll-reference").set_defaults(fn=cmd_enroll_reference)
+    p_enroll = sub.add_parser("enroll-reference")
+    p_enroll.add_argument("--out", help="thresholds.json to update")
+    p_enroll.set_defaults(fn=cmd_enroll_reference)
     r = sub.add_parser("roc")
     r.add_argument("--frr-budget", type=float, default=0.05,
                    help="fraction of genuine captures the whole gate may "

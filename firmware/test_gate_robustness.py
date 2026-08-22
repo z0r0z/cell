@@ -21,7 +21,9 @@
 from __future__ import annotations
 
 import io
+import argparse
 import contextlib
+import json
 import tempfile
 from pathlib import Path
 
@@ -44,13 +46,14 @@ def enrolment_preserves_the_mask() -> bool:
         for s in range(cal.MIN_PER_CLASS):
             cal.save_capture(cal.DATA / f"genuine_{s:04d}.npz",
                              cal.synth_capture("genuine", s))
+        # Enrolment writes the reference into thresholds.json, so point it at
+        # the temporary directory rather than letting it touch the repo's.
+        out = Path(d) / "thresholds.json"
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            cal.cmd_enroll_reference(None)
+            cal.cmd_enroll_reference(argparse.Namespace(out=str(out)))
         printed = buf.getvalue()
-
-    body = printed.split("np.array([")[1].split("]")[0]
-    ref = np.array([float(x) for x in body.split(",")])
+        ref = np.array(json.loads(out.read_text())["reference_oxyhb"], dtype=float)
 
     ok &= check("enrolled reference has all 8 channels", len(ref) == 8)
     # The load-bearing assertion: the mask this reference would produce is the
@@ -63,6 +66,14 @@ def enrolment_preserves_the_mask() -> bool:
                 not bool(mask[bg.IDX[415]]))
     ok &= check("enrolment reports exactly one clamped channel",
                 "channels at the absorbance clamp: 1" in printed)
+
+    # And the enrolled vector must be the one gate 4 actually compares
+    # against, or calibration writes a file the device ignores.
+    th = bg.Thresholds(reference_oxyhb=tuple(float(x) for x in ref))
+    ok &= check("the gate uses the enrolled reference, not the shipped one",
+                bool(np.array_equal(bg.shape_mask(th.reference_oxyhb), mask)))
+    ok &= check("a genuine capture still passes against it",
+                bg.evaluate(cal.synth_capture("genuine", 0), th).accepted)
     return ok
 
 

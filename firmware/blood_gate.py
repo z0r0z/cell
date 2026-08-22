@@ -72,14 +72,43 @@ REFERENCE_OXYHB = np.array(
 # a margin ten times larger relative to sensor noise.
 SHAPE_CHANNELS = REFERENCE_OXYHB < A_MAX - 1e-9
 
+_DEFAULT_REFERENCE = tuple(float(x) for x in REFERENCE_OXYHB)
+
 REFERENCE_OXYHB /= np.linalg.norm(REFERENCE_OXYHB)
 _REF_SHAPE = REFERENCE_OXYHB[SHAPE_CHANNELS]
 _REF_SHAPE = _REF_SHAPE / np.linalg.norm(_REF_SHAPE)
 
 
+def shape_mask(reference) -> np.ndarray:
+    """Which channels carry shape information for this reference.
+
+    A channel pinned at the absorbance clamp holds the same value for every
+    sample dark enough to reach it, so it contributes a constant to every
+    vector and drags all cosines toward 1. The mask is derived from the
+    reference rather than hardcoded, so an enrolled reference that clamps a
+    different channel excludes that one instead.
+    """
+    return np.asarray(reference, dtype=float) < A_MAX - 1e-9
+
+
+def ref_shape(reference) -> np.ndarray:
+    """The reference restricted to its shape channels, unit length."""
+    r = np.asarray(reference, dtype=float)[shape_mask(reference)]
+    n = np.linalg.norm(r)
+    return r / n if n else r
+
+
 @dataclass(frozen=True)
 class Thresholds:
     """Every number the engine can reject on. Nothing is hardcoded elsewhere."""
+
+    # The oxyHb absorbance reference gate 4 compares shape against. It lives
+    # here rather than as a module constant so that `enroll-reference` can put
+    # a measured one in thresholds.json, alongside every other calibrated
+    # number. That also puts it under the attestation's cal_hash rather than
+    # its fw_hash: enrolling your own reference is a calibration, not a new
+    # firmware build, and co-signers should see it as one.
+    reference_oxyhb: tuple = _DEFAULT_REFERENCE
 
     # --- chemistry, AS7341 -------------------------------------------------
     # G1 is a WINDOW, not a floor. Whole blood in an optically semi-infinite
@@ -466,9 +495,10 @@ def gate4_shape(a: np.ndarray, th: Thresholds) -> GateResult:
     they are what you get from a sample that is old, venous, or otherwise not
     the fresh fingertip draw the device is specified for.
     """
-    w = a[SHAPE_CHANNELS]
+    mask = shape_mask(th.reference_oxyhb)
+    w = a[mask]
     n = np.linalg.norm(w)
-    cos = 0.0 if n == 0 else float(np.dot(w, _REF_SHAPE) / n)
+    cos = 0.0 if n == 0 else float(np.dot(w, ref_shape(th.reference_oxyhb)) / n)
     return GateResult("G4 spectral shape", cos >= th.sam_cos_min, cos, th.sam_cos_min,
                       "Spectrum does not match oxygenated whole blood.")
 
@@ -695,7 +725,7 @@ def metrics(capture: dict, th: Thresholds = Thresholds()) -> dict:
 
     refl = np.clip(f8 - dark_f8, 1e-6, None) / np.clip(white_f8 - dark_f8, 1e-6, None)
     a = absorbance(f8, white_f8, dark_f8)
-    w = a[SHAPE_CHANNELS]
+    w = a[shape_mask(th.reference_oxyhb)]
     nw = np.linalg.norm(w)
 
     r_clear = (clear - dark_clear) / max(white_clear - dark_clear, 1e-6)
@@ -711,7 +741,8 @@ def metrics(capture: dict, th: Thresholds = Thresholds()) -> dict:
         "g2_scatter": float(r_nir / max(r_clear, 1e-9)),
         "g3_soret":   float((refl[IDX[630]] - refl[IDX[415]])
                             / max(refl[IDX[630]] + refl[IDX[415]], 1e-9)),
-        "g4_sam":     0.0 if nw == 0 else float(np.dot(w, _REF_SHAPE) / nw),
+        "g4_sam":     0.0 if nw == 0 else float(
+            np.dot(w, ref_shape(th.reference_oxyhb)) / nw),
     }
     if len(t) == 0:
         m.update(g5_contrast=0.0, g5_d_early=0.0,

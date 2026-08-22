@@ -976,7 +976,7 @@ Mammalian haemoglobin is spectrally near-identical to human, so pig blood **will
 ```bash
 python calibrate.py capture --label genuine       # ×30+
 python calibrate.py capture --label edta          # ×30+   ... etc
-python calibrate.py enroll-reference              # builds your own reference spectrum
+python calibrate.py enroll-reference              # your own reference, into thresholds.json
 python calibrate.py roc                           # sets EVERY threshold, writes thresholds.json
 ```
 
