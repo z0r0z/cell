@@ -99,13 +99,25 @@ The record travels beside the PSBT in a BIP-174 proprietary field and is strippe
 
 The record attests that a device holding this key ran the blood gate for this transaction, and commits to the measurements it got. As with a TPM quote or a Secure Enclave receipt, that claim rests on the firmware and the tamper seal — so co-signers register firmware hashes alongside keys, and `verify()` refuses builds it does not recognise.
 
+### Putting it on chain
+
+By default the record never reaches the chain. It is stripped before broadcast, because publishing it says "this address is a CELL device, and this spend was authorised with blood." For a treasury that is a leak.
+
+For an allowlist it is the whole point, so the option is there.
+
+A contract can check the record itself. It needs three things: the signer's attestation key, recorded once the way you record an xpub; a counter higher than the last one it saw from that key; and a firmware hash it recognises. The signature is BIP-340 Schnorr, which the EVM has no precompile for, but it can be verified through `ecrecover` for a few thousand gas.
+
+What that buys is a signature nobody can farm. A script can produce a million of them. A body produces about two a day, and each one costs a lancet and ten minutes. For allowlists, mints, quorum votes and anything else where one-human-one-action matters, that is a rate limit denominated in something an attacker cannot buy more of.
+
+The limit is the same one every hardware attestation has. The record proves a device holding that key said it ran the blood gate. Someone who opens the case and extracts the key can sign claims without bleeding. So treat it as raising the cost of faking a human, not as proof of a unique one, and register firmware hashes so an unrecognised build is refused.
+
 Implementation in `firmware/attest.py`.
 
 ## What it protects against
 
-The device defeats remote malware, automated signing, signing at scale, and signing without the owner's knowledge. A compromised host cannot produce a pulse or a clotting sample, and there is no batch mode — every signature costs a physical act by a living body, and the blood tier costs one that the body itself rate-limits.
+The device defeats remote malware, automated signing, signing at scale, and signing without the owner's knowledge. A compromised host cannot produce a pulse or a clotting sample, and there is no batch mode. Every signature costs a physical act. At blood tier your body sets the rate, so one drop is one signature and no amount of capital compresses that.
 
-Liveness and identity are separate jobs, and the device does both with separate mechanisms. The gate proves a living human is present. The PIN, backed by the ATECC608B's monotonic attempt counter, proves it is *you* — and it is required at both tiers.
+The gate asks whether someone alive is here. The PIN asks who. It is required at both tiers, and the secure element's attempt counter increments before it checks, so cutting power mid-guess costs an attempt rather than refunding one. Ten wrong and the device wipes.
 
 `BUILD.md` §16 carries the full threat model.
 
