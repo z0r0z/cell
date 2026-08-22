@@ -281,6 +281,17 @@ def docs_match_the_code() -> bool:
     # BOM, or it is only a matter of time.
     want("CONTRIBUTING reader cost", contributing,
          f"${round(kits['Reader'])} of hardware")
+
+    # How many suites this runner runs. Four documents quote the number and
+    # all four were stale at once -- README said 33, VALIDATION said thirty,
+    # BUILD said 32, CONTRIBUTING said five, and the runner ran 35. Nothing
+    # checked it because the count lives in this file, which is the file a
+    # reader is least likely to open and most likely to believe.
+    n_suites = len(SUITES) + len(IN_PROCESS)
+    want("README suite count", readme, f"{n_suites} suites")
+    want("VALIDATION suite count", validation, f"{n_suites} suites")
+    want("BUILD suite count", build, f"{n_suites} suites")
+    want("CONTRIBUTING suite count", contributing, f"{n_suites} suites")
     return ok
 
 
@@ -311,6 +322,20 @@ def schnorr_implementations_agree() -> bool:
     return True
 
 
+# The checks that need to run in-process rather than as a subprocess.
+# Counted rather than hardcoded, so adding one cannot leave the summary line
+# quietly claiming a number it no longer runs. At module scope because
+# docs_match_the_code() counts it: the suite total appears in four documents
+# and drifted in all four at once.
+IN_PROCESS = [
+    ("BIP-340 — attest.py and secp256k1.py agree", schnorr_implementations_agree),
+    ("calibration round trip — capture, sweep, load", calibration_round_trip),
+    ("docs match the code — counts, record size, BOM totals", docs_match_the_code),
+    ("touch calibration round trip — capture, sweep, load",
+     touch_calibration_round_trip),
+]
+
+
 def main() -> int:
     failures = []
     for name, cmd in SUITES:
@@ -319,16 +344,6 @@ def main() -> int:
         if r.returncode != 0:
             failures.append(name)
 
-    # The checks that need to run in-process rather than as a subprocess.
-    # Counted rather than hardcoded, so adding one cannot leave the summary
-    # line quietly claiming a number it no longer runs.
-    IN_PROCESS = [
-        ("BIP-340 — attest.py and secp256k1.py agree", schnorr_implementations_agree),
-        ("calibration round trip — capture, sweep, load", calibration_round_trip),
-        ("docs match the code — counts, record size, BOM totals", docs_match_the_code),
-        ("touch calibration round trip — capture, sweep, load",
-         touch_calibration_round_trip),
-    ]
     for name, fn in IN_PROCESS:
         print(f"\n=== {name} " + "=" * max(0, 60 - len(name)))
         try:
