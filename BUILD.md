@@ -409,9 +409,20 @@ For a device used twice a year this costs nothing, and it removes any need for a
 
 **This is the part that needs care.** Everything else is ordinary electronics.
 
-**45 × 14 × 2.4 mm, white PETG, 0.15 mm layers, 100% infill, top-surface ironing ON.**
+**51 × 14 × 2.4 mm, white PETG, 0.15 mm layers, 100% infill, top-surface ironing ON.**
 
-The length is set by the machine, not by preference: the read spot sits 31.6 mm behind the front face (`models/instrument.obj`), so a 45 mm cartridge leaves 13.4 mm proud of the slot to grip. Shorten it and you are fishing a blood-contact part out of the slot with your fingernails.
+**It reads at two stops.** There is one aperture and one read spot, 31.6 mm behind the front face, so the patch and the well cannot both be under it at once — they take turns:
+
+| Stop | Insert to | Under the aperture | What the device reads |
+|---|---|---|---|
+| 1 | 34.6 mm — the first click | the white patch, centred 3.0 mm from the tip | white reference, then dark with the LEDs off |
+| 2 | 42.1 mm — pushed past the detent | the well, centred 10.5 mm from the tip | the sample, then 600 s of speckle |
+
+A low detent ridge across the top at 34.6 mm meets the slot lip and gives you the first stop by feel. It stands 0.35 mm proud into 0.6 mm of slot clearance, so a deliberate push rides over it — it is a tactile stop, not a lock.
+
+**The order is load-bearing.** Every gate is normalised against the patch, so a white reference taken at the second stop is a reading of the sample against itself: absorbance collapses to zero and the device rejects genuine blood at G1 while reporting "far too bright to be whole blood". `hardware.py` refuses both mistakes rather than measuring through them — it will not read white with the cartridge seated, and it will not read the sample without the seating switch closed.
+
+The length follows from the geometry: the well must reach the read spot, which puts 42.1 mm of the cartridge inside, leaving 8.9 mm proud of the slot to grip. Shorten it and you are fishing a blood-contact part out of the slot with your fingernails.
 
 | Feature | Dimension | Why |
 |---|---|---|
@@ -437,7 +448,7 @@ python3 tools/gen_printables.py     # -> models/print/*.stl
 
 Every printed part except the two enclosure shells comes out of that generator, dimensioned from the constants in this section: the cartridge, the pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the slot baffle, and a jig for cutting the PET windows. It validates each mesh before writing it — every shell closed, consistently wound, positive in volume — and exits non-zero rather than hand a slicer something it would have to guess at. `models/print/MANIFEST.md` lists orientation, settings and the dimensions it had to derive. The shells still come from the viewer export; that stays the one source for anything with an outside surface.
 
-**Length: 45 mm gives 7.4 mm of grip, not 13.4.** The three numbers above do not all hold at once. The well needs clearance ahead of it — 6.0 mm from the tip to the moat wall — so a cartridge whose well reaches the read spot has gone 37.6 mm in, and 7.4 mm is what is left to hold. For the full 13.4 mm, set `CART_L = 51.0` in the generator and regenerate. Either works; they are not interchangeable in the slot, so pick one before printing a batch.
+**Why the well sits 10.5 mm back.** It has to leave room for a 4 mm patch *ahead* of it. Features nearer the tip cross the read spot first, so a patch ahead of the well is read before the sample; a patch behind it would only be reachable after the sample had already been read, which is no use for normalising that same reading. At the original 6.0 mm the moat wall was 2.5 mm from the tip and there was nowhere to put the patch at all — which is exactly how this shipped with a white patch that no optical path could reach. `tools/gen_printables.py` re-checks all six distances on every run and refuses to write a cartridge that breaks any of them.
 
 **Windows:** cut 12 × 10 mm rectangles from 0.1 mm transparency film. Tape one edge to the cartridge body with 3M 300LSE so it flips up to load and down to close. Handle by the edges — a fingerprint on the window is a calibration error.
 

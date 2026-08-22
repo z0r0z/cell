@@ -248,7 +248,13 @@ class SensorHead(ABC):
 
     @abstractmethod
     def read_white_reference(self) -> tuple[np.ndarray, float, float]:
-        """Same, aimed at the cartridge's own printed white patch."""
+        """Same, aimed at the cartridge's own printed white patch.
+
+        Read at the FIRST cartridge stop, where the patch is under the
+        aperture. Every gate is normalised against this, so reading it at the
+        second stop measures the sample against itself: absorbance collapses to
+        zero and genuine blood is rejected at G1 as "far too bright".
+        """
 
     @abstractmethod
     def read_dark(self) -> tuple[np.ndarray, float, float]:
@@ -268,6 +274,18 @@ class SensorHead(ABC):
         adjustment between frames destroys the correlation measurement. Exposure
         should be short (<=2 ms) so each frame samples the speckle field almost
         instantaneously rather than time-averaging it."""
+
+    def await_sample_position(self) -> None:
+        """Block until the cartridge is at the SECOND stop, with the well under
+        the aperture.
+
+        Called once, after the white and dark reads and before the timed loop
+        starts. Not abstract: a replay head or a synthetic stub has nothing to
+        wait for. On hardware it is what stops the speckle series beginning
+        while the patch is still under the aperture — and the laser interlock
+        would refuse anyway, since the seating switch is what it checks.
+        """
+        return None
 
     def read_temperatures(self) -> Optional[tuple[float, float]]:
         """(sample_c, ambient_c), or None if no thermal sensor is fitted.
@@ -572,8 +590,14 @@ def acquire(head: SensorHead, th: Thresholds = Thresholds(),
     Pass early_abort=False when recording calibration data, where the full
     speckle series is wanted even for samples that fail on chemistry.
     """
+    # Stop 1: the white patch is under the aperture.
     white = head.read_white_reference()
     dark = head.read_dark()
+
+    # Stop 2: the well. Everything after this point reads the sample, and the
+    # clock does not start until the cartridge is there — otherwise the first
+    # speckle burst fires at the patch and the laser interlock refuses.
+    head.await_sample_position()
 
     t0 = time.monotonic()
     chem = None

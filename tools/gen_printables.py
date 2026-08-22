@@ -31,10 +31,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "models", "print")
 
 # --- BUILD.md section 8, the cartridge -------------------------------------
-CART_L, CART_W, CART_T = 45.0, 14.0, 2.4      # 45 x 14 x 2.4 mm
+CART_L, CART_W, CART_T = 51.0, 14.0, 2.4      # 51 x 14 x 2.4 mm
 WELL_D, WELL_DEPTH = 4.0, 0.55                # 4.0 dia, 0.55 deep, ~7 uL
 MOAT_D, MOAT_DEPTH = 7.0, 0.40                # 7.0 annulus, 0.4 deep
 PATCH = 4.0                                   # white reference patch, 4 x 4
+PATCH_FROM_TIP = 3.0                          # patch centre, ahead of the moat
+DETENT_PROUD = 0.35                           # first-stop bump, rides over on a push
+DETENT_L = 1.2                                # along the cartridge
 WINDOW_L, WINDOW_W = 12.0, 10.0               # PET window blank
 TRAVEL = 31.6                                 # front face to read spot
 
@@ -48,7 +51,12 @@ SLOT_W, SLOT_H = 34.0, 3.0                    # front slot, 34.0 x 3.0
 BAFFLE_OFFSET = 6.0                           # baffle 6 mm behind the flap
 
 # --- DERIVED: nothing in BUILD.md fixes these ------------------------------
-WELL_FROM_TIP = 6.0        # tip clearance ahead of the moat outer wall
+# The well sits far enough back that a 4 x 4 patch fits AHEAD of the moat.
+# That ordering is what makes the two-stop read possible: features nearer the
+# tip cross the read spot first, so the patch is read before the sample rather
+# than after it. At 6.0 the moat outer wall was 2.5 mm from the tip and there
+# was nowhere to put the patch — which is why nothing could read it.
+WELL_FROM_TIP = 10.5       # well centre; moat spans 7.0-14.0 from the tip
 GRIP_T = 3.6               # > SLOT_H, so the shoulder is the insertion stop
 LED_BORE = 5.4             # 5 mm LED slip fit
 LASER_BORE = 6.4           # 6 mm laser module slip fit
@@ -56,8 +64,12 @@ CAMERA_BORE = 8.0          # lensless CSI module clear aperture
 HEAD_DIA = 46.0            # fits the 47.2 sample dish
 WALL = 2.4                 # 6 perimeters at 0.4, per the print table
 
-INSERT_DEPTH = WELL_FROM_TIP + TRAVEL          # 37.6 mm
-GRIP_PROUD = CART_L - INSERT_DEPTH             # 7.4 mm at the specified length
+# Two stops. Push to the first, the patch is under the aperture and the device
+# reads white and dark; push past the detent to the second and the well is
+# under the aperture for the sample and the 600 s speckle series.
+INSERT_WHITE = PATCH_FROM_TIP + TRAVEL         # 34.6 mm — stop 1, the patch
+INSERT_DEPTH = WELL_FROM_TIP + TRAVEL          # 42.1 mm — stop 2, the well
+GRIP_PROUD = CART_L - INSERT_DEPTH             # 8.9 mm at the specified length
 
 
 def _cartridge_body(with_pocket=True):
@@ -77,6 +89,14 @@ def _cartridge_body(with_pocket=True):
     # solids overlap in volume without sharing a face -- coincident faces are
     # what makes a slicer guess.
     tris += stl.box(INSERT_DEPTH, 1.0, 1.0, CART_L - 2.0, CART_W - 1.0, GRIP_T)
+    # First-stop detent: a low ridge that meets the slot lip when the patch is
+    # under the aperture. It is proud by less than the slot clearance, so a
+    # deliberate push rides over it to the second stop; it is a tactile stop,
+    # not a lock. Sunk into the slab so the two solids overlap in volume rather
+    # than sharing a face.
+    tris += stl.box(INSERT_WHITE - DETENT_L / 2, 3.0, CART_T - 0.4,
+                    INSERT_WHITE + DETENT_L / 2, CART_W - 3.0,
+                    CART_T + DETENT_PROUD)
     return tris
 
 
@@ -234,6 +254,33 @@ def validate(name, tris):
     return total
 
 
+def check_cartridge_geometry():
+    """The two-stop read is a set of distances that must all hold at once.
+
+    Every one of these was violated by the 45 mm single-stop cartridge, which
+    is how it shipped with a white patch that no optical path could reach. They
+    are checked here so the same thing cannot happen quietly again.
+    """
+    fails = []
+    if PATCH_FROM_TIP + PATCH / 2 >= WELL_FROM_TIP - MOAT_D / 2:
+        fails.append("the patch overlaps the moat — no clean white surface")
+    if PATCH_FROM_TIP - PATCH / 2 <= 0.5:
+        fails.append("the patch runs off the tip")
+    if INSERT_WHITE >= INSERT_DEPTH:
+        fails.append("stop 1 is not ahead of stop 2 — the patch is never read first")
+    if DETENT_PROUD >= SLOT_H - CART_T:
+        fails.append("the detent is taller than the slot clearance — it will jam")
+    if INSERT_WHITE - DETENT_L / 2 <= WELL_FROM_TIP + WINDOW_L / 2:
+        fails.append("the detent sits under the PET window")
+    if GRIP_PROUD < 6.0:
+        fails.append(f"only {GRIP_PROUD:.1f} mm of cartridge left to hold")
+    if fails:
+        raise SystemExit("cartridge geometry:\n  " + "\n  ".join(fails))
+    return (f"cartridge: patch at {PATCH_FROM_TIP:.1f}, well at "
+            f"{WELL_FROM_TIP:.1f}, stops at {INSERT_WHITE:.1f} and "
+            f"{INSERT_DEPTH:.1f} mm, {GRIP_PROUD:.1f} mm grip")
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rows = []
@@ -247,6 +294,7 @@ def main():
               % (name, len(tris), vol, os.path.getsize(path) / 1024))
     import gen_enclosure
     rows += gen_enclosure.generate()
+    print(check_cartridge_geometry())
     _manifest(rows)
 
 

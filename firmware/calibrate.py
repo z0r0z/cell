@@ -536,10 +536,12 @@ def cmd_touch_capture(args):
         red, ir, bore = tg._synth(args.label, args.seed, th)
         fs = th.fs
     else:
-        from hardware import RealTouchSensor          # provided by the device build
+        # RealTouchSensor shares the spectrometer with the blood head, so it
+        # takes that head rather than opening the I2C bus a second time.
+        from hardware import RealSensorHead, RealTouchSensor
         print(f"[{args.label}] {TOUCH_PANEL[args.label]}")
         input(f"Press Enter, then hold still for {th.duration_s:.0f} s...")
-        sensor = RealTouchSensor()
+        sensor = RealTouchSensor(RealSensorHead())
         # fs is a TARGET; the sensor reports what it achieved and that is what
         # gets stored, because every frequency-derived feature scales with it.
         red, ir, fs = sensor.read_ppg(th.duration_s, th.fs)

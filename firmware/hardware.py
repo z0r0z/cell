@@ -11,6 +11,14 @@ can be replayed against recorded data. This file is the real implementation.
 Install:
     pip install adafruit-circuitpython-as7341 picamera2 numpy
 
+The cartridge reads at TWO STOPS, and the order is not cosmetic. Push to the
+first click and the printed white patch is under the aperture: that is where
+read_white_reference() and read_dark() must happen. Push past the detent to the
+second stop and the well is under the aperture, for the sample and the speckle
+series. Every gate normalises against the patch, so a white reference taken at
+the wrong stop reads the sample against itself, absorbance collapses to zero,
+and the device rejects genuine blood at G1 while reporting "far too bright".
+
 Sequencing rule that matters more than any other line here: THE TWO OPTICAL
 PATHS MUST NEVER RUN AT ONCE. The laser contaminates the 630 nm channel and the
 white LEDs wash out the speckle. Every method below leaves its illumination OFF
@@ -61,7 +69,15 @@ SETTLE_PPG_S = 0.002
 class RealSensorHead(SensorHead):
     """Blood tier: AS7341 chemistry + laser/camera speckle."""
 
-    def __init__(self):
+    def __init__(self, prompt=None):
+        """`prompt(text)` blocks until the operator has done what it says.
+
+        Injected so the device build can drive the ST7789 and the CONFIRM
+        button, while a bring-up session on a laptop gets input(). It is a
+        constructor argument rather than a hardcoded input() because a device
+        that blocks on stdin with no terminal attached hangs forever.
+        """
+        self._prompt = prompt or (lambda msg: input(msg + " [Enter] "))
         import board, busio, digitalio            # noqa: E401
         import adafruit_as7341
         from picamera2 import Picamera2
@@ -148,16 +164,49 @@ class RealSensorHead(SensorHead):
         return f8, float(self.spec.channel_clear), float(self.spec.channel_nir)
 
     def read_channels(self):
+        """The sample. Requires the cartridge at the SECOND stop.
+
+        The microswitch closes only when the cartridge is fully seated, so this
+        is checked rather than assumed — reading the sample at stop 1 would
+        measure the white patch and call it blood.
+        """
+        self._await_seated()
         with self._exclusive(white=True, ir=True):
             return self._channels()
 
+    def await_sample_position(self):
+        """The SensorHead hook blood_gate.acquire() calls between the two
+        reads. Same check as the sample read makes, done once, before any
+        timing starts."""
+        self._await_seated()
+
+    def _await_seated(self):
+        if not self.cartridge_present():
+            self._prompt("Push the cartridge past the detent to the second stop.")
+        if not self.cartridge_present():
+            raise RuntimeError(
+                "cartridge is not fully seated — the well is not under the "
+                "aperture and any reading would be of the white patch")
+
     def read_white_reference(self):
-        # The cartridge's own printed white patch. Positioning is mechanical:
-        # the patch sits under the aperture when the cartridge is fully seated.
+        """The cartridge's own printed white patch, at the FIRST stop.
+
+        This is what cancels LED aging, photodiode drift and print variation,
+        and it is read from the same part, in the same layer, seconds before
+        the sample. It cannot be read at the second stop: at that depth the
+        well is under the aperture and the patch is 7.5 mm past it.
+        """
+        if self.cartridge_present():
+            raise RuntimeError(
+                "cartridge is already at the second stop — withdraw it to the "
+                "first click, or the white reference will be a reading of the "
+                "sample against itself")
         with self._exclusive(white=True, ir=True):
             return self._channels()
 
     def read_dark(self):
+        # Same position as the white reference, LEDs off. Taken at stop 1 for
+        # exactly that reason — see blood_gate.SensorHead.read_dark.
         with self._exclusive():            # everything off
             return self._channels()
 
@@ -251,6 +300,8 @@ if __name__ == "__main__":
         "Laser on with a cartridge seated: camera sees speckle, contrast K > 0.3",
         "Autocorrelate one frame: central peak spans 3-5 px",
         "Confirm the achieved PPG sample rate is stable at the configured fs",
+        "Cartridge at stop 1: the clear channel reads HIGH — that is the "
+        "white patch. At stop 2 with blood loaded it drops to ~0.15 of it",
         "Only then run: calibrate.py capture --label genuine",
     ], 1):
         print(f"  {i}. {step}")

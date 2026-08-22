@@ -26,6 +26,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+from dataclasses import replace
 
 import blood_gate as bg
 import calibrate as cal
@@ -111,12 +112,77 @@ def hostile_captures_reject_without_raising() -> bool:
     return ok
 
 
+def acquire_visits_both_cartridge_stops() -> bool:
+    """The white patch and the well are at different insertion depths, so the
+    ORDER of calls is the only thing that puts each read at the right stop.
+
+    White and dark are read at stop 1, then the cartridge moves to stop 2, and
+    everything after that reads the sample. Get it wrong and the white
+    reference is a reading of the sample against itself: absorbance goes to
+    zero and genuine blood is rejected at G1 as "far too bright". hardware.py
+    refuses both mistakes, but nothing there runs off-device, so the ordering
+    contract is pinned here.
+    """
+    order: list[str] = []
+
+    class RecordingHead(bg.SensorHead):
+        def __init__(self):
+            self.real = cal.SyntheticHead("genuine", 0)
+
+        def read_white_reference(self):
+            order.append("white")
+            return self.real.read_white_reference()
+
+        def read_dark(self):
+            order.append("dark")
+            return self.real.read_dark()
+
+        def await_sample_position(self):
+            order.append("stop2")
+
+        def read_channels(self):
+            order.append("chem")
+            return self.real.read_channels()
+
+        def read_speckle_burst(self):
+            order.append("speckle")
+            return self.real.read_speckle_burst()
+
+    th = bg.Thresholds()
+    # A short capture: the ordering is what matters, not ten minutes of it.
+    short = replace(th, duration_s=0.4, chemistry_at_s=0.1, speckle_period_s=0.15)
+    bg.acquire(RecordingHead(), short, early_abort=False)
+
+    def before(a: str, b: str) -> bool:
+        """a happens, b happens, and a comes first.
+
+        Membership is checked rather than assumed: with the hook missing
+        entirely, .index() raised and the suite died with a traceback instead
+        of reporting a failure. A test that crashes tells you less than one
+        that fails.
+        """
+        return a in order and b in order and order.index(a) < order.index(b)
+
+    ok = True
+    ok &= check("white is read before dark", before("white", "dark"))
+    ok &= check("both stop-1 reads happen before the cartridge moves",
+                before("dark", "stop2"))
+    ok &= check("the cartridge reaches stop 2 before the sample is read",
+                before("stop2", "chem"))
+    ok &= check("no speckle is captured at stop 1", before("stop2", "speckle"))
+    ok &= check("the sample position is awaited exactly once",
+                order.count("stop2") == 1)
+    return ok
+
+
 def run() -> int:
     print("Gate robustness — enrolment invariant, hostile captures.\n")
     print(" Enrolment")
     ok = enrolment_preserves_the_mask()
     print("\n Hostile captures")
     ok &= hostile_captures_reject_without_raising()
+    print("\n Cartridge stops")
+    ok &= acquire_visits_both_cartridge_stops()
     print("\n" + "-" * 60)
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
