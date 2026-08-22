@@ -144,10 +144,20 @@ def point_mul(p, k: int):
 # base can be precomputed, and then the multiply has no doublings left in it at
 # all -- 63 additions against 256 doublings plus 128 additions.
 #
-# That matters here more than it looks. BIP-32 derivation calls this once per
-# level per key, so a wallet test that walks a few accounts spends effectively
-# all of its time in point_add. The table takes the wallet suite from minutes
-# to seconds, and it is the same win on the Pi Zero this module targets.
+# Measured on this machine, per scalar multiply, so the two optimisations here
+# are not confused with each other:
+#
+#                        affine   jacobian    table
+#     k*G                87.9 ms    3.0 ms   0.8 ms
+#     k*Q (arbitrary)    88.2 ms    2.8 ms      n/a
+#
+# The Jacobian accumulation in point_mul above is the large win and it covers
+# every multiply, including the three against arbitrary points that this table
+# cannot help: ecdsa_verify, ecdsa_recover and schnorr_verify. This table is a
+# further 3.9x, and only against G.
+#
+# Keep both. Removing the Jacobian code because the table looks like it does
+# the work would cost 29x on the paths the table never touches.
 #
 # NOT CONSTANT TIME -- the window digit indexes a table, and a zero digit skips
 # the addition entirely. Neither is new: the square-and-multiply above already
