@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "firmware"))
 
 import bip39                                                    # noqa: E402
+import eth                                                      # noqa: E402
 import seedstore                                                # noqa: E402
 import signer                                                   # noqa: E402
 import wallet                                                   # noqa: E402
@@ -198,6 +199,8 @@ def _save(out: Path, prov: wallet.Provisioning, network: str) -> None:
                                      "path": c.path, "xpub": c.xpub}
                                     for c in m.cosigners]}
                      for m in prov.multisig],
+        "chains": [{"chain_id": cid, "name": nm, "ticker": tk}
+                   for cid, (nm, tk) in sorted(prov.chains.items())],
     }, indent=2) + "\n")
 
 
@@ -214,6 +217,11 @@ def load(d: Path) -> wallet.Provisioning:
             sorted_keys=m["sorted_keys"], wrapped=m["wrapped"],
             network=m["network"],
             cosigners=[wallet.CoSigner(**c) for c in m["cosigners"]]))
+    for c in data.get("chains", []):
+        # Apply the owner's registrations to the signing module. Anything not
+        # in here, or built in, is a chain the device refuses outright.
+        eth.register_chain(c["chain_id"], c["name"], c["ticker"])
+        prov.chains[c["chain_id"]] = (c["name"], c["ticker"])
     return prov
 
 
@@ -266,6 +274,43 @@ def cmd_multisig(args) -> int:
     return 0
 
 
+def cmd_chain(args) -> int:
+    """Register an EVM chain by id, display name and native-token ticker.
+
+    The device signs for the two chains it ships knowing — Ethereum and Sepolia
+    — and refuses every other chain id until you run this. That refusal is the
+    feature. The chain id is what the signature commits to, but the name and
+    the ticker are what you read before you bleed, so they have to be your
+    claim rather than something a coordinator handed the device along with the
+    transaction it wants signed.
+
+    Check the id yourself against a source you trust before you type it. A
+    registration that names chain 1 "Sepolia" is a device that will take a
+    blood gate for real money while telling you it is play money, and nothing
+    downstream of this command can catch that for you.
+    """
+    d = Path(args.dir)
+    prov = load(d)
+    try:
+        eth.register_chain(args.id, args.name, args.ticker)
+    except eth.BadEthTransaction as e:
+        print(f"Refused: {e}")
+        return 1
+    prov.chains[args.id] = (args.name, args.ticker)
+
+    network = json.loads((d / ACCOUNTS).read_text())["network"]
+    _save(d, prov, network)
+    print(f"Registered chain {args.id} as {args.name!r}, denominated in "
+          f"{args.ticker}.")
+    print("\nConfirmation screens for this chain will now read:")
+    print(f"  SEND ON {args.name.upper()}")
+    print(f"  amount   1.5 {args.ticker}")
+    print(f"  chain id {args.id}")
+    print("\nRead that back. If the name or the ticker is wrong, it is wrong on")
+    print("every transaction you will ever approve on this chain.")
+    return 0
+
+
 def cmd_show(args) -> int:
     d = Path(args.dir)
     data = json.loads((d / ACCOUNTS).read_text())
@@ -279,6 +324,12 @@ def cmd_show(args) -> int:
               f"{len(m['cosigners'])}")
         for c in m["cosigners"]:
             print(f"    {c['label']:<12} {c['fingerprint']}  {c['path']}")
+    registered = data.get("chains", [])
+    print("\n  EVM chains: Ethereum (ETH), Sepolia (test) (tETH)"
+          + "".join(f", {c['name']} ({c['ticker']})" for c in registered))
+    if not registered:
+        print("  No chains registered beyond the built-in two; every other")
+        print("  chain id is refused. Add one with `provision.py chain`.")
     print("\nThese are public. Give them to a coordinator to watch the wallet.")
     print("\nFor a multisig co-signer file, your line is:")
     for a in data["accounts"]:
@@ -323,6 +374,15 @@ def main() -> int:
     p.add_argument("--unsorted", action="store_true",
                    help="do NOT sort keys (BIP-67 is the default)")
     p.set_defaults(fn=cmd_multisig)
+
+    p = sub.add_parser("chain", help="register an EVM chain the device may sign for")
+    p.add_argument("--dir", default="/boot/cell")
+    p.add_argument("--id", type=int, required=True, help="EIP-155 chain id")
+    p.add_argument("--name", required=True,
+                   help='shown as "SEND ON <NAME>", e.g. "Arbitrum One"')
+    p.add_argument("--ticker", required=True,
+                   help="native token symbol, e.g. ETH or POL")
+    p.set_defaults(fn=cmd_chain)
 
     args = ap.parse_args()
     if getattr(args, "pin", None) is not None and not args.pin.isdigit():

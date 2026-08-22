@@ -715,10 +715,20 @@ def main() -> int:
                                        value=0), eth.BadEthTransaction)
 
     # The same transfer on another chain must produce a different signature,
-    # or one authorisation drains every EVM chain the owner holds.
+    # or one authorisation drains every EVM chain the owner holds. Polygon is
+    # not built in — the owner registers it, and registers its own ticker with
+    # it, because Polygon does not denominate in ETH.
+    eth.register_chain(137, "Polygon", "POL")
     t_poly = eth.EthTransaction(**{**t.__dict__, "chain_id": 137})
     check("a different chain id yields a different digest",
           t.sighash() != t_poly.sighash())
+    check("a registered chain renders its own denomination",
+          any("POL" in line for line in
+              ops.EthereumSpend(amount_wei=t_poly.value, destination=t_poly.to,
+                                chain_id=t_poly.chain_id,
+                                chain_name=t_poly.chain_name(),
+                                ticker=t_poly.ticker(), nonce=t_poly.nonce,
+                                max_fee_wei=t_poly.max_fee_wei()).render()))
 
     # ---- tier policy still governs ------------------------------------
     print("\n the gate still governs")

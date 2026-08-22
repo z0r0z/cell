@@ -32,17 +32,82 @@ from hashes import keccak256
 
 TX_TYPE_1559 = 0x02
 
-# Chain ids the device will sign for, by name, so the display can say
-# "Ethereum" rather than "chain 1" — and so an unknown chain is a refusal
-# rather than a number the owner cannot evaluate.
-CHAINS = {
-    1: "Ethereum",
-    10: "Optimism",
-    137: "Polygon",
-    8453: "Base",
-    42161: "Arbitrum One",
-    11155111: "Sepolia (test)",
+# Chain ids the device will sign for, as (name, ticker), so the display can say
+# "Ethereum" and "ETH" rather than "chain 1" and a denomination it guessed —
+# and so an unknown chain is a refusal rather than a number the owner cannot
+# evaluate.
+#
+# Only the two chains whose names nobody needs to be told are built in. Every
+# other EVM chain is registered by the owner, out of band, with
+# `tools/provision.py chain`. That is the whole design, not a shortcut:
+#
+#   The name and the ticker are the only parts of the confirmation screen that
+#   say WHICH NETWORK and WHICH DENOMINATION the owner is consenting to. The
+#   signature commits to the chain id, but nobody reads a chain id. So those
+#   two strings must never arrive with the transaction — an attacker who can
+#   label chain 1 "Sepolia (test)" collects a signature on real money from an
+#   owner who believed they were spending testnet play money, and one who can
+#   label chain 137 "Ethereum" moves the owner onto the wrong network entirely.
+#
+# Registering it yourself makes the label your own claim rather than the
+# coordinator's, which is the same argument that makes multisig quorums
+# registration-only. It also means the firmware never has to assert that some
+# chain's native token is ETH when it is not.
+CHAINS: dict[int, tuple[str, str]] = {
+    1: ("Ethereum", "ETH"),
+    11155111: ("Sepolia (test)", "tETH"),
 }
+
+# The name has to fit "SEND ON <NAME>" inside ops.DISPLAY_COLS (40), and the
+# ticker has to sit after an amount without wrapping it. Both are also held to
+# printable ASCII: a right-to-left override or a zero-width joiner in a chain
+# name is a label that renders as something other than what was registered.
+MAX_CHAIN_NAME = 24
+MAX_TICKER = 8
+
+
+def register_chain(chain_id: int, name: str, ticker: str) -> None:
+    """Teach this device one more chain, by name and native-token ticker.
+
+    PROVISIONING ONLY. Never call this with anything that arrived alongside a
+    transaction — see the note on CHAINS above for what that would cost. The
+    device loads registrations from its provisioning record at boot, which is
+    written with the case open by someone holding the device.
+
+    Re-registering a built-in chain is refused outright. Everything else is
+    idempotent for an identical repeat and a refusal for a conflicting one, so
+    a second registration can never silently rename a chain the owner has
+    already been reading on screen.
+    """
+    if not isinstance(chain_id, int) or isinstance(chain_id, bool) or chain_id < 1:
+        raise BadEthTransaction("chain id must be a positive integer")
+    if chain_id in BUILTIN_CHAINS:
+        raise BadEthTransaction(
+            f"chain {chain_id} is built in as {BUILTIN_CHAINS[chain_id][0]!r} "
+            f"and cannot be relabelled")
+    for label, value, cap in (("name", name, MAX_CHAIN_NAME),
+                              ("ticker", ticker, MAX_TICKER)):
+        if not isinstance(value, str) or not value.strip():
+            raise BadEthTransaction(f"chain {label} must be a non-empty string")
+        if value != value.strip():
+            raise BadEthTransaction(f"chain {label} has leading or trailing space")
+        if len(value) > cap:
+            raise BadEthTransaction(
+                f"chain {label} {value!r} is longer than {cap} characters and "
+                f"would not fit the confirmation screen")
+        if any(c < " " or c > "~" for c in value):
+            raise BadEthTransaction(
+                f"chain {label} {value!r} has characters outside printable "
+                f"ASCII; the owner cannot trust what such a label renders as")
+    existing = CHAINS.get(chain_id)
+    if existing is not None and existing != (name, ticker):
+        raise BadEthTransaction(
+            f"chain {chain_id} is already registered as {existing[0]!r} "
+            f"({existing[1]}); refusing to rename it to {name!r} ({ticker})")
+    CHAINS[chain_id] = (name, ticker)
+
+
+BUILTIN_CHAINS = dict(CHAINS)
 
 
 class BadEthTransaction(ValueError):
@@ -143,7 +208,8 @@ class EthTransaction:
             raise BadEthTransaction(
                 f"chain id {self.chain_id} is not one this device recognises. "
                 f"Signing for an unnamed chain means the owner cannot tell "
-                f"which network the transfer lands on.")
+                f"which network the transfer lands on. Register it first with "
+                f"`tools/provision.py chain`.")
         for name in ("nonce", "max_priority_fee_per_gas", "max_fee_per_gas",
                      "gas_limit", "value"):
             v = getattr(self, name)
@@ -198,7 +264,11 @@ class EthTransaction:
         return self.max_fee_per_gas * self.gas_limit
 
     def chain_name(self) -> str:
-        return CHAINS[self.chain_id]
+        return CHAINS[self.chain_id][0]
+
+    def ticker(self) -> str:
+        """The native token's symbol. Not every EVM chain denominates in ETH."""
+        return CHAINS[self.chain_id][1]
 
 
 def sign(tx: EthTransaction, seckey: bytes) -> tuple[int, int, int]:
@@ -288,7 +358,7 @@ def _selftest() -> int:
     # catch a field accidentally left out of _fields().
     base = t.sighash()
     variants = {
-        "chain_id": {"chain_id": 137},
+        "chain_id": {"chain_id": 11155111},
         "nonce": {"nonce": 10},
         "priority fee": {"max_priority_fee_per_gas": 3_000_000_000},
         "max fee": {"max_fee_per_gas": 31_000_000_000},
@@ -336,6 +406,52 @@ def _selftest() -> int:
     checks.append(("max fee is price times limit",
                    t.max_fee_wei() == 30_000_000_000 * 21000))
     checks.append(("chain is named", t.chain_name() == "Ethereum"))
+    checks.append(("chain carries its ticker", t.ticker() == "ETH"))
+
+    # ---- registered chains ----
+    #
+    # The device ships knowing two chains and is taught the rest. What matters
+    # here is that a registration cannot quietly relabel a chain the owner has
+    # already been reading on screen, and cannot smuggle a label that renders
+    # as something other than what was registered.
+    def reg_refuses(label, cid, name, ticker):
+        try:
+            register_chain(cid, name, ticker)
+            checks.append((label, False))
+        except BadEthTransaction:
+            checks.append((label, True))
+
+    checks.append(("ships with only Ethereum and Sepolia",
+                   set(BUILTIN_CHAINS) == {1, 11155111}))
+    checks.append(("an unregistered chain has no name", 42161 not in CHAINS))
+
+    register_chain(42161, "Arbitrum One", "ETH")
+    checks.append(("a registered chain is signable",
+                   EthTransaction(**{**t.__dict__, "chain_id": 42161})
+                   .chain_name() == "Arbitrum One"))
+    register_chain(137, "Polygon", "POL")
+    checks.append(("a registered chain keeps its own ticker",
+                   EthTransaction(**{**t.__dict__, "chain_id": 137})
+                   .ticker() == "POL"))
+
+    register_chain(137, "Polygon", "POL")     # identical repeat is a no-op
+    checks.append(("re-registering the same chain is idempotent",
+                   CHAINS[137] == ("Polygon", "POL")))
+    reg_refuses("refuses to rename a registered chain", 137, "Ethereum", "ETH")
+    reg_refuses("refuses to relabel a built-in chain", 1, "Sepolia", "tETH")
+    reg_refuses("refuses a chain id below one", 0, "Zero", "ETH")
+    reg_refuses("refuses an empty chain name", 999, "", "ETH")
+    reg_refuses("refuses an empty ticker", 999, "Somechain", "")
+    reg_refuses("refuses a name too long for the screen",
+                999, "A" * (MAX_CHAIN_NAME + 1), "ETH")
+    reg_refuses("refuses a ticker too long for the screen",
+                999, "Somechain", "T" * (MAX_TICKER + 1))
+    reg_refuses("refuses a name with a direction override",
+                999, "Ether\u202eum", "ETH")
+    reg_refuses("refuses a name with a zero-width joiner",
+                999, "Ether\u200dum", "ETH")
+    reg_refuses("refuses a padded name", 999, " Ethereum ", "ETH")
+    checks.append(("a refused registration is not recorded", 999 not in CHAINS))
 
     ok = True
     for label, good in checks:

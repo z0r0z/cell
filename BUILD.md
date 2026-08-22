@@ -289,7 +289,7 @@ Two consequences of that rule are worth stating outright, because both look like
 
 **One destination per Bitcoin transaction.** A PSBT paying several recipients is refused. The device shows one destination in full, on a screen the owner can check character by character; a batch would be a total they cannot. Split the payment, or batch at a layer above the signer.
 
-**Every Ethereum field is displayed.** The chain id, the nonce and `gas_limit × max_fee_per_gas` are on the confirmation screen next to the amount. They are what the signature commits to, so they are what the owner is asked to approve. An unrecognised chain id is a refusal rather than a number nobody can evaluate — a signature that does not pin the chain replays on every other EVM network the owner holds funds on.
+**Every Ethereum field is displayed.** The chain id, the nonce and `gas_limit × max_fee_per_gas` are on the confirmation screen next to the amount. They are what the signature commits to, so they are what the owner is asked to approve. An unrecognised chain id is a refusal rather than a number nobody can evaluate — a signature that does not pin the chain replays on every other EVM network the owner holds funds on. The device ships knowing two chains and is taught the rest by its owner; see §12.
 
 Make this scope decision deliberately.
 
@@ -761,7 +761,7 @@ So the stack is here, and the mitigation for writing it ourselves is that none o
 | `eth.py` | Yellow-paper RLP vectors; EIP-1559 encoding |
 | `hashes.py` | ISO RIPEMD-160 vectors; Keccak-256 vectors |
 
-During development every signature was also compared byte for byte against `embit` (Bitcoin, all four script types) and `eth-account` (Ethereum, six chains). They match exactly — including Bitcoin Core's low-R grinding convention, which is why our DER encodings are the same length as everyone else's. Neither package is a dependency; the vectors they confirmed are in the suites.
+During development every signature was also compared byte for byte against `embit` (Bitcoin, all four script types) and `eth-account` (Ethereum, across six chain ids). They match exactly — including Bitcoin Core's low-R grinding convention, which is why our DER encodings are the same length as everyone else's. Neither package is a dependency; the vectors they confirmed are in the suites.
 
 SeedSigner remains the reference worth reading for the parts this repo does not solve: the ST7789 UI, camera handling, and the hardened read-only image build.
 
@@ -789,6 +789,37 @@ python3 tools/provision.py multisig --dir /boot/cell \
 The file is one co-signer per line — `label fingerprint path xpub` — and it must include this device. BIP-48 paths (`m/48'/coin'/account'/2'` native, `.../1'` p2sh-wrapped) are derived at provisioning whether or not you ever use them, so getting your own xpub does not mean re-opening a sealed case.
 
 **Why the ceremony.** Without the co-signers on file, the only question the device can answer is "does this script contain a key of mine?". A coordinator under an attacker's control can build a script holding exactly one key of yours and n-1 of theirs: it hashes correctly, the wallet calls it change, and the balance moves to an address you cannot spend without them. With the quorum registered the question becomes "does this equal the script my co-signers produce at the path it claims?", which is arithmetic. BIP-67 key ordering is recorded rather than guessed, because the wrong choice produces a different address instead of an error.
+
+### EVM chains have to be registered too
+
+The device ships knowing Ethereum and Sepolia. Every other chain id is refused
+until you register it, with the name and the native-token ticker it should be
+displayed under:
+
+```bash
+python3 tools/provision.py chain --dir /boot/cell \
+    --id 42161 --name "Arbitrum One" --ticker ETH
+python3 tools/provision.py chain --dir /boot/cell \
+    --id 137 --name "Polygon" --ticker POL
+```
+
+**Why this is not just a shorter list.** The signature commits to the chain id,
+but nobody reads a chain id. The name and the ticker are what the owner
+actually reads to know which network and which denomination they are approving.
+If those two strings could arrive with the transaction, an attacker who labels
+chain 1 "Sepolia (test)" collects a blood-gated signature on real money from an
+owner who believed it was play money. Registering them yourself makes the label
+your own claim, exactly as registering a quorum makes the script your own claim.
+
+So check the chain id against a source you trust before you type it, and read
+back the confirmation the command prints. Nothing downstream can catch a
+registration that names the wrong network — it is wrong on every transaction
+you will ever approve on that chain.
+
+Registrations are refused if they would rename a chain already registered, or
+relabel one of the two built in. Names are capped at 24 characters and tickers
+at 8, both printable ASCII only: a name carrying a direction override or a
+zero-width joiner renders as something other than what was registered.
 
 ### Proving it against a node
 

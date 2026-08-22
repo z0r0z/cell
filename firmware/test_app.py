@@ -28,6 +28,7 @@ import app
 import bip32
 import ops
 import psbt as psbtmod
+import eth
 import qr
 import wallet
 from buttons import BACK, CONFIRM, DOWN, UP, FakeButtons
@@ -239,6 +240,23 @@ def main() -> int:
     check("the chain id is shown", "chain id 1" in t6)
     check("the nonce is shown", "nonce    3" in t6)
     check("the worst-case fee is shown", "max fee" in t6)
+    check("amounts carry the chain's own ticker", "0.1 ETH" in t6)
+
+    # A chain the owner registered renders under the name and denomination
+    # they registered, not under a ticker the firmware assumed.
+    eth.register_chain(137, "Polygon", "POL")
+    req_pol = json.dumps({"type": "cell-eth-tx", "chain_id": 137, "nonce": 3,
+                          "max_priority_fee_per_gas": 10**9,
+                          "max_fee_per_gas": 25 * 10**9, "gas_limit": 21000,
+                          "to": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+                          "value": 10**17}).encode()
+    d6b, _ = make_device(presses=[CONFIRM, CONFIRM] + pin_presses()
+                         + [CONFIRM, CONFIRM],
+                         frames=qr.encode(req_pol))
+    check("a registered chain signs", d6b.run_once() == "signed-eth")
+    t6b = d6b.display.text()
+    check("...under its registered name", "POLYGON" in t6b.upper())
+    check("...and its own ticker, not ETH", "0.1 POL" in t6b and "ETH" not in t6b)
     check("the raw transaction was emitted", len(d6.display.frames) > 0)
     raw = qr.decode(d6.display.frames)
     check("...and it is a typed EIP-1559 envelope", raw[0] == 0x02)

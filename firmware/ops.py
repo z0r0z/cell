@@ -65,11 +65,20 @@ def format_btc(sats: int) -> str:
     return f"{whole}.{frac:08d} BTC"
 
 
-def format_eth(wei: int) -> str:
+def format_eth(wei: int, ticker: str = "ETH") -> str:
+    """Wei, in whole units of the chain's native token.
+
+    The ticker is a parameter because it is not always ETH: an EVM chain the
+    owner registered may denominate in something else entirely, and printing
+    "1.5 ETH" over a transfer of 1.5 of some other token is exactly the kind of
+    divergence between screen and signature this module exists to prevent.
+    """
     if wei < 0:
         raise ValueError("negative amount")
     whole, frac = divmod(wei, WEI_PER_ETH)
-    return f"{whole}.{frac:018d}".rstrip("0").rstrip(".") + " ETH" if frac else f"{whole} ETH"
+    if frac:
+        return f"{whole}.{frac:018d}".rstrip("0").rstrip(".") + f" {ticker}"
+    return f"{whole} {ticker}"
 
 
 def wrap_full(value: str, width: int, indent: str = "           ") -> list[str]:
@@ -277,6 +286,7 @@ class EthereumSpend:
     chain_name: str
     nonce: int
     max_fee_wei: int                # gas_limit * max_fee_per_gas, the worst case
+    ticker: str = "ETH"             # the chain's native token, not always ETH
 
     def op_class(self) -> str:
         return "tx.send"
@@ -293,14 +303,19 @@ class EthereumSpend:
             raise UnrenderableOperation(
                 f"chain {self.chain_id} has no name; the owner cannot tell "
                 f"which network this lands on")
+        if not self.ticker:
+            raise UnrenderableOperation(
+                f"chain {self.chain_id} has no native-token ticker; an amount "
+                f"with no denomination is not a number the owner can evaluate")
         lines = [f"SEND ON {self.chain_name.upper()}",
-                 f"  amount   {format_eth(self.amount_wei)}",
+                 f"  amount   {format_eth(self.amount_wei, self.ticker)}",
                  "  to"]
         lines += wrap_full(self.destination, DISPLAY_COLS)
-        lines.append(f"  max fee  {format_eth(self.max_fee_wei)}")
+        lines.append(f"  max fee  {format_eth(self.max_fee_wei, self.ticker)}")
         lines.append(f"  chain id {self.chain_id}")
         lines.append(f"  nonce    {self.nonce}")
-        lines.append(f"  MOST     {format_eth(self.amount_wei + self.max_fee_wei)}")
+        lines.append(f"  MOST     "
+                     f"{format_eth(self.amount_wei + self.max_fee_wei, self.ticker)}")
         return lines
 
 

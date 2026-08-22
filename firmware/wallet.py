@@ -166,6 +166,9 @@ class Provisioning:
     accounts: list[Account] = field(default_factory=list)
     master_fingerprint: bytes = b"\x00\x00\x00\x00"
     multisig: list[Multisig] = field(default_factory=list)
+    # EVM chains the owner registered, {chain_id: (name, ticker)}. Applied to
+    # eth.CHAINS when the record is loaded; see tools/provision.py chain.
+    chains: dict[int, tuple[str, str]] = field(default_factory=dict)
 
     def descriptors(self, network: str = "mainnet") -> list:
         return [m.descriptor() for m in self.multisig if m.network == network]
@@ -418,6 +421,7 @@ def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
 
     op = ops.EthereumSpend(amount_wei=tx.value, destination=tx.to,
                            chain_id=tx.chain_id, chain_name=tx.chain_name(),
+                           ticker=tx.ticker(),
                            nonce=tx.nonce, max_fee_wei=tx.max_fee_wei())
     digest = tx.sighash()
     out: dict = {}
