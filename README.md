@@ -222,6 +222,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/test_consensus.py` | An independent interpreter runs our scripts |
 | `tools/provision.py` | Choose a seed, wrap it, record the watch-only accounts |
 | `tools/cell.service` | The systemd unit that starts the loop at boot |
+| `tools/bench.py` | The checks only the built device can answer |
 | `tools/regtest_e2e.py` | Sign with the firmware, make Bitcoin Core accept it |
 | `firmware/signer.py` | The unlock chain: policy, confirm, PIN, gate, sign, attest |
 | `firmware/se.py` | Secure element interface and a software stub for tests |

@@ -706,7 +706,23 @@ minutes on a Zero 2 W. It is the cheapest possible check that the card, the
 Python and the install are sound, and it runs before any key exists.
 
 **5. Check the hardware answers.** With the sensor head and the gate chip
-wired per §11:
+wired per §11, run the bench checks — each takes about a minute and each
+settles something no amount of testing on a laptop can:
+
+```bash
+tools/bench.py display                      # is the panel's origin the driver's?
+tools/bench.py buttons                      # do your switches settle in 30 ms?
+tools/bench.py atecc --i-can-wipe-this-chip # does the PIN counter actually gate the key?
+```
+
+The ATECC608B check wipes the chip, which is the point: a counter that
+survives being tested was never tested. Run it before there is a seed to lose,
+and re-provision afterwards. If "the wrapping key CANNOT be derived without a
+PIN" fails, stop — slot 0 is not bound to the PIN slot, the attempt counter is
+decoration, and a six-digit PIN is a million offline guesses against the
+encrypted seed.
+
+Then:
 
 ```bash
 python3 firmware/se_atecc.py --probe     # after the zones are locked

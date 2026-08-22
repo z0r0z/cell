@@ -198,15 +198,32 @@ produced would have been unreadable to the coordinator that had to finalise
 it. No amount of round-tripping through our own parser would have shown it,
 because our parser treats the key as an opaque blob and never looks inside.
 
+## Bench checks
+
+Three of the open items below are answerable in about a minute each with the
+parts in front of you. `tools/bench.py` asks them:
+
+| Command | Settles |
+|---|---|
+| `bench.py atecc --i-can-wipe-this-chip` | Whether the wrapping key can be derived without spending a PIN attempt, whether one PIN authorises exactly one derive, and whether ten wrong PINs wipe. **Wipes the chip** — run it before provisioning |
+| `bench.py buttons` | How long your switches actually ring, against the 30 ms the firmware debounces at |
+| `bench.py display --x-offset N --y-offset N` | Whether the panel's first pixel is the one the driver addresses, by drawing a frame at all four extremes |
+
+The ATECC608B check tests behaviour rather than reading the config zone back.
+The guarantee that matters is "no derive without a spent attempt", which is
+slot 0's ReqAuth binding; decoding those bits means hard-coding a layout,
+being wrong is silent, and the zone locks permanently. Asking the chip to
+misbehave and watching it refuse tests the property itself.
+
 ## Written but unverified
 
 | Component | Why | How to verify |
 |---|---|---|
 | `firmware/se_atecc.py` | Needs the chip. The logic around it is now covered against a fake transport; nothing that touches I2C is | `python3 firmware/se_atecc.py --probe` on a built device |
-| `firmware/display.py` | Needs the panel. Layout limits and library calls are covered; the SPI timing, the font metrics and the Y offset many 240x240 panels need are not | Any screen on a built device |
-| `firmware/buttons.py` | Needs the switches. Consent and debounce logic and the library calls are covered; whether 30 ms actually settles YOUR switches is not | Press each button on a built device |
+| `firmware/display.py` | Needs the panel. Layout limits and library calls are covered; SPI timing and font metrics are not | `bench.py display` for the origin, any screen for the rest |
+| `firmware/buttons.py` | Needs the switches. Consent and debounce logic and the library calls are covered; whether 30 ms settles YOUR switches is not | `bench.py buttons` |
 | `firmware/camera.py` | Needs the webcam. Collection, framing and the OpenCV calls are covered; whether a cheap lens focuses on a 240x240 panel is not | Scan a signed PSBT into a coordinator and back |
-| The ATECC608B config zone | The LimitedUse binding between slot 0 and Counter0 is what makes the attempt counter real, and no software can confirm it from outside | `se_atecc.py --probe`, then try eleven wrong PINs on a device you can afford to wipe |
+| The ATECC608B config zone | The ReqAuth binding on slot 0 is what makes the attempt counter real, and no software can read it back and be sure | `bench.py atecc --i-can-wipe-this-chip` |
 | `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
 | `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |
 | Attestation key custody | The ATECC608B signs NIST P-256 only, so the secp256k1 attestation scalar is derived from a chip secret and exists in RAM while signing, rather than never leaving the chip | Stated in `se_atecc.py`; switch `attest.py` to P-256 if you need the stronger property |

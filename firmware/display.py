@@ -114,6 +114,9 @@ class ConsoleDisplay:
         self.frames.append(payload)
         print(f"[QR {len(payload)} chars] {caption}", file=self.out)
 
+    def set_offsets(self, x: int, y: int) -> None:
+        self.offsets = (x, y)
+
     def clear(self) -> None:
         self.last = []
 
@@ -125,7 +128,16 @@ class ST7789Display:
     backlight on 24.
     """
 
-    def __init__(self, rotation: int = 0, backlight: bool = True):
+    # Many 1.3" 240x240 modules are a window into the controller's 240x320
+    # address space, so the panel's first pixel is not the controller's. Get
+    # this wrong and the bottom row is off the glass — which on a confirmation
+    # screen is where the tier disclosure sits. `tools/bench.py display` draws
+    # a frame at the extremes so a wrong origin is visible in one look.
+    X_OFFSET = 0
+    Y_OFFSET = 0
+
+    def __init__(self, rotation: int = 0, backlight: bool = True,
+                 x_offset: int | None = None, y_offset: int | None = None):
         try:
             import board
             import digitalio
@@ -142,6 +154,8 @@ class ST7789Display:
         spi = board.SPI()
         self._panel = st7789.ST7789(
             spi, width=WIDTH, height=HEIGHT, rotation=rotation,
+            x_offset=self.X_OFFSET if x_offset is None else x_offset,
+            y_offset=self.Y_OFFSET if y_offset is None else y_offset,
             cs=digitalio.DigitalInOut(board.CE0),
             dc=digitalio.DigitalInOut(board.D25),
             rst=digitalio.DigitalInOut(board.D27),
@@ -186,6 +200,10 @@ class ST7789Display:
             draw.text((0, HEIGHT - CELL_H), caption[:DISPLAY_COLS],
                       font=self._font, fill=BLACK)
         self._panel.image(img)
+
+    def set_offsets(self, x: int, y: int) -> None:
+        """Re-open the panel at a different origin. Used by bench.py."""
+        self._panel._offset_left, self._panel._offset_top = x, y
 
     def clear(self) -> None:
         self._panel.image(self._Image.new("RGB", (WIDTH, HEIGHT), BLACK))
