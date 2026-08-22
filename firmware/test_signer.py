@@ -18,6 +18,7 @@ from se import MAX_PIN_ATTEMPTS, SoftSE
 from signer import Refused, SignRequest, Signer
 
 FW = hashlib.sha256(b"cell-fw-test").digest()
+CAL = hashlib.sha256(b"cell-thresholds-test").digest()
 PIN = "123456"
 SIGHASH = hashlib.sha256(b"tx-under-test").digest()
 
@@ -49,7 +50,7 @@ def make(pol=None, confirm=True, gate=GATE_OK, se=None, seed=b"\x11" * 32):
         log["seed_after"] = seed_buf          # same object, checked after
         return attest.schnorr_sign(sighash, bytes(seed_buf))
 
-    s = Signer(se or SoftSE(pin=PIN), pol or Policy(), FW,
+    s = Signer(se or SoftSE(pin=PIN), pol or Policy(), FW, CAL,
                _confirm, _gate, _unwrap, _sign)
     return s, log
 
@@ -88,6 +89,12 @@ def run() -> int:
     v = attest.verify(res.attestation, s.se.attest_pubkey(), SIGHASH,
                       min_counter=0, allowed_fw=[FW], require=Tier.TOUCH)
     check("attestation verifies", v.ok)
+    check("attestation carries the calibration in force",
+          res.attestation.cal_hash == CAL)
+    check("attestation refuses an unregistered calibration",
+          not attest.verify(res.attestation, s.se.attest_pubkey(), SIGHASH,
+                            min_counter=0, allowed_fw=[FW], require=Tier.TOUCH,
+                            allowed_cal=[bytes(32)]).ok)
     other = hashlib.sha256(b"another-tx").digest()
     check("attestation refuses a different tx",
           not attest.verify(res.attestation, s.se.attest_pubkey(), other,

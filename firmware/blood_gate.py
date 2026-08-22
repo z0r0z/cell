@@ -29,6 +29,7 @@ Dependencies: numpy, scipy.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from abc import ABC, abstractmethod
@@ -176,6 +177,28 @@ class Thresholds:
         return (f"thresholds: calibrated, FRR {b.get('measured_frr', 0)*100:.1f}% "
                 f"FAR {far_txt} "
                 f"(n={b.get('n_spoof', 0)} spoof, {b.get('n_genuine', 0)} genuine)")
+
+
+def calibration_hash(*paths: "str | Path | None") -> bytes:
+    """SHA-256 over the threshold sets actually in force, in a fixed order.
+
+    This is what the attestation carries. The firmware hash pins the code; it
+    says nothing about the numbers that code compares against, and those live
+    in a per-device JSON file that sets every limit the gate can reject on. A
+    co-signer that registers only a firmware hash is trusting a file it has
+    never seen.
+
+    A device still on shipped defaults hashes the sentinel below rather than
+    failing, so an uncalibrated device is DISTINGUISHABLE rather than
+    unattestable — a co-signer can then decide whether to accept one.
+    """
+    h = hashlib.sha256()
+    for p in paths or (Path(__file__).with_name("thresholds.json"),
+                       Path(__file__).with_name("touch_thresholds.json")):
+        p = Path(p) if p else None
+        h.update(p.read_bytes() if p and p.exists() else b"UNCALIBRATED")
+        h.update(b"|")
+    return h.digest()
 
 
 @dataclass
@@ -437,6 +460,21 @@ def gate4_shape(a: np.ndarray, th: Thresholds) -> GateResult:
 # --------------------------------------------------------------------------
 
 
+def _trend(t: np.ndarray, D: np.ndarray) -> float:
+    """Spearman rho of D against time, with a defined answer for a flat series.
+
+    A decorrelation series that never varies has no rank correlation — scipy
+    returns NaN and warns. NaN then fails every comparison, which happens to
+    reject, but by accident rather than by decision. A sample that never moved
+    has no downward trend, so the honest value is +1: no trend in the required
+    direction. Same verdict, arrived at deliberately.
+    """
+    if len(t) < 3 or float(np.std(D)) == 0.0 or float(np.std(t)) == 0.0:
+        return 1.0
+    rho = float(spearmanr(t, D).statistic)
+    return 1.0 if np.isnan(rho) else rho
+
+
 def gate5_free_motion(t: np.ndarray, D: np.ndarray, K: np.ndarray,
                       th: Thresholds) -> GateResult:
     """The sample arrived as a live liquid suspension of moving particles.
@@ -489,7 +527,7 @@ def gate6_motion_arrested(t: np.ndarray, D: np.ndarray, th: Thresholds) -> GateR
                           "Capture too short.")
     d_late, d_early = float(np.mean(late)), float(np.mean(early))
     drop = d_early - d_late
-    rho = float(spearmanr(t, D).statistic)
+    rho = _trend(t, D)
 
     ok = (d_late <= th.d_clot_max and drop >= th.d_drop_min
           and rho <= th.monotone_rho_max)
@@ -668,7 +706,7 @@ def metrics(capture: dict, th: Thresholds = Thresholds()) -> dict:
         # Same minimum gate6 enforces. A rho fitted to three points is noise,
         # and a sweep that set monotone_rho_max from captures the gate would
         # refuse outright would be calibrating against samples it never judges.
-        g6_rho=float(spearmanr(t, D).statistic) if len(t) >= 5 else 1.0,
+        g6_rho=_trend(t, D) if len(t) >= 5 else 1.0,
     )
     return m
 

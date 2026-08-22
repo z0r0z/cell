@@ -32,6 +32,8 @@ SUITES = [
      [sys.executable, "se.py"]),
     ("unlock chain — step order, refusals, key binding",
      [sys.executable, "test_signer.py"]),
+    ("gate robustness — enrolment invariant, hostile captures",
+     [sys.executable, "test_gate_robustness.py"]),
 ]
 
 

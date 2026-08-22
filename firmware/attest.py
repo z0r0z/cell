@@ -51,7 +51,7 @@ from policy import Tier
 
 MAGIC = b"CELL"
 VERSION = 1
-RECORD_LEN = 4 + 1 + 1 + 8 + 32 + 32 + 32      # 110
+RECORD_LEN = 4 + 1 + 1 + 8 + 32 + 32 + 32 + 32      # 142
 SIG_LEN = 64
 
 
@@ -167,15 +167,17 @@ class Attestation:
     counter: int
     sighash: bytes          # 32
     fw_hash: bytes          # 32
+    cal_hash: bytes         # 32 — SHA-256 of the active threshold set
     attest_pub: bytes       # 32, x-only
     signature: bytes = b""  # 64
 
     def body(self) -> bytes:
-        if len(self.sighash) != 32 or len(self.fw_hash) != 32 or len(self.attest_pub) != 32:
+        if any(len(f) != 32 for f in
+               (self.sighash, self.fw_hash, self.cal_hash, self.attest_pub)):
             raise ValueError("hash and key fields must be 32 bytes")
         return (MAGIC + bytes([VERSION, int(self.tier)])
                 + self.counter.to_bytes(8, "big")
-                + self.sighash + self.fw_hash + self.attest_pub)
+                + self.sighash + self.fw_hash + self.cal_hash + self.attest_pub)
 
     def digest(self) -> bytes:
         return _tagged("CELL/attest-v1", self.body())
@@ -200,17 +202,19 @@ class Attestation:
         return Attestation(
             tier=tier,
             counter=int.from_bytes(blob[6:14], "big"),
-            sighash=blob[14:46], fw_hash=blob[46:78], attest_pub=blob[78:110],
-            signature=blob[110:],
+            sighash=blob[14:46], fw_hash=blob[46:78], cal_hash=blob[78:110],
+            attest_pub=blob[110:142], signature=blob[142:],
         )
 
 
 def attest(tier: Tier, counter: int, sighash: bytes, fw_hash: bytes,
-           sign: Callable[[bytes], bytes], attest_pub: bytes) -> Attestation:
+           cal_hash: bytes, sign: Callable[[bytes], bytes],
+           attest_pub: bytes) -> Attestation:
     """Device side. `sign` is the ATECC608B/SE signing callable — the raw key
     never appears here."""
-    a = Attestation(tier, counter, sighash, fw_hash, attest_pub)
-    return Attestation(tier, counter, sighash, fw_hash, attest_pub, sign(a.digest()))
+    a = Attestation(tier, counter, sighash, fw_hash, cal_hash, attest_pub)
+    return Attestation(tier, counter, sighash, fw_hash, cal_hash, attest_pub,
+                       sign(a.digest()))
 
 
 # --------------------------------------------------------------------------
@@ -245,7 +249,8 @@ def verify_blob(blob: bytes, expect_pub: bytes, expect_sighash: bytes,
 def verify(a: Attestation, expect_pub: bytes, expect_sighash: bytes,
            min_counter: int = -1,
            allowed_fw: Optional[Iterable[bytes]] = None,
-           require: Tier = Tier.BLOOD) -> Verdict:
+           require: Tier = Tier.BLOOD,
+           allowed_cal: Optional[Iterable[bytes]] = None) -> Verdict:
     """Verifier side. Every check is a separate named failure, deliberately —
     "attestation invalid" tells a co-signer nothing actionable."""
     if a.attest_pub != expect_pub:
@@ -258,6 +263,11 @@ def verify(a: Attestation, expect_pub: bytes, expect_sighash: bytes,
         return Verdict(False, f"counter {a.counter} not above last seen {min_counter} — replay")
     if allowed_fw is not None and a.fw_hash not in set(allowed_fw):
         return Verdict(False, "firmware hash is not on the accepted list")
+    # Checked separately from firmware, and named separately, because the
+    # remedy differs: an unknown firmware means do not trust this device, an
+    # unknown calibration means ask which thresholds it is running.
+    if allowed_cal is not None and a.cal_hash not in set(allowed_cal):
+        return Verdict(False, "calibration hash is not on the accepted list")
     if a.tier < require:
         return Verdict(False, f"signed at {a.tier.name}, {require.name} was required")
     return Verdict(True, f"{a.tier.name}, counter {a.counter}")
@@ -268,7 +278,9 @@ def verify_quorum(attestations: dict[str, Attestation],
                   sighash: bytes,
                   last_counters: Optional[dict[str, int]] = None,
                   allowed_fw: Optional[Iterable[bytes]] = None,
-                  require: Tier = Tier.BLOOD) -> tuple[bool, dict[str, Verdict]]:
+                  require: Tier = Tier.BLOOD,
+                  allowed_cal: Optional[Iterable[bytes]] = None
+                  ) -> tuple[bool, dict[str, Verdict]]:
     """"Everyone in this quorum signed with blood."
 
     `roster` is the registered attestation pubkey per signer, recorded once at
@@ -282,7 +294,8 @@ def verify_quorum(attestations: dict[str, Attestation],
         if a is None:
             out[name] = Verdict(False, "no attestation provided")
             continue
-        out[name] = verify(a, pub, sighash, last.get(name, -1), allowed_fw, require)
+        out[name] = verify(a, pub, sighash, last.get(name, -1), allowed_fw,
+                           require, allowed_cal)
     return all(v.ok for v in out.values()), out
 
 
@@ -311,10 +324,12 @@ def _selftest() -> int:
 
     # Attestation round trip
     fw = hashlib.sha256(b"firmware-v1").digest()
+    cal = hashlib.sha256(b"thresholds-A").digest()
+    other_cal = hashlib.sha256(b"thresholds-B").digest()
     sh = hashlib.sha256(b"tx-A").digest()
     other = hashlib.sha256(b"tx-B").digest()
     signer = lambda m: schnorr_sign(m, sk)
-    a = attest(Tier.BLOOD, 42, sh, fw, signer, pk)
+    a = attest(Tier.BLOOD, 42, sh, fw, cal, signer, pk)
     good = Attestation.unpack(a.pack()) == a and len(a.pack()) == RECORD_LEN + SIG_LEN
     ok &= good
     print(f"\n  record        {len(a.pack())} bytes, round-trips{'' if good else '  MISMATCH'}")
@@ -326,10 +341,14 @@ def _selftest() -> int:
         ("replayed counter",   verify(a, pk, sh, 42, [fw]),                        False),
         ("unknown firmware",   verify(a, pk, sh, 41, [bytes(32)]),                 False),
         ("wrong signer key",   verify(a, bytes(32), sh, 41, [fw]),                 False),
+        ("unknown calibration", verify(a, pk, sh, 41, [fw],
+                                       allowed_cal=[other_cal]),                   False),
+        ("registered calibration", verify(a, pk, sh, 41, [fw],
+                                          allowed_cal=[cal]),                      True),
     ]
-    tampered = Attestation(Tier.BLOOD, 42, sh, fw, pk, bytes(64))
+    tampered = Attestation(Tier.BLOOD, 42, sh, fw, cal, pk, bytes(64))
     cases.append(("forged signature", verify(tampered, pk, sh, 41, [fw]), False))
-    touch = attest(Tier.TOUCH, 43, sh, fw, signer, pk)
+    touch = attest(Tier.TOUCH, 43, sh, fw, cal, signer, pk)
     cases.append(("touch when blood required", verify(touch, pk, sh, 42, [fw]), False))
     cases.append(("touch when touch allowed",
                   verify(touch, pk, sh, 42, [fw], require=Tier.TOUCH), True))
@@ -367,13 +386,14 @@ def _selftest() -> int:
     print("\n  Quorum — all three must be BLOOD:")
     keys = {n: bytes.fromhex(f"{i+7:064x}") for i, n in enumerate(("alice", "bob", "carol"))}
     roster = {n: schnorr_pubkey(k) for n, k in keys.items()}
-    atts = {n: attest(Tier.BLOOD, 1, sh, fw, lambda m, k=k: schnorr_sign(m, k), roster[n])
+    atts = {n: attest(Tier.BLOOD, 1, sh, fw, cal,
+                      lambda m, k=k: schnorr_sign(m, k), roster[n])
             for n, k in keys.items()}
     passed, det = verify_quorum(atts, roster, sh, allowed_fw=[fw])
     ok &= passed
     print(f"    all blood                   {'PASS' if passed else 'FAIL'}")
 
-    atts["bob"] = attest(Tier.TOUCH, 1, sh, fw,
+    atts["bob"] = attest(Tier.TOUCH, 1, sh, fw, cal,
                          lambda m: schnorr_sign(m, keys["bob"]), roster["bob"])
     passed, det = verify_quorum(atts, roster, sh, allowed_fw=[fw])
     ok &= not passed

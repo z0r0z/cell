@@ -18,8 +18,8 @@ samples. That step is part of the build, not a caveat about it.
 | Component | Method | Result |
 |---|---|---|
 | BIP-340 Schnorr | Published BIP-340 test vectors | Byte-exact match on pubkey and signature |
-| Attestation record | Pack/unpack round trip | 174 bytes, exact |
-| Attestation rejection | 6 negative cases | Wrong transaction, replayed counter, unknown firmware, wrong signer, forged signature, wrong tier — all refused |
+| Attestation record | Pack/unpack round trip | 206 bytes, exact |
+| Attestation rejection | 7 negative cases | Wrong transaction, replayed counter, unknown firmware, unregistered calibration, wrong signer, forged signature, wrong tier — all refused |
 | Malformed input | 6 hostile inputs | Truncated, empty, bad magic, bad version, unknown tier, all-zero — all return a verdict, none raise |
 | Quorum | 3-signer roster | Missing attestation fails; touch-tier attestation fails where blood is required |
 | Tier policy | 12 cases | Escalation permitted, de-escalation refused, five locked classes enforced |
@@ -31,6 +31,8 @@ samples. That step is part of the build, not a caveat about it.
 | Blood gates | 17 sample classes | Each rejected at the physically correct gate; all 6 gates exercised |
 | Touch gates | 9 sample classes | Each rejected at the correct gate; all 7 gates exercised |
 | Calibration loop | Capture → sweep → load → re-verify | Thresholds written, loaded, and still separate the panel |
+| Enrolment invariant | Reference emitted by `enroll-reference` | Reproduces the G4 clamp mask; 415 nm stays excluded |
+| Hostile captures | 9 malformed captures | Zeros, NaNs, negative counts, short speckle — each rejected at a named gate, none raise |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
 
 Interoperability against the BIP-340 vectors is the meaningful result there —

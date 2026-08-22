@@ -91,9 +91,9 @@ Implementation in `firmware/policy.py`.
 
 ## Attestation
 
-A signature carries no information about what gated the key, so the tier is asserted separately. Each device holds an attestation key generated at provisioning, and signs a 174-byte record binding the tier to a specific sighash, a monotonic counter and a firmware hash.
+A signature carries no information about what gated the key, so the tier is asserted separately. Each device holds an attestation key generated at provisioning, and signs a 206-byte record binding the tier to a specific sighash, a monotonic counter, a firmware hash and the hash of the calibration in force.
 
-Co-signers register each other's attestation keys once. After that, verifying that every member of a quorum signed at blood tier is a mechanical check, and a missing attestation counts as a failure rather than an abstention.
+Co-signers register each other's attestation keys once, alongside the firmware and calibration hashes they will accept. After that, verifying that every member of a quorum signed at blood tier is a mechanical check, and a missing attestation counts as a failure rather than an abstention.
 
 The record travels beside the PSBT in a BIP-174 proprietary field and is stripped before broadcast, so it does not appear on chain.
 

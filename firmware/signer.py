@@ -128,13 +128,20 @@ class Signer:
     """
 
     def __init__(self, se: SecureElement, pol: Policy, fw_hash: bytes,
+                 cal_hash: bytes,
                  confirm: Callable[[list[str]], bool],
                  run_gate: Callable[[Tier], tuple[bool, dict]],
                  unwrap_seed: Callable[[bytes], bytearray],
                  sign_digest: Callable[[bytearray, bytes], bytes]):
         if len(fw_hash) != 32:
             raise ValueError("fw_hash must be 32 bytes")
+        if len(cal_hash) != 32:
+            raise ValueError("cal_hash must be 32 bytes")
         self.se, self.policy, self.fw_hash = se, pol, fw_hash
+        # Read once at construction, not per signing. Re-reading the threshold
+        # files mid-session would let a file swapped underneath the process
+        # attest to whichever set it liked.
+        self.cal_hash = cal_hash
         self._confirm, self._run_gate = confirm, run_gate
         self._unwrap_seed, self._sign_digest = unwrap_seed, sign_digest
         self.trace: list[str] = []       # step order, asserted in the tests
@@ -204,7 +211,8 @@ class Signer:
         self._step("attest")
         counter = self.se.increment_counter()
         att = attest.attest(tier, counter, req.sighash, self.fw_hash,
-                            self.se.attest_sign, self.se.attest_pubkey())
+                            self.cal_hash, self.se.attest_sign,
+                            self.se.attest_pubkey())
 
         return SignResult(signature=signature, attestation=att, tier=tier,
                           display=display)
