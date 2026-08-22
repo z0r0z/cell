@@ -77,6 +77,8 @@ SUITES = [
      [sys.executable, "policy.py"]),
     ("attestation — BIP-340 vectors, quorum, malformed input",
      [sys.executable, "attest.py"]),
+    ("duress PIN — a second wallet, and no way to tell",
+     [sys.executable, "test_duress.py"]),
     ("cardiac identity — pipeline, and what it actually separates",
      [sys.executable, "test_cardiac_id.py"]),
     ("post-quantum attestation — LMS against RFC 8554 vectors",

@@ -84,6 +84,19 @@ class SeedBlob:
                         ciphertext=blob[head + NONCE_LEN:])
 
 
+# Plaintext is padded to a fixed width before encryption. AES-GCM is a stream
+# cipher underneath, so ciphertext length equals plaintext length, and BIP-39
+# words run from three letters to eight -- which means an unpadded blob's SIZE
+# leaks roughly how long the mnemonic is, and a clearly shorter one says twelve
+# words rather than twenty-four. That is free information about a wallet nobody
+# has unlocked, and it also lets anyone holding two blobs see they differ.
+#
+# 256 clears the longest 24-word mnemonic: 24 eight-letter words and 23 spaces
+# is 215. Padding is trailing spaces, which a mnemonic never contains, so
+# unwrap can strip it unambiguously and an older unpadded blob still opens.
+MNEMONIC_FIELD = 256
+
+
 def wrap(mnemonic: str, key: bytes, salt: bytes | None = None,
          nonce: bytes | None = None) -> SeedBlob:
     """Encrypt a mnemonic under a 32-byte wrapping key.
@@ -106,8 +119,11 @@ def wrap(mnemonic: str, key: bytes, salt: bytes | None = None,
     if len(salt) != SALT_LEN or len(nonce) != NONCE_LEN:
         raise SeedStoreError("bad salt or nonce length")
     blob = SeedBlob(salt=salt, nonce=nonce, ciphertext=b"")
-    ct = _aead()(_bind(key, salt)).encrypt(
-        nonce, bip39.normalise(mnemonic).encode("utf-8"), blob.header())
+    plain = bip39.normalise(mnemonic).encode("utf-8")
+    if len(plain) > MNEMONIC_FIELD:
+        raise SeedStoreError(f"mnemonic exceeds {MNEMONIC_FIELD} bytes")
+    plain = plain.ljust(MNEMONIC_FIELD, b" ")
+    ct = _aead()(_bind(key, salt)).encrypt(nonce, plain, blob.header())
     return SeedBlob(salt=salt, nonce=nonce, ciphertext=ct)
 
 
@@ -132,7 +148,15 @@ def unwrap(blob: SeedBlob | bytes, key: bytes) -> bytearray:
         raise SeedStoreError(
             "could not open the seed store: wrong PIN, wrong device, or the "
             "blob has been altered") from None
-    return bytearray(plain)
+    out = bytearray(plain)
+    # Trim the padding in place, so the buffer the caller zeroises is the same
+    # object that held the seed. Trailing spaces cannot be part of a mnemonic,
+    # and a blob written before padding existed simply has none to strip.
+    end = len(out)
+    while end and out[end - 1] == 0x20:
+        end -= 1
+    del out[end:]
+    return out
 
 
 def _bind(key: bytes, salt: bytes) -> bytes:

@@ -29,11 +29,25 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+from enum import IntEnum
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 
 MAX_PIN_ATTEMPTS = 10
+
+
+class PinResult(IntEnum):
+    """Which PIN was entered.
+
+    NONE is 0 and therefore falsy, so every existing `if not verify_pin(pin)`
+    keeps working unchanged. Callers that care about duress ask; callers that
+    do not carry on treating this as a boolean.
+    """
+
+    NONE = 0
+    NORMAL = 1
+    DURESS = 2
 
 
 class PinLockout(Exception):
@@ -48,12 +62,21 @@ class SecureElement(ABC):
         ...
 
     @abstractmethod
-    def verify_pin(self, pin: str) -> bool:
-        """Increment the counter, THEN compare.
+    def verify_pin(self, pin: str) -> "PinResult":
+        """Increment the counter, THEN compare. Returns which PIN matched.
 
         Order is the security property. Comparing first and incrementing only
         on failure means an attacker who cuts power the instant a wrong PIN is
         detected never pays for the attempt.
+
+        An implementation that returns a plain bool still satisfies every
+        caller, because PinResult.NONE is falsy and both other values are
+        truthy. It just cannot express duress, so on that device the second
+        seed blob is unreachable and the feature is simply absent.
+
+        se_atecc.RealSecureElement is currently in that position: it returns
+        bool, and needs a second PIN slot on the chip before it can do more.
+        See duress.py.
         """
 
     @abstractmethod
@@ -107,6 +130,7 @@ class SecureElement(ABC):
 @dataclass
 class _State:
     pin_attempts_used: int = 0
+    role: "PinResult" = None            # which PIN authorised the pending kdf
     op_counter: int = 0
     wiped: bool = False
     # Set by a successful verify_pin, consumed by one kdf. Never persisted:
@@ -126,16 +150,25 @@ class SoftSE(SecureElement):
     IS_SECURE = False
 
     def __init__(self, pin: str = "000000", secret: bytes | None = None,
-                 attest_seckey: bytes | None = None):
+                 attest_seckey: bytes | None = None,
+                 duress_pin: str | None = None):
+        if duress_pin is not None and duress_pin == pin:
+            raise ValueError("the duress PIN must differ from the normal one")
         self._secret = secret or os.urandom(32)
         self._pin_hash = hashlib.sha256(pin.encode()).digest()
+        # A device with no duress PIN set still holds a hash here, of a random
+        # value nobody can enter. Storing None would make "is duress
+        # configured" answerable by looking at the chip, and the whole point is
+        # that it should not be.
+        self._duress_hash = hashlib.sha256(
+            (duress_pin or os.urandom(32).hex()).encode()).digest()
         self._st = _State()
         self._attest_sk = attest_seckey or (b"\x00" * 31 + b"\x03")
 
     def attempts_remaining(self) -> int:
         return max(0, MAX_PIN_ATTEMPTS - self._st.pin_attempts_used)
 
-    def verify_pin(self, pin: str) -> bool:
+    def verify_pin(self, pin: str) -> PinResult:
         if self._st.wiped:
             raise PinLockout("device is wiped")
         if self.attempts_remaining() == 0:
@@ -143,14 +176,27 @@ class SoftSE(SecureElement):
             raise PinLockout("attempt counter exhausted; device wiped")
         # Increment first. See SecureElement.verify_pin.
         self._st.pin_attempts_used += 1
-        ok = hmac.compare_digest(hashlib.sha256(pin.encode()).digest(), self._pin_hash)
-        if ok:
+        h = hashlib.sha256(pin.encode()).digest()
+        # BOTH comparisons always run, and neither short-circuits the other.
+        # Checking the duress hash only after the normal one fails would make
+        # a duress entry measurably slower, and a coercer holding a stopwatch
+        # is exactly who this is hiding from.
+        is_normal = hmac.compare_digest(h, self._pin_hash)
+        is_duress = hmac.compare_digest(h, self._duress_hash)
+        role = (PinResult.NORMAL if is_normal
+                else PinResult.DURESS if is_duress
+                else PinResult.NONE)
+        if role:
+            # A duress PIN resets the counter exactly as the normal one does.
+            # Leaving it debited would let an attacker who tries both spot the
+            # difference in what the device reports afterwards.
             self._st.pin_attempts_used = 0
             self._st.pin_authorised = True
+            self._st.role = role
         elif self.attempts_remaining() == 0:
             self.wipe()
             raise PinLockout("attempt counter exhausted; device wiped")
-        return ok
+        return role
 
     def kdf(self, context: bytes) -> bytes:
         if self._st.wiped:
@@ -190,9 +236,9 @@ def _selftest() -> int:
 
     se = SoftSE(pin="123456")
     checks = [
-        ("correct PIN accepted", se.verify_pin("123456") is True),
+        ("correct PIN accepted", se.verify_pin("123456") is PinResult.NORMAL),
         ("counter resets on success", se.attempts_remaining() == MAX_PIN_ATTEMPTS),
-        ("wrong PIN rejected", se.verify_pin("000000") is False),
+        ("wrong PIN rejected", se.verify_pin("000000") is PinResult.NONE),
         ("wrong PIN costs an attempt", se.attempts_remaining() == MAX_PIN_ATTEMPTS - 1),
     ]
 
