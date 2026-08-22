@@ -307,7 +307,7 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 
 ---
 
-## 6. Parts (~US$90)
+## 6. Parts (~US$90 complete, ~US$60 for the reader alone)
 
 | Item | Part | ~USD | Notes |
 |---|---|---|---|
@@ -317,7 +317,7 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 | Laser | 650 nm diode module, ≤5 mW | 2 | Liveness gate. Coherent source is mandatory — an LED will not produce speckle |
 | Camera (speckle) | Pi Camera + **mini**-CSI cable | 10 | **Phase 1.** Lens removed. Fixed exposure/gain — see §8 |
 | Display | ST7789 1.3" 240×240 SPI | 8 | Phase 2 |
-| Camera | Pi Camera v2 (IMX219) + mini-CSI cable | 25 | QR ingest only |
+| Camera (QR) | Cheap USB webcam | 8 | Phase 2. **Not a second CSI camera** — the Pi Zero has one CSI port and the speckle path has it. QR decoding tolerates auto-exposure |
 | Buttons | 12 mm tactile ×4 | 3 | Phase 2. One is CONFIRM, on its own pin |
 | LEDs | 5 mm white ×2, 940 nm IR ×1, 2N7002 ×2, resistors | 3 | |
 | Power | USB-C breakout, power only | 2 | **No battery** — see §2. Desolder D+/D− or use a data blocker |
