@@ -77,6 +77,8 @@ SUITES = [
      [sys.executable, "policy.py"]),
     ("attestation — BIP-340 vectors, quorum, malformed input",
      [sys.executable, "attest.py"]),
+    ("post-quantum attestation — LMS against RFC 8554 vectors",
+     [sys.executable, "test_lms.py"]),
     ("secure element — PIN counter, KDF binding, wipe",
      [sys.executable, "se.py"]),
     ("unlock chain — step order, refusals, key binding",
