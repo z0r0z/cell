@@ -104,16 +104,18 @@ jobs:
       CORE_VERSION: "28.0"
       # Pinned, not merely checked against the SHA256SUMS served alongside the
       # download. Verifying a file against a hash from the same host proves the
-      # transfer was not corrupted and nothing else — if bitcoincore.org is ever
-      # compromised, both move together. This value is in the repository, so a
-      # substituted binary fails here rather than executing in CI on a wallet
-      # project. Update it deliberately when bumping CORE_VERSION.
+      # transfer was not corrupted and nothing else -- if bitcoincore.org is
+      # ever compromised, both move together. This value lives in the
+      # repository, so a substituted binary fails here rather than executing in
+      # CI on a wallet project. Update it deliberately when bumping
+      # CORE_VERSION.
       CORE_SHA256: "7fe294b02b25b51acb8e8e0a0eb5af6bbafa7cd0c5b0e5fcbb61263104a82fbc"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: pip install -r firmware/requirements.txt
 
       - name: Cache Bitcoin Core
         id: core-cache
@@ -133,14 +135,41 @@ jobs:
           tar -xzf "${TARBALL}" -C ~/bitcoin-core --strip-components=1
           rm "${TARBALL}"
 
-      - name: Run the regtest round trip
+      - name: Start the node
         run: |
           set -euo pipefail
-          # txindex=1: without it getrawtransaction fails on confirmed
-          # transactions and the script cannot check what Core actually mined.
-          #
-          # No codesign step here. That is needed only on Apple Silicon, where
-          # an unsigned bitcoind is SIGKILLed on launch
-          # (codesign -s - --force bitcoind). A Linux runner does not need it,
-          # which is why it looks absent rather than forgotten.
-          python3 tools/regtest_e2e.py --bitcoin-dir ~/bitcoin-core/bin
+          DATADIR="$RUNNER_TEMP/regtest"
+          mkdir -p "$DATADIR"
+          # regtest_e2e.py expects a node already running and drives it with
+          # `bitcoin-cli -datadir=...` only, so the chain has to come from the
+          # config file -- otherwise bitcoin-cli talks to mainnet's 8332 and
+          # the run dies on "could not connect".
+          cat > "$DATADIR/bitcoin.conf" <<'CONF'
+          regtest=1
+          server=1
+          # getrawtransaction fails on confirmed transactions without this, and
+          # the script checks what Core actually mined.
+          txindex=1
+          # regtest has no fee history, so the wallet refuses to send without a
+          # fallback.
+          fallbackfee=0.0002
+          CONF
+          ~/bitcoin-core/bin/bitcoind -datadir="$DATADIR" -daemon
+          # No codesign step: that is only needed on Apple Silicon, where an
+          # unsigned bitcoind is SIGKILLed on launch. Absent here on purpose.
+          for _ in $(seq 60); do
+            if ~/bitcoin-core/bin/bitcoin-cli -datadir="$DATADIR" getblockchaininfo >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          ~/bitcoin-core/bin/bitcoin-cli -datadir="$DATADIR" getblockchaininfo \
+            | python3 -c "import json,sys; print('chain:', json.load(sys.stdin)['chain'])"
+          echo "DATADIR=$DATADIR" >> "$GITHUB_ENV"
+
+      - name: Run the regtest round trip
+        run: python3 tools/regtest_e2e.py --bitcoin-dir ~/bitcoin-core/bin --datadir "$DATADIR"
+
+      - name: Stop the node
+        if: always()
+        run: ~/bitcoin-core/bin/bitcoin-cli -datadir="$DATADIR" stop || true
