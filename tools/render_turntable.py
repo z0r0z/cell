@@ -181,6 +181,10 @@ def main() -> int:
     ap.add_argument("--gain", type=float, default=1.22,
                 help="studio lighting multiplier. The shell is black PETG by "
                      "design; too much here turns it silver and loses the identity.")
+    ap.add_argument("--gif-size", type=int, default=460,
+                    help="GIF width. Kept below --size on purpose: a 256-colour "
+                         "GIF of a long slow spin gets large fast, and the MP4 "
+                         "is the one worth posting anyway.")
     ap.add_argument("--timeout", type=int, default=600)
     args = ap.parse_args()
 
@@ -251,7 +255,7 @@ def main() -> int:
     pal = frames_dir / "palette.png"
     # One global palette over every frame. A per-frame palette makes a dark,
     # softly-shaded body shimmer as the quantiser changes its mind each frame.
-    vf = (f"fps={args.fps},scale={args.size}:-1:flags=lanczos,"
+    vf = (f"fps={args.fps},scale={args.gif_size}:-1:flags=lanczos,"
           f"format=rgb24")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
                     "-framerate", str(args.fps), "-i", str(frames_dir / "f%04d.png"),
