@@ -70,12 +70,13 @@ The reader has no security requirements, because nothing is being signed. Leave 
 
 It answers the question that determines whether the rest is worth building: does the gate separate real blood from every fake? Run the spoof panel in §13. If it does not, you never order the wallet kit.
 
-### Kit 2 — the wallet (+$30.80)
+### Kit 2 — the wallet (+$32.80)
 
 | Item | ~USD |
 |---|---|
 | ST7789 1.3" 240×240 SPI display | 8 |
 | USB webcam, for QR ingest | 8 |
+| micro-USB OTG adapter, for that webcam | 2 |
 | ATECC608B breakout | 6 |
 | 4 × 12 mm tactile buttons | 3 |
 | USB-C breakout, power only | 2 |
@@ -337,6 +338,7 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 | Camera (speckle) | Pi Camera + **mini**-CSI cable | 10 | **Reader kit.** Lens removed. Fixed exposure/gain — see §8 |
 | Display | ST7789 1.3" 240×240 SPI | 8 | Wallet kit |
 | Camera (QR) | Cheap USB webcam | 8 | Wallet kit. **Not a second CSI camera** — the Pi Zero has one CSI port and the speckle path has it. QR decoding tolerates auto-exposure |
+| USB OTG adapter | micro-USB male → USB-A female | 2 | Wallet kit. The Zero's ports are micro-USB. Without this the webcam does not physically connect |
 | Buttons | 12 mm tactile ×4 | 3 | Wallet kit. One is CONFIRM, on its own pin |
 | LEDs | 5 mm white ×2, 940 nm IR ×1, 2N7002 ×2, resistors | 3 | |
 | Power | USB-C breakout, power only | 2 | **No battery** — see §2. Desolder D+/D− or use a data blocker |
@@ -349,6 +351,37 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 **Consumables:** contact-activated sterile lancets 28G/1.8 mm (~$0.06 ea, any pharmacy), alcohol prep pads, 0.1 mm PET film for cartridge windows (transparency or laminating pouch, ~$8/100 sheets ≈ 1,600 windows), a 1 L sharps container. No reagents — nothing here has a shelf life.
 
 **Optional, later:** MLX90614-DCI infrared thermometer (~$15) adds a sixth gate. See §3 for why it isn't in the core build. It must be the DCI variant; the 90° version images the whole chamber rather than the sample.
+
+### Buying it
+
+Most of this is generic and any supplier will do. Five items are not, and
+picking the wrong one costs a rebuild rather than a return.
+
+| Item | What to insist on | What goes wrong otherwise |
+|---|---|---|
+| **ATECC608B** | The **608B**, on a breakout with I²C pulled out. Adafruit 4314 or the SparkFun equivalent | The 508A and 608A are different parts; 608A is end-of-life. Footprints and libraries look identical |
+| **AS7341** | Adafruit 4698, or a clone that brings out the **LDR/LED driver pin** | Boards that omit that pin cannot drive LED #1 directly and §9's wiring does not apply |
+| **ST7789 240×240** | A module with a **CS pin broken out** | Many 1.3" 240×240 boards hard-wire chip select. §11 puts the display on SPI0 CE0; without CS you cannot share the bus and the pinout in §11 is wrong for your board |
+| **Pi camera** | An **OV5647 (v1-style)** module, plus the **narrow 22-pin "Zero" CSI cable** | The lens has to come off (§9). v1 modules unscrew; v3 does not come apart the same way. And the Zero's connector is narrower than a full-size Pi's — the standard cable will not fit |
+| **650 nm laser** | A **module with a driver board**, 3–5 V in, ≤5 mW, with a lens you can defocus | A bare laser diode without current limiting dies the first time you power it |
+
+The **USB webcam** only has to resolve a QR code at roughly a hand's distance.
+Fixed-focus units often cannot focus that close — one with a manual focus ring
+is the safer buy, and it is the cheapest part in the wallet kit to get wrong.
+
+Lancets, alcohol pads and the sharps container come from any pharmacy. PET
+window film is laser-printer transparency or laminating pouch stock. The 3M
+300LSE tape is worth buying by name: it is 0.05 mm, and thicker double-sided
+tape changes the optical path length the cartridge was dimensioned around.
+
+### Tools
+
+Assumed, and not in the bill: a 3D printer (see `PRINTING.md` for what it has
+to be able to do), a soldering iron — **with a heat-set insert tip**, which is
+the one tool people do not already own — digital calipers, a small screwdriver
+set, and a craft knife with fresh blades for the antenna trace and the PET
+windows. A multimeter is not required but you will want one the first time a
+bus does not answer.
 
 ### Cost reduction
 
@@ -734,9 +767,12 @@ The file is one co-signer per line — `label fingerprint path xpub` — and it 
 `tools/regtest_e2e.py` runs the whole thing against Bitcoin Core on a private regtest chain: Core funds an address the firmware derived, the firmware signs a PSBT spending it, and Core finalises, accepts and mines the result. Every script type, taproot and 2-of-3 included.
 
 ```bash
-bitcoind -regtest -daemon -datadir=/tmp/rt -txindex=1
-tools/regtest_e2e.py --bitcoin-dir /path/to/bitcoin-28.0/bin --datadir /tmp/rt
+tools/regtest_e2e.py --bitcoin-dir /path/to/bitcoin-28.0/bin
 ```
+
+It starts a private regtest node, runs every script type through it, and stops
+the node again. Pass `--datadir` to keep the chain around, or `--no-start` to
+drive one you started yourself.
 
 Worth doing before you fund anything, and worth doing again after any change to `psbt.py`, `tx.py` or `addresses.py`. It is the only check in this repo that answers on its own authority rather than by comparison, and it earned its place the first time it ran by finding a malformed BIP-174 proprietary key that made every PSBT this device produced unreadable to Core.
 

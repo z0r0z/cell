@@ -181,6 +181,8 @@ def main() -> int:
     ap.add_argument("--bitcoin-dir", required=True,
                     help="directory holding bitcoind and bitcoin-cli")
     ap.add_argument("--datadir", help="regtest datadir (a temporary one by default)")
+    ap.add_argument("--no-start", action="store_true",
+                    help="use a node that is already running on this datadir")
     args = ap.parse_args()
 
     binary = Path(args.bitcoin_dir).expanduser()
@@ -189,7 +191,55 @@ def main() -> int:
     core = Core(binary, datadir)
 
     print("Regtest end to end — the firmware signs, Bitcoin Core accepts\n")
+    started_here = False
+    if not args.no_start:
+        started_here = start_node(binary, datadir)
     print(f"  node    {core('getblockchaininfo')['chain']}")
+
+    try:
+        return run_cases(core, datadir)
+    finally:
+        if started_here:
+            subprocess.run([str(binary / "bitcoin-cli"), f"-datadir={datadir}",
+                            "stop"], capture_output=True)
+
+
+def start_node(binary: Path, datadir: Path) -> bool:
+    """Start a regtest node on `datadir`, unless one is already answering.
+
+    The script used to require a node someone else had started, which made the
+    CI job three steps and meant the commonest failure was a missing
+    `regtest=1` sending bitcoin-cli at mainnet's port. Owning the lifecycle
+    here makes the job a one-liner and puts the settings that matter next to
+    the code that depends on them.
+    """
+    import time
+    cli = [str(binary / "bitcoin-cli"), f"-datadir={datadir}"]
+    if subprocess.run(cli + ["getblockchaininfo"],
+                      capture_output=True).returncode == 0:
+        return False                    # somebody else's node; leave it alone
+
+    datadir.mkdir(parents=True, exist_ok=True)
+    conf = datadir / "bitcoin.conf"
+    if not conf.exists():
+        # txindex, because getrawtransaction on a CONFIRMED transaction fails
+        # without it. fallbackfee, because regtest has no fee history and the
+        # wallet refuses to send at all without one. Both are the kind of
+        # setting that produces a baffling error rather than a clear one.
+        conf.write_text("regtest=1\nserver=1\ntxindex=1\n"
+                        "fallbackfee=0.0002\n\n[regtest]\n"
+                        "listen=0\nconnect=0\ndnsseed=0\n")
+    subprocess.run([str(binary / "bitcoind"), f"-datadir={datadir}", "-daemon"],
+                   capture_output=True, check=True)
+    for _ in range(60):
+        if subprocess.run(cli + ["getblockchaininfo"],
+                          capture_output=True).returncode == 0:
+            return True
+        time.sleep(0.5)
+    raise RuntimeError("bitcoind did not answer RPC within 30 seconds")
+
+
+def run_cases(core: "Core", datadir: Path) -> int:
 
     # Idempotent: the wallet may already exist and may already be loaded, and
     # a rerun against the same datadir is the normal case while debugging.
