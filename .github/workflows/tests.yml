@@ -89,3 +89,58 @@ jobs:
       - run: python3 contracts/test/gen_registry_vectors.py
       - run: forge test -vv
         working-directory: contracts
+
+  regtest:
+    # End-to-end against a real Bitcoin Core on a private regtest chain: Core
+    # funds an address the firmware derived, the firmware signs, Core finalises
+    # and mines it. This is what caught the malformed BIP-174 proprietary key
+    # that our own parser accepted, so it is worth keeping honest on every push.
+    #
+    # Kept out of the unit job on purpose. It downloads and runs a 40 MB binary,
+    # and a Core outage should not redden the suite that has nothing to do with
+    # Core.
+    runs-on: ubuntu-latest
+    env:
+      CORE_VERSION: "28.0"
+      # Pinned, not merely checked against the SHA256SUMS served alongside the
+      # download. Verifying a file against a hash from the same host proves the
+      # transfer was not corrupted and nothing else — if bitcoincore.org is ever
+      # compromised, both move together. This value is in the repository, so a
+      # substituted binary fails here rather than executing in CI on a wallet
+      # project. Update it deliberately when bumping CORE_VERSION.
+      CORE_SHA256: "7fe294b02b25b51acb8e8e0a0eb5af6bbafa7cd0c5b0e5fcbb61263104a82fbc"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache Bitcoin Core
+        id: core-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/bitcoin-core
+          key: bitcoin-core-${{ env.CORE_VERSION }}-linux-x86_64
+
+      - name: Download and verify Bitcoin Core
+        if: steps.core-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          TARBALL="bitcoin-${CORE_VERSION}-x86_64-linux-gnu.tar.gz"
+          curl -fsSLO "https://bitcoincore.org/bin/bitcoin-core-${CORE_VERSION}/${TARBALL}"
+          echo "${CORE_SHA256}  ${TARBALL}" | sha256sum -c -
+          mkdir -p ~/bitcoin-core
+          tar -xzf "${TARBALL}" -C ~/bitcoin-core --strip-components=1
+          rm "${TARBALL}"
+
+      - name: Run the regtest round trip
+        run: |
+          set -euo pipefail
+          # txindex=1: without it getrawtransaction fails on confirmed
+          # transactions and the script cannot check what Core actually mined.
+          #
+          # No codesign step here. That is needed only on Apple Silicon, where
+          # an unsigned bitcoind is SIGKILLed on launch
+          # (codesign -s - --force bitcoind). A Linux runner does not need it,
+          # which is why it looks absent rather than forgotten.
+          python3 tools/regtest_e2e.py --bitcoin-dir ~/bitcoin-core/bin
