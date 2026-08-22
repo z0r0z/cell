@@ -697,6 +697,26 @@ def evaluate(capture: dict, th: Thresholds = Thresholds()) -> LivenessResult:
 # there is no second list to keep in step.
 #   "min" -> genuine must be >= the threshold
 #   "max" -> genuine must be <= the threshold
+# Fields that are deliberately NOT swept, and why. Every field of Thresholds
+# must appear here or in TUNABLE: test_gate_robustness asserts the partition is
+# total, so adding a threshold forces the question "is this calibrated?" rather
+# than letting a new way to reject a sample sit at its shipped default forever.
+#
+# These are acquisition geometry and timing. A ROC sweep sets a DECISION
+# boundary from the distribution of a metric; changing how long the capture
+# runs or how large the speckle window is changes the metric itself, so they
+# are design parameters rather than thresholds to fit.
+NOT_TUNABLE = {
+    "chemistry_at_s":   "when chemistry is read, so an obvious spoof aborts early",
+    "duration_s":       "capture length, set by clotting time not by the panel",
+    "early_window_s":   "which frames count as early",
+    "late_window_s":    "which frames count as late",
+    "speckle_period_s": "frame interval, bounded by the camera",
+    "contrast_px":      "speckle contrast window",
+    "envelope_px":      "high-pass window for the beam envelope",
+    "reference_oxyhb":  "calibrated, but by enroll-reference rather than by roc",
+}
+
 TUNABLE = {
     "return_min":           ("g1_return",     "min"),
     "return_max":           ("g1_return",     "max"),

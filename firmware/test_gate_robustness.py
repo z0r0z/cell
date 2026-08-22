@@ -31,6 +31,7 @@ import numpy as np
 from dataclasses import replace
 
 import blood_gate as bg
+import touch_gate as tg
 import calibrate as cal
 
 
@@ -186,12 +187,43 @@ def acquire_visits_both_cartridge_stops() -> bool:
     return ok
 
 
+def every_threshold_is_accounted_for() -> bool:
+    """Each threshold is either swept by the ROC or declared as not swept.
+
+    A field that is neither is a way to reject a sample that nobody decided
+    about: it sits at its shipped default on every device, and calibration
+    never touches it. Forcing the partition to be total makes that a build
+    failure at the moment the field is added rather than a discovery later.
+    """
+    from dataclasses import fields
+    ok = True
+    for name, cls, tunable, not_tunable in (
+            ("blood", bg.Thresholds, bg.TUNABLE, bg.NOT_TUNABLE),
+            ("touch", tg.TouchThresholds, tg.TUNABLE, tg.NOT_TUNABLE)):
+        declared = set(tunable) | set(not_tunable)
+        actual = {f.name for f in fields(cls)}
+        missing = sorted(actual - declared)
+        extra = sorted(declared - actual)
+        ok &= check(f"{name}: every threshold is swept or declared not swept",
+                    not missing)
+        if missing:
+            print(f"      undeclared: {missing} — add to TUNABLE or NOT_TUNABLE")
+        ok &= check(f"{name}: nothing declared that no longer exists", not extra)
+        if extra:
+            print(f"      stale: {extra}")
+        ok &= check(f"{name}: the two lists do not overlap",
+                    not (set(tunable) & set(not_tunable)))
+    return ok
+
+
 def run() -> int:
     print("Gate robustness — enrolment invariant, hostile captures.\n")
     print(" Enrolment")
     ok = enrolment_preserves_the_mask()
     print("\n Hostile captures")
     ok &= hostile_captures_reject_without_raising()
+    print("\n Threshold coverage")
+    ok &= every_threshold_is_accounted_for()
     print("\n Cartridge stops")
     ok &= acquire_visits_both_cartridge_stops()
     print("\n" + "-" * 60)

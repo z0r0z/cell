@@ -360,6 +360,19 @@ PANEL = ("genuine", "no_contact", "static_object", "pump_fake",
 # fs, fs_min and duration_s are deliberately absent: they are properties of the
 # CAPTURE, not of the finger, and fitting them to your own sessions would set a
 # validity floor from the very data it is supposed to validate.
+# See blood_gate.NOT_TUNABLE. Every TouchThresholds field must be here or in
+# TUNABLE, and test_gate_robustness asserts it.
+#
+# fs_min is the interesting one: it CAN reject a capture, but it rejects for
+# unanalysability rather than for being a spoof. A ROC sweep against the panel
+# would be fitting a boundary to the wrong question — every class fails it
+# equally when the I2C bus is slow.
+NOT_TUNABLE = {
+    "fs":         "target sample rate; the sensor reports what it achieved",
+    "fs_min":     "validity floor, not an anti-spoof boundary",
+    "duration_s": "session length, set by how many beats a variability estimate needs",
+}
+
 TUNABLE = {
     "dc_min":        ("dc_red",     "min"),
     "dc_max":        ("dc_red",     "max"),
