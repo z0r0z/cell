@@ -265,12 +265,17 @@ No tiers, no spending thresholds. Every key on the device requires blood, becaus
 
 ### The closed operation set
 
-It signs exactly four things:
+It signs four spends:
 
 - A Bitcoin spend — amount, destination, fee, change ownership
 - An Ethereum transfer — amount, destination, chain, nonce, worst-case fee
 - A confidential note spend — note, amount, recipient owner
 - A direct transfer to a pubkey
+
+and two non-spends:
+
+- A policy change — the tier floor; blood-locked in both directions
+- A coordinator challenge — a 32-byte nonce and the frozen purpose `coordinator/v1`; Touch-default; no coins move. The digest is `SHA256(CELL/challenge/v1|purpose|nonce)`, computed on the device from the fields on the confirmation screen. Coordinators that are not asking for a spend still need the attestation bound to something the owner saw, or a blood attestation can be lifted onto any later operation.
 
 **It refuses everything else**, including generic EVM calldata and bare hashes. If the device can't render an operation as a sentence a human can read, it doesn't sign it. A device that displays `0x9a3f…` and asks for blood is worse than one that refuses.
 

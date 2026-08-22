@@ -257,6 +257,32 @@ def run() -> int:
                       "destination": "bc1qgood0000"})
     check("parser accepts a well-formed spend", isinstance(good, ops.BitcoinSpend))
 
+    nonce = "ab" * 32
+    ch = ops.parse({"type": "challenge", "nonce": nonce, "purpose": "coordinator/v1"})
+    check("parser accepts a coordinator challenge", isinstance(ch, ops.Challenge))
+    check("challenge digest is 32 bytes", len(ch.digest()) == 32)
+    check("challenge nonce shown in full", nonce in "".join(ch.render()).replace(" ", ""))
+    try:
+        ops.parse({"type": "challenge", "nonce": nonce, "purpose": "heir/v1"})
+        check("parser refuses an unknown challenge purpose", False)
+    except ops.UnrenderableOperation:
+        check("parser refuses an unknown challenge purpose", True)
+    try:
+        ops.parse({"type": "challenge", "nonce": "aa", "purpose": "coordinator/v1"})
+        check("parser refuses a short challenge nonce", False)
+    except ops.UnrenderableOperation:
+        check("parser refuses a short challenge nonce", True)
+
+    s_ch, log_ch = make()
+    r_ch = s_ch.authorize_and_sign(SignRequest(ch, ch.digest()), PIN)
+    check("challenge runs the unlock chain", s_ch.trace == signer.EXPECTED_ORDER)
+    check("challenge is Touch-default", log_ch["gate_tier"] is Tier.TOUCH)
+    check("challenge attestation binds the digest",
+          r_ch.attestation.sighash == ch.digest())
+    v_ch = attest.verify(r_ch.attestation, s_ch.se.attest_pubkey(), ch.digest(),
+                         min_counter=0, allowed_fw=[FW], require=Tier.TOUCH)
+    check("challenge attestation verifies", v_ch.ok)
+
     # multisig context, matching what the industrial-design mockup shows
     ms = ops.BitcoinSpend(amount_sats=41_800_000, fee_sats=12_000,
                           destination="bc1q4m8z9xkt7fk3p2vq8dl4r6nwe5ta9c0hjuxsqz",

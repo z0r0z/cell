@@ -26,6 +26,7 @@ import hashlib
 import sys
 
 import addresses
+import attest
 import bip32
 import bip39
 import eth
@@ -408,6 +409,27 @@ def main() -> int:
     t_poly = eth.EthTransaction(**{**t.__dict__, "chain_id": 137})
     check("a different chain id yields a different digest",
           t.sighash() != t_poly.sighash())
+
+    print("\n coordinator challenge")
+    nonce = "cd" * 32
+    ch = ops.Challenge(nonce=nonce, purpose="coordinator/v1")
+    ch_lines = {}
+    cr = wallet.sign_challenge(
+        ch, prov, se, Policy(), FW, CAL,
+        lambda ln: ch_lines.setdefault("l", ln) is None or True,
+        gate_ok, PIN)
+    ctxt = "\n".join(ch_lines["l"])
+    check("challenge nonce shown in full",
+          nonce in ctxt.replace("\n", "").replace(" ", ""))
+    check("challenge purpose shown", "coordinator/v1" in ctxt)
+    check("attestation binds the challenge digest",
+          attest.Attestation.unpack(cr.attestation).sighash == ch.digest())
+    check("spend-key signature verifies",
+          ec.schnorr_verify(cr.digest, cr.pubkey, cr.signature))
+    check("challenge is Touch-default", cr.tier is Tier.TOUCH)
+    refuses("unknown purpose refused before the gate",
+            lambda: ops.Challenge(nonce=nonce, purpose="heir/v1").digest(),
+            ops.UnrenderableOperation)
 
     # ---- tier policy still governs ------------------------------------
     print("\n the gate still governs")
