@@ -51,11 +51,22 @@ class Chamber:
         self.size, self.grain_px, self.rng = size, grain_px, rng
         self.E = _field((size, size), grain_px, rng)
 
-    def read(self, drift=0.0, frames=16, shot=0.02, gain=1.0, shift=(0, 0)):
+    def read(self, drift=0.0, frames=16, shot=0.02, gain=1.0, shift=(0, 0),
+             rot_deg=0.0):
         """A prepared image. `drift` is the fraction of the field replaced,
         `shift` is whole-pixel translation of the whole pattern -- what a
         mount does when the resin warms."""
         E = self.E
+        if rot_deg:
+            n = self.size
+            c = (n - 1) / 2.0
+            th = np.deg2rad(rot_deg)
+            ct, st = np.cos(th), np.sin(th)
+            y, x = np.mgrid[0:n, 0:n]
+            yc, xc = y - c, x - c
+            iy = np.clip(np.rint(ct * yc - st * xc + c).astype(int), 0, n - 1)
+            ix = np.clip(np.rint(st * yc + ct * xc + c).astype(int), 0, n - 1)
+            E = E[iy, ix]
         if any(shift):
             E = np.roll(np.roll(E, shift[0], axis=0), shift[1], axis=1)
         if drift > 0:
@@ -65,6 +76,13 @@ class Chamber:
         I = I / I.mean() * gain
         out = I[None, ...] + self.rng.normal(0, shot, (frames,) + I.shape)
         return puf.prepare(out)
+
+
+def _reproduces(img, helper, key) -> bool:
+    try:
+        return puf.reproduce(img, helper) == key
+    except puf.PufError:
+        return False
 
 
 def _checks():
@@ -96,6 +114,50 @@ def _checks():
         if got is not None and not np.array_equal(got, cw):
             silent += 1
     checks.append(("never miscorrects silently past t", silent == 0))
+
+    # -- the code against something that is not itself -------------------
+    # Dimensions of primitive BCH codes are tabulated in the coding
+    # literature (Lin & Costello, appendix C) and do not come from anything
+    # here. Three lengths, so a mistake in the generator would have to be a
+    # mistake that happens to be right 47 times.
+    TABLES = {
+        6: {1: 57, 2: 51, 3: 45, 4: 39, 5: 36, 6: 30, 7: 24, 10: 18, 11: 16,
+            13: 10, 15: 7},
+        8: {1: 247, 2: 239, 3: 231, 4: 223, 5: 215, 6: 207, 7: 199, 8: 191,
+            9: 187, 10: 179, 11: 171, 12: 163, 13: 155, 14: 147, 15: 139,
+            18: 131, 19: 123, 21: 115, 22: 107, 23: 99, 25: 91, 26: 87,
+            27: 79, 29: 71, 30: 63, 31: 55},
+        9: {1: 502, 2: 493, 3: 484, 4: 475, 5: 466, 6: 457, 7: 448, 8: 439,
+            9: 430, 10: 421},
+    }
+    wrong = [(m, t) for m, tab in TABLES.items() for t, k in tab.items()
+             if puf.BCH(m, t).k != k]
+    n_par = sum(len(v) for v in TABLES.values())
+    checks.append((f"dimensions match published BCH tables "
+                   f"({n_par - len(wrong)}/{n_par})", not wrong))
+
+    # And the two algebraic facts that define the code: the designed roots
+    # really are roots of the generator, and the generator really divides
+    # x^n - 1. Either failing means the thing is not a BCH code at all.
+    alg = True
+    for m, t in ((8, 10), (12, 180), (6, 3)):
+        c = puf.BCH(m, t)
+        for i in range(1, 2 * t + 1):
+            v = 0
+            for j, coef in enumerate(c.g):
+                if coef:
+                    v ^= c.gf.exp[(i * j) % c.gf.n]
+            if v:
+                alg = False
+        poly = np.zeros(c.n + 1, dtype=np.uint8)
+        poly[0] = poly[c.n] = 1
+        r, dg = poly.copy(), len(c.g) - 1
+        for i in range(len(r) - 1, dg - 1, -1):
+            if r[i]:
+                r[i - dg:i + 1] ^= c.g
+        if r[:dg].any():
+            alg = False
+    checks.append(("designed roots are roots, and g divides x^n - 1", alg))
 
     # -- feature extraction --------------------------------------------
     ch = Chamber()
@@ -208,6 +270,32 @@ def _checks():
         checks.append(("registration finds the shift it was given",
                        puf.estimate_shift(ch.read(shift=(6, -3)),
                                           helper.fiducial) == (6, -3)))
+
+        # Rotation. A mount that twists rather than slides is the same
+        # failure and one fiducial cannot see it -- a twist and a slide look
+        # identical from a single patch. Two, along a known baseline, separate
+        # them. Half a degree is ~3 px at the edge of this field, which was
+        # enough to lose the key before this existed.
+        turned = {}
+        for deg in (0.0, 0.5, 1.0, 2.0, 3.0):
+            got = 0
+            for _ in range(2):
+                try:
+                    got += puf.reproduce(ch.read(rot_deg=deg), helper) == key
+                except puf.PufError:
+                    pass
+            turned[deg] = got
+        checks.append((f"survives rotation to 3 deg "
+                       f"({'/'.join(str(turned[d]) for d in turned)} of 2)",
+                       all(v == 2 for v in turned.values())))
+
+        est = np.rad2deg(puf.estimate_rotation(ch.read(rot_deg=2.0), helper))
+        checks.append((f"rotation is measured, not just tolerated "
+                       f"(got {est:.2f} deg)", 1.6 < est < 2.4))
+
+        checks.append(("a twist and a slide together still resolve",
+                       _reproduces(ch.read(rot_deg=1.0, shift=(9, -7)),
+                                   helper, key)))
 
         # Translation must not become a way to pass with the wrong chamber:
         # the search is over shifts, not over diffusers.

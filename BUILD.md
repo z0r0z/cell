@@ -586,10 +586,12 @@ closes the bay, it must not be part of the measurement.
 **The mount matters as much as the bond.** A speckle grain is about 4 px, so
 the pattern only has to slide one grain for the raw features to be destroyed —
 and PETG over the 20 mm standoff moves roughly a pixel per kelvin, which makes
-a cold morning enough on its own. `optical_puf` registers each read against a
-published fiducial corner and searches ±24 px, so ordinary thermal movement
-costs nothing. That budget is for the mount drifting, not for the camera being
-free to wander: keep the standoff rigid and the whole assembly moving together.
+a cold morning enough on its own. `optical_puf` registers every read against
+two published fiducial patches before it reads anything: ±24 px of slide and
+about 3° of twist come out, and both are reported rather than merely absorbed,
+so a chamber that is drifting can be told from one that has been opened. Keep
+the standoff rigid and the whole assembly moving together — the budget is there
+for thermal creep, not for a camera free to wander.
 
 **Not hot glue, and not tape.** Both creep with temperature. The diffuser has
 to be in the same place in six months as it is today, because "the same place"

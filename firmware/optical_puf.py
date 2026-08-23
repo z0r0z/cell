@@ -337,7 +337,8 @@ def prepare(frames: np.ndarray, envelope_px: float = 12.0) -> np.ndarray:
 
 
 def estimate_shift(img: np.ndarray, fiducial: np.ndarray,
-                   max_shift: int = MAX_SHIFT_PX) -> tuple[int, int]:
+                   max_shift: int = MAX_SHIFT_PX,
+                   origin: "tuple[int, int] | None" = None) -> tuple[int, int]:
     """How far the pattern has moved since enrolment, in whole pixels.
 
     THIS IS NOT AN OPTIMISATION. A speckle grain here is about 4 px, so the
@@ -354,28 +355,54 @@ def estimate_shift(img: np.ndarray, fiducial: np.ndarray,
     """
     f = np.asarray(fiducial, dtype=np.float64)
     n = f.shape[0]
-    f = f - f.mean()
-    denom = np.sqrt((f * f).sum())
-    best, best_score = (0, 0), -np.inf
-    for dy in range(-max_shift, max_shift + 1):
-        for dx in range(-max_shift, max_shift + 1):
-            y0, x0 = FIDUCIAL_ORIGIN + dy, FIDUCIAL_ORIGIN + dx
-            if y0 < 0 or x0 < 0:
-                continue
-            patch = img[y0:y0 + n, x0:x0 + n]
-            if patch.shape != f.shape:
-                continue
-            p = patch - patch.mean()
-            d = np.sqrt((p * p).sum()) * denom
-            if d <= 0:
-                continue
-            score = float((p * f).sum() / d)
-            if score > best_score:
-                best_score, best = score, (dy, dx)
-    return best
+    oy, ox = origin or (FIDUCIAL_ORIGIN, FIDUCIAL_ORIGIN)
+    h, w = img.shape
+
+    # The search window: everywhere the patch could have moved to, clipped to
+    # the frame. Brute force over it costs (2s+1)^2 patch correlations, which
+    # on a Pi Zero is most of the time a signature takes. One FFT gives every
+    # offset at once.
+    y0, x0 = max(0, oy - max_shift), max(0, ox - max_shift)
+    y1, x1 = min(h, oy + n + max_shift), min(w, ox + n + max_shift)
+    region = img[y0:y1, x0:x1]
+    if region.shape[0] < n or region.shape[1] < n:
+        return (0, 0)
+
+    fz = f - f.mean()
+    fz_energy = float(np.sqrt((fz * fz).sum())) or 1.0
+
+    rh, rw = region.shape
+    num = np.fft.irfft2(np.fft.rfft2(region, s=(rh, rw))
+                        * np.conj(np.fft.rfft2(fz, s=(rh, rw))),
+                        s=(rh, rw))
+
+    # Normalise by the energy under each placement, or a bright patch wins on
+    # brightness rather than on matching. Box sums via the summed-area table.
+    ones = np.ones((n, n))
+    s1 = _box(region, n)
+    s2 = _box(region * region, n)
+    var = s2 - s1 * s1 / (n * n)
+    denom = np.sqrt(np.clip(var, 1e-12, None)) * fz_energy
+
+    valid_h, valid_w = rh - n + 1, rw - n + 1
+    score = num[:valid_h, :valid_w] / denom[:valid_h, :valid_w]
+    idx = int(np.argmax(score))
+    py, px = divmod(idx, valid_w)
+    dy, dx = (y0 + py) - oy, (x0 + px) - ox
+    if abs(dy) > max_shift or abs(dx) > max_shift:
+        return (0, 0)
+    return (int(dy), int(dx))
 
 
-def bits_from_image(img: np.ndarray, grain_px: int = 4
+def _box(a: np.ndarray, n: int) -> np.ndarray:
+    """Sums of every n x n window, via a summed-area table."""
+    c = np.cumsum(np.cumsum(
+        np.pad(a, ((1, 0), (1, 0))), axis=0), axis=1)
+    return (c[n:, n:] - c[:-n, n:] - c[n:, :-n] + c[:-n, :-n])
+
+
+def bits_from_image(img: np.ndarray, grain_px: int = 4,
+                    fid_b: "tuple[int, int] | None" = None
                     ) -> tuple[np.ndarray, np.ndarray]:
     """-> (bit per grain, how far that bit is from flipping).
 
@@ -415,9 +442,11 @@ def bits_from_image(img: np.ndarray, grain_px: int = 4
     q = (q + 0.5) / flat.size - 0.5           # -> (-0.5, 0.5), symmetric
     margin = np.abs(q).reshape(gh, gw) * 2.0
 
-    lo = FIDUCIAL_ORIGIN // grain_px
-    hi = -(-(FIDUCIAL_ORIGIN + FIDUCIAL_PX) // grain_px)   # round outward
-    margin[lo:hi, lo:hi] = -np.inf
+    for oy, ox in [(FIDUCIAL_ORIGIN, FIDUCIAL_ORIGIN)] + ([fid_b] if fid_b else []):
+        ylo, xlo = oy // grain_px, ox // grain_px
+        yhi = -(-(oy + FIDUCIAL_PX) // grain_px)          # round outward
+        xhi = -(-(ox + FIDUCIAL_PX) // grain_px)
+        margin[ylo:yhi, xlo:xhi] = -np.inf
     return (q > 0).astype(np.uint8), margin.ravel()
 
 
@@ -481,6 +510,11 @@ class Helper:
     # publishing it costs nothing. See estimate_shift.
     fiducial: np.ndarray = None
     grain_px: int = 4
+    # A second fiducial, along a known baseline from the first. Two are what
+    # separate a twist from a slide -- see estimate_rotation.
+    fiducial_b: np.ndarray = None
+    fid_a: tuple = (FIDUCIAL_ORIGIN, FIDUCIAL_ORIGIN)
+    fid_b: tuple = (FIDUCIAL_ORIGIN, FIDUCIAL_ORIGIN)
 
     def leakage_bits(self) -> int:
         """Upper bound on what the offset discloses: the code's redundancy."""
@@ -520,13 +554,23 @@ def enroll(images: list[np.ndarray], m: int = 12, t: int = 180,
         raise ValueError("enrolment needs at least two reads")
     imgs = [np.asarray(i, dtype=np.float64) for i in images]
     o, n = FIDUCIAL_ORIGIN, FIDUCIAL_PX
+    width = imgs[0].shape[1]
+    bx = width - MAX_SHIFT_PX - n
+    if bx <= o + n:
+        raise PufError(
+            f"ROI {width} px is too narrow for two fiducials; needs "
+            f"> {2 * n + MAX_SHIFT_PX + o} px")
+    fid_a, fid_b = (o, o), (o, bx)
     fiducial = imgs[0][o:o + n, o:o + n].copy()
+    fiducial_b = imgs[0][o:o + n, bx:bx + n].copy()
+    ref = Helper(np.array([], dtype=np.int64), np.array([], dtype=np.uint8),
+                 m, t, salt, fiducial, grain_px, fiducial_b, fid_a, fid_b)
 
     stack, margins = [], []
     for i, img in enumerate(imgs):
         if i:
-            img = _shift_to(img, fiducial)
-        b, g = bits_from_image(img, grain_px)
+            img = _shift_to(img, ref)
+        b, g = bits_from_image(img, grain_px, fid_b=fid_b)
         stack.append(b)
         margins.append(g)
     bits = np.stack(stack)
@@ -548,13 +592,67 @@ def enroll(images: list[np.ndarray], m: int = 12, t: int = 180,
     rng = rng or np.random.default_rng()
     msg = rng.integers(0, 2, code.k, dtype=np.uint8)
     offset = code.encode(msg) ^ w
-    return (Helper(mask, offset, m, t, salt, fiducial, grain_px),
+    return (Helper(mask, offset, m, t, salt, fiducial, grain_px,
+                   fiducial_b, fid_a, fid_b),
             _key(w, salt))
 
 
-def _shift_to(img: np.ndarray, fiducial: np.ndarray) -> np.ndarray:
-    """Undo whole-pixel translation, so the grains land where they enrolled."""
-    dy, dx = estimate_shift(img, fiducial)
+def _rotate(img: np.ndarray, theta: float) -> np.ndarray:
+    """Rotate about the centre by `theta` radians, nearest neighbour.
+
+    Nearest neighbour on purpose. Interpolation would average across the grain
+    boundary and blur exactly the structure being measured; at the angles this
+    corrects, a whole-pixel resample is close to a permutation.
+    """
+    n, m = img.shape
+    cy, cx = (n - 1) / 2.0, (m - 1) / 2.0
+    y, x = np.mgrid[0:n, 0:m]
+    yc, xc = y - cy, x - cx
+    ct, st = np.cos(theta), np.sin(theta)
+    sy = np.rint(ct * yc - st * xc + cy).astype(int)
+    sx = np.rint(st * yc + ct * xc + cx).astype(int)
+    return img[np.clip(sy, 0, n - 1), np.clip(sx, 0, m - 1)]
+
+
+def estimate_rotation(img: np.ndarray, helper: "Helper") -> float:
+    """Radians, from how differently the two fiducials moved.
+
+    One fiducial cannot tell rotation from translation. Two, separated along a
+    known baseline, can: a twist moves the far one across the baseline while
+    the near one barely moves, and the difference over the separation is the
+    angle. Measured on the simulated chamber, half a degree is already enough
+    to lose the key -- about 3 px at the edge of a 768 px field -- so a mount
+    that creeps in rotation rather than translation would look exactly like
+    tampering without this.
+    """
+    if helper.fiducial_b is None:
+        return 0.0
+    ay, ax = helper.fid_a
+    by, bx = helper.fid_b
+    da = estimate_shift(img, helper.fiducial, origin=(ay, ax))
+    db = estimate_shift(img, helper.fiducial_b, origin=(by, bx))
+    baseline = float(bx - ax)
+    if abs(baseline) < 1.0:
+        return 0.0
+    return float(db[0] - da[0]) / baseline
+
+
+def _shift_to(img: np.ndarray, helper_or_fid) -> np.ndarray:
+    """Undo rotation then whole-pixel translation, so grains land as enrolled.
+
+    Two passes, because the translation estimate is only meaningful once the
+    twist is out: with the field still rotated, the fiducial correlates worst
+    exactly where it is being asked to be precise.
+    """
+    if isinstance(helper_or_fid, Helper):
+        helper = helper_or_fid
+        theta = estimate_rotation(img, helper)
+        if abs(theta) > 1e-4:
+            img = _rotate(img, -theta)
+        fid, origin = helper.fiducial, helper.fid_a
+    else:
+        fid, origin = helper_or_fid, (FIDUCIAL_ORIGIN, FIDUCIAL_ORIGIN)
+    dy, dx = estimate_shift(img, fid, origin=origin)
     if dy or dx:
         img = np.roll(np.roll(img, -dy, axis=0), -dx, axis=1)
     return img
@@ -568,8 +666,8 @@ def reproduce(image: np.ndarray, helper: Helper) -> bytes:
     """
     img = np.asarray(image, dtype=np.float64)
     if helper.fiducial is not None:
-        img = _shift_to(img, helper.fiducial)
-    bits, _ = bits_from_image(img, helper.grain_px)
+        img = _shift_to(img, helper)
+    bits, _ = bits_from_image(img, helper.grain_px, fid_b=helper.fid_b)
     if helper.mask.size and helper.mask.max() >= bits.size:
         raise PufError("read is smaller than the enrolled ROI")
     code = BCH(helper.m, helper.t)
@@ -618,7 +716,9 @@ def save_helper(helper: Helper, path: str) -> None:
     np.savez(path, mask=helper.mask, offset=helper.offset,
              m=helper.m, t=helper.t, salt=np.frombuffer(helper.salt, np.uint8),
              fiducial=np.asarray(helper.fiducial, dtype=np.float32),
-             grain_px=helper.grain_px)
+             grain_px=helper.grain_px,
+             fiducial_b=np.asarray(helper.fiducial_b, dtype=np.float32),
+             fid_a=np.asarray(helper.fid_a), fid_b=np.asarray(helper.fid_b))
 
 
 def load_helper(path: str) -> Helper:
@@ -627,7 +727,10 @@ def load_helper(path: str) -> Helper:
                   m=int(z["m"]), t=int(z["t"]),
                   salt=z["salt"].tobytes(),
                   fiducial=z["fiducial"].astype(np.float64),
-                  grain_px=int(z["grain_px"]))
+                  grain_px=int(z["grain_px"]),
+                  fiducial_b=z["fiducial_b"].astype(np.float64),
+                  fid_a=tuple(int(v) for v in z["fid_a"]),
+                  fid_b=tuple(int(v) for v in z["fid_b"]))
 
 
 def chamber_reader(capture, helper: Helper, grain_px: int = 4):
