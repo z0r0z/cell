@@ -294,11 +294,19 @@ class Device:
                 "  time.",
             ])
         else:
+            # Two screens, in this order, because the measurement needs it.
+            # T1 decides "is a finger present" by dividing the capture's DC
+            # level by the EMPTY-bore level, so the empty read has to happen
+            # while the ring is still clear. Asking for the fingertip here
+            # would put it on the ring before that read -- see
+            # run_gate_on_hardware, which shows the second screen itself once
+            # the bore reference is in hand.
             self._screen("TOUCH REQUIRED", [
-                "  Rest a fingertip on the ring",
-                "  and hold still.",
+                "  Keep the ring CLEAR for a",
+                "  moment while the device reads",
+                "  the empty port.",
                 "",
-                "  Fifteen seconds.",
+                "  It will ask for your finger.",
             ])
 
     # ---- the read-only screens ----
@@ -409,7 +417,8 @@ def gate_result(result) -> tuple[bool, dict]:
     return bool(result.accepted), att
 
 
-def run_gate_on_hardware(tier: Tier, directory) -> tuple[bool, dict]:  # pragma: no cover
+def run_gate_on_hardware(tier: Tier, directory,
+                         ready=None) -> tuple[bool, dict]:  # pragma: no cover
     """Drive the sensor head for the tier the policy chose.
 
     Both tiers share one AS7341 and one bore, so the touch sensor is handed
@@ -424,23 +433,38 @@ def run_gate_on_hardware(tier: Tier, directory) -> tuple[bool, dict]:  # pragma:
     import hardware
     import touch_gate
 
-    cal = Path(directory) / "thresholds.json"
+    # Two tiers, two calibration files. They are separate because the sweeps
+    # that write them are separate, and because the field names barely
+    # overlap: handing blood's thresholds.json to TouchThresholds.load()
+    # silently drops every touch threshold it contains and picks up the ONE
+    # name the two dataclasses share -- duration_s, which is 600 s for blood
+    # and 15 s for touch. That turns the everyday tier into a ten-minute
+    # finger-hold running on shipped defaults. See BUILD.md section 13.
+    blood_cal = Path(directory) / "thresholds.json"
+    touch_cal = Path(directory) / "touch_thresholds.json"
     head = hardware.RealSensorHead()
     try:
         if tier is Tier.BLOOD:
-            th = blood_gate.Thresholds.load(cal) if cal.exists() \
+            th = blood_gate.Thresholds.load(blood_cal) if blood_cal.exists() \
                 else blood_gate.Thresholds()
             capture = blood_gate.acquire(head, th)
             return gate_result(blood_gate.evaluate(capture, th))
 
-        th = touch_gate.TouchThresholds.load(cal) if cal.exists() \
+        th = touch_gate.TouchThresholds.load(touch_cal) if touch_cal.exists() \
             else touch_gate.TouchThresholds()
         sensor = hardware.RealTouchSensor(head)
+        # The empty-bore reference FIRST, while the ring is still clear. T1
+        # divides the capture's DC level by it to decide whether a finger is
+        # present, so reading it after the capture reads it THROUGH the finger
+        # and the ratio collapses to a number no window can accept.
+        bore = sensor.read_bore_reference()
+        # Only now is it safe to ask for the finger.
+        if ready is not None:
+            ready()
         # fs is a TARGET. The sensor reports what it achieved, and that is what
         # the evaluation must use, because every frequency-derived feature
         # scales with it.
         red, ir, fs = sensor.read_ppg(th.duration_s, th.fs)
-        bore = sensor.read_bore_reference()
         return gate_result(touch_gate.evaluate(red, ir, bore, th, fs=fs))
     finally:
         head.close()
@@ -466,14 +490,32 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
         from se_atecc import ATECC608B
         se = ATECC608B()
 
+    # Hoisted out of the Device(...) call below so the gate can drive it. The
+    # touch tier needs a second screen mid-capture: the empty-bore reference
+    # is read first, and only then may the owner be asked for a fingertip.
+    disp = open_display(console)
+
     def run_gate(tier: Tier):
-        return run_gate_on_hardware(tier, d)
+        def ready():
+            disp.show(["TOUCH REQUIRED", "",
+                       "  Rest a fingertip on the ring",
+                       "  and hold still.",
+                       "",
+                       "  Fifteen seconds."])
+        return run_gate_on_hardware(tier, d, ready=ready)
 
     fw_hash = hashlib.sha256(
         b"".join(sorted(p.read_bytes() for p in Path(__file__).parent.glob("*.py")))
     ).digest()
-    cal = d / "thresholds.json"
-    cal_hash = hashlib.sha256(cal.read_bytes() if cal.exists() else b"defaults").digest()
+    # Both threshold sets, via the helper that defines the ordering. Hashing
+    # only thresholds.json attested to the blood tier's numbers and said
+    # nothing about the touch tier's -- and the touch tier is the one that
+    # authorises most signatures. blood_gate.calibration_hash covers both and
+    # substitutes a sentinel for a file that is absent, so an uncalibrated
+    # device stays distinguishable rather than unattestable.
+    import blood_gate
+    cal_hash = blood_gate.calibration_hash(d / "thresholds.json",
+                                           d / "touch_thresholds.json")
 
     # The chamber binding, if this device enrolled one. Absent is the normal
     # state for a device provisioned before enrolment, and it is not a
@@ -495,7 +537,7 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
             finally:
                 head.close()
 
-    return Device(prov=prov, se=se, display=open_display(console),
+    return Device(prov=prov, se=se, display=disp,
                   read_chamber=read_chamber,
                   buttons=btn.open_buttons(console),
                   camera=cam.open_camera(console), run_gate=run_gate,

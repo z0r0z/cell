@@ -1161,17 +1161,24 @@ python calibrate.py touch-capture --label pump_fake      # ×30+   ... etc
 python calibrate.py touch-roc                            # writes touch_thresholds.json
 ```
 
-The panel is your fingertip, nothing on the ring, a static object, a mechanical pulsator, a dyed silicone finger, a moving finger, and out-of-range rates high and low. `touch_gate.TouchThresholds.load()` reads the file the sweep writes — put it beside `touch_gate.py` on the device, or the tier you use every day keeps running on shipped defaults.
+The panel is your fingertip, nothing on the ring, a static object, a mechanical pulsator, a dyed silicone finger, a moving finger, and out-of-range rates high and low. `touch_gate.TouchThresholds.load()` reads the file the sweep writes — put it in the provisioned directory (see below), or the tier you use every day keeps running on shipped defaults.
+
+`touch-capture` asks you twice. The first prompt takes the **empty-bore reference** with nothing on the ring; the second starts the capture. That order is not politeness — the contact gate is `mean(red) / bore_red`, so a reference measured through the finger is a reading of the finger against itself, and both the calibration and the device would then be fitting and judging a number that means nothing. The device follows the same order and shows a "keep the ring clear" screen before it asks for your finger.
 
 `fs`, `fs_min` and `duration_s` are deliberately not swept. They describe the capture rather than the finger, and fitting a validity floor to the very sessions it is meant to validate is circular. For the same reason the beat detector spaces peaks by a fixed physiological ceiling (`PEAK_MAX_BPM`) rather than by `bpm_max`: a number that is both an accept threshold and an analysis parameter gets fitted under one detector and judged under another, which puts FRR at 100%.
 
 **The FRR that `roc` prints is in-sample.** The thresholds were fitted to those same genuine captures, so it is optimistic by construction. The honest number comes from captures taken *after* calibration.
 
-### Then put the file on the device
+### Then put the files on the device
+
+Two files, one per tier. They live in the provisioned directory, beside the seed store, and the device reads each with its own loader:
 
 ```
-firmware/thresholds.json    →   blood_gate.Thresholds.load()
+thresholds.json          →   blood_gate.Thresholds.load()
+touch_thresholds.json    →   touch_gate.TouchThresholds.load()
 ```
+
+**Copy both.** They are not interchangeable and neither is optional: the two dataclasses share exactly one field name, so handing blood's file to the touch loader drops every touch threshold in it and silently substitutes blood's 600-second capture length for touch's 15. `app.run_gate_on_hardware` reads each tier from its own file, and `blood_gate.calibration_hash()` hashes both into the `cal_hash` the attestation carries — so a co-signer sees the numbers behind whichever tier signed.
 
 `Thresholds.load()` reads it, falling back to the shipped defaults if it is absent. **The device build calls `Thresholds.load()`, not `Thresholds()`** — that is what puts the numbers you measured into force. `Thresholds.provenance()` returns one line for the About screen naming the threshold set in use and the confidence bound behind it.
 

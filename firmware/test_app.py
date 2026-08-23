@@ -383,6 +383,127 @@ def main() -> int:
     check("touch thresholds carry the capture parameters the adapter uses",
           hasattr(tth, "duration_s") and hasattr(tth, "fs"))
 
+    # ---- the two tiers read their OWN calibration file -------------------
+    print("\n each tier loads its own thresholds")
+    import json as _json
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+    with _tempfile.TemporaryDirectory() as _td:
+        _d = _Path(_td)
+        # A realistic pair: blood's file carries its 600 s capture length,
+        # touch's carries a swept contact window.
+        (_d / "thresholds.json").write_text(_json.dumps(
+            {"duration_s": 600.0, "sam_cos_min": 0.997}))
+        (_d / "touch_thresholds.json").write_text(_json.dumps(
+            {"duration_s": 15.0, "dc_min": 0.11, "dc_max": 0.77}))
+
+        _bt = blood_gate.Thresholds.load(_d / "thresholds.json")
+        _tt = touch_gate.TouchThresholds.load(_d / "touch_thresholds.json")
+        check("blood loads its own sweep", _bt.sam_cos_min == 0.997)
+        check("touch loads its own sweep",
+              _tt.dc_min == 0.11 and _tt.dc_max == 0.77)
+        check("...and keeps its 15 s session, not blood's 600 s",
+              _tt.duration_s == 15.0)
+
+        # The bug this guards: handing blood's file to the touch loader. The
+        # two dataclasses share exactly one field name, so every touch
+        # threshold in it is dropped and duration_s crosses over -- a
+        # ten-minute finger-hold, evaluated against shipped defaults.
+        _crossed = touch_gate.TouchThresholds.load(_d / "thresholds.json")
+        check("blood's file is NOT a valid source of touch thresholds",
+              _crossed.duration_s != _tt.duration_s
+              and _crossed.dc_min != _tt.dc_min)
+
+        # cal_hash must commit to both, or the tier that signs most often is
+        # the tier the attestation says nothing about.
+        _h_both = blood_gate.calibration_hash(
+            _d / "thresholds.json", _d / "touch_thresholds.json")
+        _h_blood_only = blood_gate.calibration_hash(_d / "thresholds.json")
+        check("the calibration hash covers both threshold sets",
+              _h_both != _h_blood_only and len(_h_both) == 32)
+        (_d / "touch_thresholds.json").write_text(_json.dumps({"dc_min": 0.5}))
+        check("...so a changed touch sweep changes the attested hash",
+              blood_gate.calibration_hash(
+                  _d / "thresholds.json",
+                  _d / "touch_thresholds.json") != _h_both)
+
+    # ---- the empty bore is read BEFORE the finger is on the ring ---------
+    print("\n touch reads the empty bore first")
+
+    class _OrderingSensor(touch_gate.TouchSensor):
+        """Records the order the gate drives it in.
+
+        T1 is mean(red) / bore_red. A bore reference taken after the capture
+        is taken through the finger, the ratio lands near 1, and the contact
+        gate rejects every session -- genuine ones included. Nothing in the
+        synthetic panel catches that, because _synth hands back a constant
+        bore, so the order is asserted directly.
+        """
+
+        def __init__(self):
+            self.calls = []
+
+        def read_ppg(self, duration_s, fs):
+            self.calls.append("ppg")
+            r, i, _b = touch_gate._synth("genuine", 0, tth)
+            return r, i, tth.fs
+
+        def read_bore_reference(self):
+            self.calls.append("bore")
+            return (1.0, 1.0)
+
+    _os = _OrderingSensor()
+    _res = touch_gate.authorize(_os, tth)
+    check("authorize reads the bore before the capture",
+          _os.calls == ["bore", "ppg"])
+    check("...and still accepts a genuine capture", _res.accepted is True)
+
+    # ---- the tier floor prices everything that leaves the wallet ---------
+    print("\n the tier floor prices the whole spend")
+    from policy import Policy as _Policy, Tier as _T2
+    import policy as _policy
+
+    # blood above 0.1 BTC. The attack is a PSBT whose DESTINATION amount sits
+    # under the floor while the value actually leaves via the fee, or via an
+    # output the host labelled change and this wallet cannot derive.
+    _pol = _Policy(blood_above=10_000_000)
+
+    _honest = ops.BitcoinSpend(amount_sats=1_000, destination="bc1qx",
+                               fee_sats=200)
+    check("a small honest spend still runs at touch tier",
+          _policy.decide(_pol, _honest.op_class(),
+                         _honest.amount_for_policy()).tier_to_run is _T2.TOUCH)
+
+    _fee_attack = ops.BitcoinSpend(amount_sats=1, destination="bc1qx",
+                                   fee_sats=50_000_000)
+    check("value routed through the fee escalates to blood",
+          _policy.decide(_pol, _fee_attack.op_class(),
+                         _fee_attack.amount_for_policy()).tier_to_run is _T2.BLOOD)
+
+    _change_attack = ops.BitcoinSpend(
+        amount_sats=1, destination="bc1qx", fee_sats=200,
+        change_sats=50_000_000, change_address="bc1qattacker",
+        change_is_ours=False)
+    check("value routed through an underivable 'change' output escalates",
+          _policy.decide(_pol, _change_attack.op_class(),
+                         _change_attack.amount_for_policy()).tier_to_run
+          is _T2.BLOOD)
+
+    _real_change = ops.BitcoinSpend(
+        amount_sats=1_000, destination="bc1qx", fee_sats=200,
+        change_sats=50_000_000, change_address="bc1qours", change_is_ours=True)
+    check("change the wallet DID derive does not escalate — it comes back",
+          _policy.decide(_pol, _real_change.op_class(),
+                         _real_change.amount_for_policy()).tier_to_run
+          is _T2.TOUCH)
+
+    _eth = ops.EthereumSpend(amount_wei=1, destination="0xabc", chain_id=1,
+                             chain_name="Ethereum", nonce=0,
+                             max_fee_wei=50_000_000, ticker="ETH")
+    check("an Ethereum fee cap is priced too, as the screen's MOST line is",
+          _policy.decide(_pol, _eth.op_class(),
+                         _eth.amount_for_policy()).tier_to_run is _T2.BLOOD)
+
     # ---- every screen fits the panel ------------------------------------
     print("\n every screen fits")
     over = []

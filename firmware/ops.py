@@ -158,7 +158,32 @@ class BitcoinSpend:
         return "tx.send"
 
     def amount_for_policy(self) -> int:
-        return self.amount_sats
+        """Everything this signature moves out of the owner's control.
+
+        Not just `amount_sats`. The tier floor asks "how much is at risk here",
+        and three things leave the wallet:
+
+          the amount    to the destination
+          the fee       to a miner, and a fee is a payment like any other
+          the change    ONLY when the wallet could not derive it -- an output
+                        the host labelled as change and this device cannot
+                        prove it owns is, as far as the owner is concerned,
+                        a second recipient
+
+        Pricing the destination alone is a tier downgrade a host can reach for
+        deliberately: a PSBT paying 1 sat to a real address, with the balance
+        carried in the fee or in an underivable "change" output, has an
+        `amount_sats` under any blood floor and would have signed at touch
+        tier. Both of those already get their own line on the confirmation
+        screen -- and EthereumSpend already renders exactly this total as
+        MOST -- so this makes the policy price what the owner is shown.
+
+        Change the wallet DID derive is excluded: it comes straight back.
+        """
+        at_risk = self.amount_sats + self.fee_sats
+        if not self.change_is_ours:
+            at_risk += self.change_sats
+        return at_risk
 
     def render(self) -> list[str]:
         if not self.destination:
@@ -297,7 +322,14 @@ class EthereumSpend:
         return "tx.send"
 
     def amount_for_policy(self) -> int:
-        return self.amount_wei
+        """The worst case, which is what the screen already calls MOST.
+
+        gas_limit x max_fee_per_gas is spent whatever happens to the call, so
+        a transfer of 1 wei with a ten-ether fee cap moves ten ether. Pricing
+        `amount_wei` alone let that sign at touch tier while the device
+        displayed the true total three lines further down.
+        """
+        return self.amount_wei + self.max_fee_wei
 
     def render(self) -> list[str]:
         if not self.destination:

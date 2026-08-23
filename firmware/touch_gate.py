@@ -297,9 +297,16 @@ def evaluate(red: np.ndarray, ir: np.ndarray, bore: tuple[float, float],
 
 def authorize(sensor: TouchSensor,
               th: TouchThresholds = TouchThresholds()) -> TouchResult:
-    """Top-level entry point for touch mode."""
+    """Top-level entry point for touch mode.
+
+    The empty-bore reference is read BEFORE the capture, while the ring is
+    still clear. T1 is `mean(red) / bore_red`, so a bore reference taken
+    afterwards is taken through the finger: the ratio lands near 1 and the
+    contact gate rejects every session, genuine ones included.
+    """
+    bore = sensor.read_bore_reference()
     red, ir, fs = sensor.read_ppg(th.duration_s, th.fs)
-    return evaluate(red, ir, sensor.read_bore_reference(), th, fs)
+    return evaluate(red, ir, bore, th, fs)
 
 
 # --------------------------------------------------------------------------

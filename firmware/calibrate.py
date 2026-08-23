@@ -483,8 +483,10 @@ def cmd_roc(args):
     })
     Path("thresholds.json").write_text(json.dumps(out, indent=2, sort_keys=True))
     print("\nwrote thresholds.json")
-    print("  blood_gate.Thresholds.load() reads it. Put it beside blood_gate.py")
-    print("  on the device, or the device keeps signing on shipped defaults.")
+    print("  blood_gate.Thresholds.load() reads it. Copy it into the device's")
+    print("  provisioned directory, or the blood tier keeps signing on")
+    print("  shipped defaults. touch_thresholds.json is a SEPARATE file and")
+    print("  the device reads each tier from its own -- copy both.")
     return 0
 
 
@@ -571,12 +573,19 @@ def cmd_touch_capture(args):
         # takes that head rather than opening the I2C bus a second time.
         from hardware import RealSensorHead, RealTouchSensor
         print(f"[{args.label}] {TOUCH_PANEL[args.label]}")
-        input(f"Press Enter, then hold still for {th.duration_s:.0f} s...")
         sensor = RealTouchSensor(RealSensorHead())
+        # The empty bore FIRST, with nothing on the ring. T1 divides the
+        # capture's DC level by this, so a reference read through the finger
+        # makes the ratio meaningless -- and calibrating dc_min/dc_max from
+        # such captures fits the contact gate to a measurement that never
+        # happens in the field.
+        input("Ring CLEAR, nothing touching it. Press Enter...")
+        bore = sensor.read_bore_reference()
+        input(f"Now place the sample and hold still for {th.duration_s:.0f} s. "
+              f"Press Enter...")
         # fs is a TARGET; the sensor reports what it achieved and that is what
         # gets stored, because every frequency-derived feature scales with it.
         red, ir, fs = sensor.read_ppg(th.duration_s, th.fs)
-        bore = sensor.read_bore_reference()
     n = len(list(TOUCH_DATA.glob(f"{args.label}_*.npz")))
     path = TOUCH_DATA / f"{args.label}_{n:04d}.npz"
     save_touch(path, red, ir, bore, args.label, fs,
@@ -666,9 +675,12 @@ def cmd_touch_roc(args):
     })
     Path("touch_thresholds.json").write_text(json.dumps(out, indent=2, sort_keys=True))
     print("\nwrote touch_thresholds.json")
-    print("  touch_gate.TouchThresholds.load() reads it. Put it beside")
-    print("  touch_gate.py on the device, or the touch tier keeps signing on")
-    print("  shipped defaults — and the touch tier is the everyday one.")
+    print("  touch_gate.TouchThresholds.load() reads it. Copy it into the")
+    print("  device's provisioned directory, under this exact name -- the")
+    print("  device reads the touch tier from touch_thresholds.json and the")
+    print("  blood tier from thresholds.json, and they are not interchangeable.")
+    print("  Without it the touch tier keeps signing on shipped defaults, and")
+    print("  the touch tier is the everyday one.")
     return 0
 
 

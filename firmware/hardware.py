@@ -358,12 +358,28 @@ class RealTouchSensor(TouchSensor):
 
     def read_bore_reference(self) -> tuple[float, float]:
         """Empty bore, LEDs on. Establishes the no-finger level so the contact
-        gate can tell a fingertip from an open port. Capture at provisioning
-        and store it; re-measuring with a finger present defeats the point."""
-        with self.h._exclusive(white=True):
-            r = float(self.h.spec.channel_630nm)
-        with self.h._exclusive(ir=True):
-            n = float(self.h.spec.channel_nir)
+        gate can tell a fingertip from an open port.
+
+        Call it with NOTHING on the ring, and before read_ppg rather than
+        after. T1 is `mean(red) / bore_red`; a reference measured through the
+        finger is a reading of the finger against itself.
+
+        Taken at the PPG integration time, not the chemistry one. The head
+        idles at ATIME_CHEM (281 ms per channel) and read_ppg switches to
+        ATIME_PPG (2.8 ms) for the duration of the capture. Counts scale with
+        integration time, so a reference read at the chemistry setting is
+        ~100x the level of the samples it is the denominator for, and T1
+        rejects every genuine session as "no finger".
+        """
+        prev = (self.h.spec.atime, self.h.spec.astep)
+        self.h._set_integration(ATIME_PPG, ASTEP_PPG)
+        try:
+            with self.h._exclusive(white=True, settle_s=SETTLE_PPG_S):
+                r = float(self.h.spec.channel_630nm)
+            with self.h._exclusive(ir=True, settle_s=SETTLE_PPG_S):
+                n = float(self.h.spec.channel_nir)
+        finally:
+            self.h._set_integration(*prev)
         return r, n
 
 
