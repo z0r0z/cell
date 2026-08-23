@@ -750,6 +750,7 @@ settles something no amount of testing on a laptop can:
 tools/bench.py display                      # is the panel's origin the driver's?
 tools/bench.py buttons                      # do your switches settle in 30 ms?
 tools/bench.py atecc --i-can-wipe-this-chip # does the PIN counter actually gate the key?
+tools/bench.py thermal --load 4             # what a sealed case does over a 10 min run
 ```
 
 The ATECC608B check wipes the chip, which is the point: a counter that

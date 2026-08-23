@@ -11,6 +11,7 @@ the parts in front of you.
     tools/bench.py atecc     the gate chip's PIN counter, tested by behaviour
     tools/bench.py buttons   how long your switches actually bounce
     tools/bench.py display   whether the panel's origin matches the driver's
+    tools/bench.py thermal   what a sealed case does to the SoC over a run
 
 VALIDATION.md lists these as open. This is how they close.
 
@@ -256,6 +257,144 @@ def cmd_display(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# The sealed case
+# --------------------------------------------------------------------------
+
+# Where the SoC reports its own temperature. Present on every Pi OS image and
+# readable without vcgencmd, which the read-only rootfs may not carry.
+THERMAL_ZONE = Path("/sys/class/thermal/thermal_zone0/temp")
+
+# The Pi caps the ARM clock at 80 C. Below that nothing is wrong; above it a
+# blood run gets slower rather than incorrect, but a capture that misses its
+# frame rate is a T0 fault (see touch_gate) and reads as a sensor problem.
+THROTTLE_C = 80.0
+# PETG softens from about 80 C, and the shells carry screw preload through six
+# heat-set inserts. 70 C leaves headroom for a hot room on top of a hot run.
+CREEP_MARGIN_C = 70.0
+
+
+def _soc_temp_c() -> float | None:
+    try:
+        return int(THERMAL_ZONE.read_text().strip()) / 1000.0
+    except (OSError, ValueError):
+        return None
+
+
+def _throttled_flags() -> int | None:
+    """vcgencmd get_throttled, as an int. None if vcgencmd is unavailable."""
+    import subprocess
+    try:
+        out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    _, _, value = out.partition("=")
+    try:
+        return int(value, 0)
+    except ValueError:
+        return None
+
+
+def cmd_thermal(args) -> int:
+    """Watch the SoC temperature and the supply through a full-length run.
+
+    The enclosure has no ventilation and cannot be given any: section 10
+    requires the fifteen vents to stay blind pockets, because a through-hole
+    lets ambient light into the optical chamber and the 415 nm gate stops
+    working. So the Pi sits in a sealed PETG box, and nothing in the design
+    has ever measured what that does over the ten minutes a blood capture
+    takes.
+
+    A rough energy balance says it is fine -- about 3 W across 0.0275 m2 of
+    shell gives a 12-14 C rise, so a 25 C room puts the SoC near 55-60 C,
+    clear of the 80 C cap. That is an estimate with no measurement behind it,
+    and the case it does not cover is a device left somewhere hot: 45 C
+    ambient starts the same run 20 C higher.
+
+    This also reads the under-voltage flags, which answer a separate question
+    the bill of materials raises. Section 11 budgets 5 V at 2 A because the
+    Zero 2 W peaks near 0.5 A and a blood run has the webcam, the laser and
+    the LEDs drawing at once. An undersized supply shows up here as bit 0 or
+    bit 16, and nowhere else until something behaves strangely.
+
+    Run it with the case CLOSED and the shells screwed down. An open case
+    measures a different instrument.
+    """
+    start = _soc_temp_c()
+    if start is None:
+        print(f"cannot read {THERMAL_ZONE} -- this check only runs on the Pi")
+        return 1
+
+    seconds = args.minutes * 60
+    print(f"Sealed-case thermal — {args.minutes:g} minutes, "
+          f"the length of a blood capture\n")
+    print("  Run this with the case CLOSED and screwed down.")
+    if args.load:
+        print(f"  Loading {args.load} core(s) to stand in for a capture.")
+    else:
+        print("  No synthetic load: start a real capture now, or pass --load 4")
+        print("  for the worst case the device can actually reach.")
+    print(f"\n  start {start:.1f} C\n")
+
+    workers = []
+    if args.load:
+        import multiprocessing
+
+        def _spin():
+            while True:
+                pass
+        for _ in range(args.load):
+            p = multiprocessing.Process(target=_spin, daemon=True)
+            p.start()
+            workers.append(p)
+
+    peak = start
+    try:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            time.sleep(min(10.0, max(0.0, deadline - time.monotonic())))
+            t = _soc_temp_c()
+            if t is None:
+                continue
+            peak = max(peak, t)
+            left = max(0.0, deadline - time.monotonic())
+            print(f"    {t:5.1f} C   peak {peak:5.1f} C   {left / 60:4.1f} min left")
+    except KeyboardInterrupt:
+        print("\n  interrupted -- reporting what was measured so far")
+    finally:
+        for p in workers:
+            p.terminate()
+
+    print()
+    check("SoC stays below the 80 C throttle point", peak < THROTTLE_C,
+          f"peak {peak:.1f} C, rose {peak - start:.1f} C from {start:.1f} C")
+    check(f"peak leaves PETG margin (under {CREEP_MARGIN_C:.0f} C)",
+          peak < CREEP_MARGIN_C,
+          "the shells hold screw preload through heat-set inserts; PETG "
+          "softens from about 80 C")
+
+    flags = _throttled_flags()
+    if flags is None:
+        print("\n  vcgencmd unavailable -- supply flags not read")
+    else:
+        # Bits 0-3 are live, 16-19 latch since boot. The latched ones are the
+        # useful half: a sag during the run is still visible afterwards.
+        check("no under-voltage since boot", not (flags & (1 << 16)),
+              f"get_throttled={flags:#x}")
+        check("ARM clock never capped since boot", not (flags & (1 << 17)),
+              f"get_throttled={flags:#x}")
+        if flags & ((1 << 16) | (1 << 0)):
+            print("\n  Under-voltage is the supply, not the heat. Section 11 wants")
+            print("  5 V at 2 A, and a USB-C breakout with no CC pulldowns or a")
+            print("  thin cable will sag under the webcam and the laser together.")
+
+    if peak >= CREEP_MARGIN_C:
+        print("\n  The vents cannot be opened -- see section 10, constraint 1.")
+        print("  What can change: a heatsink on the SoC, or moving the Pi bay")
+        print("  wall thinner so the shell conducts. Measure again after.")
+    return 0 if all(ok for _, ok, _ in RESULTS) else 1
+
+# --------------------------------------------------------------------------
 
 
 def main() -> int:
@@ -277,6 +416,13 @@ def main() -> int:
     p.add_argument("--y-offset", type=int, default=0)
     p.add_argument("--console", action="store_true")
     p.set_defaults(fn=cmd_display)
+
+    p = sub.add_parser("thermal", help="SoC temperature in the sealed case")
+    p.add_argument("--minutes", type=float, default=10.0,
+                   help="default 10, the length of a blood capture")
+    p.add_argument("--load", type=int, default=0,
+                   help="busy this many cores to stand in for a capture")
+    p.set_defaults(fn=cmd_thermal)
 
     args = ap.parse_args()
     rc = args.fn(args)

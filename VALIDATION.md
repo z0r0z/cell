@@ -201,14 +201,16 @@ because our parser treats the key as an opaque blob and never looks inside.
 
 ## Bench checks
 
-Three of the open items below are answerable in about a minute each with the
-parts in front of you. `tools/bench.py` asks them:
+Four of the open items below are answerable with the parts in front of you —
+three in about a minute each, the fourth in the ten minutes a blood capture
+takes. `tools/bench.py` asks them:
 
 | Command | Settles |
 |---|---|
 | `bench.py atecc --i-can-wipe-this-chip` | Whether the wrapping key can be derived without spending a PIN attempt, whether one PIN authorises exactly one derive, and whether ten wrong PINs wipe. **Wipes the chip** — run it before provisioning |
 | `bench.py buttons` | How long your switches actually ring, against the 30 ms the firmware debounces at |
 | `bench.py display --x-offset N --y-offset N` | Whether the panel's first pixel is the one the driver addresses, by drawing a frame at all four extremes |
+| `bench.py thermal --load 4` | What a sealed, unventilated case does to the SoC over a full-length run, and whether the supply sags while it happens. **Case closed and screwed down** — an open case measures a different instrument |
 
 The ATECC608B check tests behaviour rather than reading the config zone back.
 The guarantee that matters is "no derive without a spent attempt", which is
@@ -229,6 +231,8 @@ misbehave and watching it refuse tests the property itself.
 | cryptoauthlib call signatures | Every call the driver makes, introspected against the installed binding | All match. **Found one real defect**: `atcab_write_enc` takes six parameters and the fake declared five, which is the same arity class as the original `atcab_checkmac` bug |
 | **The duress PIN, on real hardware** | Now present in the driver and in the device: slot 4 holds the second PIN key, slot 5 the decoy's wrapping secret, and `wallet.provision` records both wallets. Unverified in the sense everything on this chip is unverified — nobody has run it on silicon | `atecc_config.py verify --behaviour`, then provision with `--duress-pin` and spend from the decoy |
 | `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
+| **The sealed case, thermally** | The enclosure has no ventilation and cannot be given any: §10 constraint 1 requires the fifteen vents to stay blind pockets, because a through-hole lets ambient light into the optical chamber and Gate 1 stops working. A rough energy balance is reassuring — ~3 W across 0.0275 m² of shell is a 12–14 °C rise, so a 25 °C room puts the SoC near 55–60 °C against an 80 °C cap — but that is an estimate, and it does not cover a device left somewhere hot. PETG also carries the screw preload through six heat-set inserts and softens from about 80 °C | `bench.py thermal --load 4`, case closed |
+| **The supply, under a real load** | §11 budgets 5 V at 2 A because the Zero 2 W peaks near 0.5 A and a blood run has the webcam, laser and LEDs drawing together. A supply or cable that sags does not announce itself; it shows up as under-voltage flags and, eventually, as behaviour nobody can reproduce | The same run — `bench.py thermal` reads `get_throttled` |
 | `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |
 | Attestation key custody | The ATECC608B signs NIST P-256 only, so the secp256k1 attestation scalar is derived from a chip secret and exists in RAM while signing, rather than never leaving the chip | Stated in `se_atecc.py`; switch `attest.py` to P-256 if you need the stronger property |
 
