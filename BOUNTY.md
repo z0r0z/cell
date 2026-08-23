@@ -48,8 +48,9 @@ Two things worth knowing before you start:
 
 - `firmware/hardware.py` has never touched hardware. Treat it as a wiring
   diagram in Python; it has a bring-up checklist.
-- Run `atecc_config.py verify --behaviour` **before** `lock-data`. Locking the
-  chip is permanent.
+- Locking the chip is permanent. `lock-data` refuses a chip that fails its own
+  policy or does not enforce it, so the tool covers you — but run
+  `atecc_config.py verify --behaviour` first and read it anyway.
 
 `VALIDATION.md` tracks what's been verified and what's waiting on a first
 build. You're the one who moves rows from the second list to the first.

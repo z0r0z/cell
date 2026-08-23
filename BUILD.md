@@ -1021,7 +1021,7 @@ python3 tools/atecc_config.py lock-data --permanent
 
 The secrets go in between the two locks, because data slots stay writable until the *data* zone locks and the slot policy only takes effect once the *config* zone has.
 
-`verify --behaviour` is the step that matters and the only one that proves anything. Reading the config zone back tells you the bytes are there; it does not tell you the chip enforces them. So it asks the chip to misbehave — read a secret slot, derive with no CheckMac, write a baseline in the clear — and every one must be refused. Do that before `lock-data`, while a wrong answer is still recoverable.
+`verify --behaviour` is the step that matters and the only one that proves anything. Reading the config zone back tells you the bytes are there; it does not tell you the chip enforces them. So it asks the chip to misbehave — read a secret slot, derive with no CheckMac, write a baseline in the clear — and every one must be refused. Run it yourself and read the output, while a wrong answer is still recoverable. `lock-data` also runs it and refuses a chip that fails, so the last irreversible step does not depend on you having remembered; `--skip-behaviour` overrides that if you know why a particular chip answers differently.
 
 **Two things about `atecc_config.py` you should know before trusting it.** It never invents a byte it does not understand: it reads your chip's own config, replaces only the SlotConfig and KeyConfig entries, and passes the serial number, both counters and every reserved field through untouched. And the bit positions in it were *transcribed from the datasheet* — but they are no longer only that.
 

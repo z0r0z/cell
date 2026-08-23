@@ -23,11 +23,14 @@ is a field this file leaves alone.
     atecc_config.py verify               does the chip match the policy
     atecc_config.py selfcheck            offline; what CI runs
     atecc_config.py lock-config          PERMANENT
-    atecc_config.py lock-data            PERMANENT
+    atecc_config.py lock-data            PERMANENT, runs the behaviour probe first
 
 The order is the procedure. `write` refuses to run unless `plan` has been shown
 and the operator passes --i-have-read-the-plan, and both lock commands refuse
-without --permanent, because both are.
+without --permanent, because both are. Both also refuse a chip that fails the
+policy, and lock-data runs the behaviour probe first and refuses a chip that
+does not enforce it -- the last irreversible step should not be the one that
+takes the operator's word for it.
 
 WHAT IS TRANSCRIBED AND WHAT IS CHECKED. The bit positions below come from the
 ATECC608B datasheet, section "Configuration Zone". They are transcribed, which
@@ -677,8 +680,11 @@ def cmd_write(args) -> int:
     print("Nothing is permanent yet. Next, in this order:")
     print("  1. atecc_config.py lock-config --permanent")
     print("  2. tools/provision.py ...            (writes the slot secrets)")
-    print("  3. atecc_config.py verify --behaviour")
+    print("  3. atecc_config.py verify --behaviour   (read it)")
     print("  4. atecc_config.py lock-data --permanent")
+    print("\nStep 4 runs the behaviour probe itself and refuses if the chip")
+    print("answers something its config forbids, so step 3 is for you to read")
+    print("rather than for the tool to depend on you having done.")
     print("\nThe slot secrets are written between the two locks because data")
     print("slots are writable until the DATA zone locks, and the slot policy")
     print("only takes effect once the CONFIG zone has.")
@@ -766,11 +772,32 @@ def cmd_lock(args, zone: str) -> int:
     cal = _chip(bus=args.bus, address=args.address)
     cfg = read_config(cal)
     _, ok = render_invariants(cfg)
-    if zone == "config" and not ok:
+    # Both zones, not just the config one. Locking data is the step that makes
+    # the secret slots unreadable, so a chip whose policy is wrong is a chip
+    # whose policy is wrong forever the moment this succeeds. The check used to
+    # run only for the config zone, which left the more final of the two
+    # commands as the less guarded one.
+    if not ok:
         print("This chip does not satisfy the CELL policy. Locking it now "
               "would\nmake that permanent. Refusing.\n")
         print(render_invariants(cfg)[0])
         return 1
+
+    # The behaviour probe, before the last irreversible step rather than in a
+    # sentence asking the operator to have run it. Decoding the config zone is
+    # a claim about a datasheet; watching the chip refuse a read is a claim
+    # about the chip, and only the second one is worth locking on.
+    if zone == "data" and not args.skip_behaviour:
+        print(" behaviour -- asking the chip to misbehave\n")
+        if not _behaviour(cal, cfg):
+            print("\nThe chip did not refuse something its config forbids. "
+                  "Locking the\ndata zone now would make that permanent. "
+                  "Refusing.\n")
+            print("If you know why this chip answers differently and mean to "
+                  "lock it\nanyway, pass --skip-behaviour.")
+            return 1
+        print()
+
     fn = (cal.atcab_lock_config_zone if zone == "config"
           else cal.atcab_lock_data_zone)
     if fn() != cal.Status.ATCA_SUCCESS:
@@ -921,6 +948,43 @@ def selfcheck(verbose: bool = False) -> bool:
     conf = cryptoauthlib_conformance()
     rows.extend(conf)
 
+    # The lock guard, on both zones. It covered only the config zone for a
+    # while, which left lock-data -- the more final of the two -- as the less
+    # guarded one. Driven against a stub chip and a config that fails the
+    # policy, because the interesting answer is the refusal.
+    class _StubChip:
+        class Status:
+            ATCA_SUCCESS = 0
+
+        def __init__(self):
+            self.locked = []
+
+        def atcab_lock_config_zone(self):
+            self.locked.append("config")
+            return 0
+
+        def atcab_lock_data_zone(self):
+            self.locked.append("data")
+            return 0
+
+    class _Args:
+        permanent = True
+        skip_behaviour = True
+        bus = address = None
+
+    bad = bytearray(image)
+    bad[OFF_SLOT_CONFIG] ^= 0xFF        # break slot 0's policy
+    stub = _StubChip()
+    saved_chip, saved_read = globals()["_chip"], globals()["read_config"]
+    globals()["_chip"] = lambda **kw: stub
+    globals()["read_config"] = lambda _cal: bytes(bad)
+    try:
+        refused = all(cmd_lock(_Args(), z) == 1 for z in ("config", "data"))
+    finally:
+        globals()["_chip"], globals()["read_config"] = saved_chip, saved_read
+    check("both lock commands refuse a chip that fails the policy",
+          refused and not stub.locked)
+
     if verbose:
         print("ATECC608B config zone — what is provable without a chip\n")
         for label, good in rows:
@@ -1039,6 +1103,9 @@ def main() -> int:
         lk = sub.add_parser(name, help=f"PERMANENT: lock the "
                                        f"{name.split('-')[1]} zone")
         lk.add_argument("--permanent", action="store_true")
+        lk.add_argument("--skip-behaviour", action="store_true",
+                        help="lock-data only: lock without first watching the "
+                             "chip refuse what its config forbids")
 
     sub.add_parser("selfcheck", help="everything provable without a chip")
 
