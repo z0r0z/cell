@@ -267,7 +267,12 @@ class Transaction:
         sha_outputs = hashlib.sha256(
             b"".join(o.serialize() for o in self.vout)).digest()
 
-        spend_type = 0x02 if annex is not None else 0x00
+        # BIP-341: spend_type = (ext_flag * 2) + annex_present. ext_flag is 0
+        # for a key-path spend, so an annex makes this 1, not 2. A 2 claims
+        # ext_flag=1 -- a tapscript spend, which also has to append a
+        # tapleaf_hash -- so it produces a digest for a different spend shape
+        # entirely and therefore a signature that does not verify.
+        spend_type = 0x01 if annex is not None else 0x00
         msg = (b"\x00"                                  # sighash epoch
                + bytes([hashtype])
                + self.version.to_bytes(4, "little")
@@ -384,6 +389,32 @@ def _selftest() -> int:
         checks.append(("taproot demands all amounts", False))
     except BadTransaction:
         checks.append(("taproot demands all amounts", True))
+
+    # BIP-341 spend_type = (ext_flag * 2) + annex_present. A key-path spend has
+    # ext_flag 0, so an annex makes it 1. This was 2 -- the tapscript value,
+    # which also requires a tapleaf_hash the message does not carry -- so the
+    # digest described a different spend shape and the signature would not have
+    # verified. Rebuilt here independently rather than compared to itself.
+    ann = b"\x50\xde\xad\xbe\xef"
+    amts, spks = [100, 200], [b"\x51\x20" + b"\x11" * 32] * 2
+    want = tagged("TapSighash",
+                  b"\x00" + bytes([SIGHASH_DEFAULT])
+                  + t.version.to_bytes(4, "little")
+                  + t.locktime.to_bytes(4, "little")
+                  + hashlib.sha256(b"".join(i.outpoint() for i in t.vin)).digest()
+                  + hashlib.sha256(b"".join(a.to_bytes(8, "little") for a in amts)).digest()
+                  + hashlib.sha256(b"".join(ser_compact(len(x)) + x for x in spks)).digest()
+                  + hashlib.sha256(b"".join(i.sequence.to_bytes(4, "little")
+                                            for i in t.vin)).digest()
+                  + hashlib.sha256(b"".join(o.serialize() for o in t.vout)).digest()
+                  + bytes([0x01])                       # ext_flag 0, annex present
+                  + (0).to_bytes(4, "little")
+                  + hashlib.sha256(ser_compact(len(ann)) + ann).digest())
+    checks.append(("BIP-341 annex sets spend_type 1, not 2",
+                   t.sighash_taproot(0, amts, spks, annex=ann) == want))
+    checks.append(("the annex changes the digest",
+                   t.sighash_taproot(0, amts, spks, annex=ann)
+                   != t.sighash_taproot(0, amts, spks)))
 
     # And the taproot digest must actually depend on the other input's amount.
     a = t.sighash_taproot(0, [100, 200], [b"\x51\x20" + b"\x11" * 32] * 2)
