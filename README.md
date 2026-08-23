@@ -14,7 +14,7 @@ Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, $
 python3 -m http.server -d viewer 8000     # then open localhost:8000/instrument.html
 ```
 
-Orbit it, and export OBJ or glTF straight from the viewer. The turntable above is rendered from that same model by `tools/render_turntable.py`, so it cannot show something the geometry does not. `models/README.md` documents the pipeline and the coordinate convention.
+Orbit it, and export OBJ or glTF straight from the viewer. `diagrams/turntable.mp4` is the same render as h.264, which holds more detail on a dark subject than the GIF does. The turntable above is rendered from that same model by `tools/render_turntable.py`, so it cannot show something the geometry does not. `models/README.md` documents the pipeline and the coordinate convention.
 
 ## Status
 
