@@ -663,11 +663,15 @@ do not raise the shared bus and hope.
 1. **Both I²C breakouts ship with pull-ups fitted.** Remove one pair (2.2 kΩ) or the bus may not enumerate. This is the #1 first-build failure.
 2. **CONFIRM is on its own pin for a reason.** An attacker who owns the SPI bus still can't assert it.
 
-3. **The two LED rails are not the same rail.** 68 Ω suits a white LED (Vf ≈ 3.1 V)
-   on +5 V, giving ~28 mA; on +3V3 the same resistor yields ~3 mA and the LED barely
-   lights. 47 Ω suits the 940 nm LED (Vf ≈ 1.35 V) on +3V3, giving ~41 mA; on +5 V it
-   passes ~78 mA and cooks a 5 mm part. The MOSFETs switch the low side either way,
-   so 3V3 gate drive is fine for both.
+3. **The two LED rails are not the same rail** — and this is derived from the
+   resistor values rather than stated anywhere, so check it against the parts you
+   actually bought. 68 Ω suits a white LED (Vf ≈ 3.1 V) on +5 V, giving ~28 mA; on
+   +3V3 the same resistor yields ~3 mA and the LED barely lights. 47 Ω suits the
+   940 nm LED (Vf ≈ 1.35 V) on +3V3, giving ~41 mA; on +5 V it passes ~78 mA and
+   cooks a 5 mm part. Only one assignment makes both values sensible, which is why
+   the table reads the way it does. The rule, if your LEDs differ: size R for
+   ~20–30 mA at your Vf, then pick the rail that value implies. The MOSFETs switch
+   the low side either way, so 3V3 gate drive is fine for both.
 
 4. **A USB-C breakout with no CC pulldowns delivers nothing.** A compliant source
    reads the absent 5.1 kΩ on CC1/CC2 as "nothing plugged in" and never turns on.

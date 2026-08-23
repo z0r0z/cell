@@ -307,9 +307,14 @@ def cmd_thermal(args) -> int:
 
     A rough energy balance says it is fine -- about 3 W across 0.0275 m2 of
     shell gives a 12-14 C rise, so a 25 C room puts the SoC near 55-60 C,
-    clear of the 80 C cap. That is an estimate with no measurement behind it,
-    and the case it does not cover is a device left somewhere hot: 45 C
-    ambient starts the same run 20 C higher.
+    clear of the 80 C cap. Do not lean on that figure. It lumps convection and
+    radiation into a single coefficient and ignores the air gap between die
+    and shell, so the junction can sit above it, and it is arithmetic with no
+    measurement behind it. The case it does not cover at all is a device left
+    somewhere hot: 45 C ambient starts the same run 20 C higher.
+
+    Which is the point of this command. If the estimate were trustworthy there
+    would be nothing to run.
 
     This also reads the under-voltage flags, which answer a separate question
     the bill of materials raises. Section 11 budgets 5 V at 2 A because the
