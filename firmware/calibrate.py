@@ -690,7 +690,13 @@ def cmd_puf_capture(args):
     PUF_DIR.mkdir(parents=True, exist_ok=True)
     if args.synthetic:
         rng = np.random.default_rng(args.seed)
-        size = 512
+        # Matches hardware.PUF_ROI. Imported lazily rather than hard-coded so
+        # a change to the real capture cannot leave the rehearsal describing a
+        # different instrument.
+        try:
+            from hardware import PUF_ROI as size
+        except Exception:                                       # noqa: BLE001
+            size = 768
         e = rng.normal(size=(size, size)) + 1j * rng.normal(size=(size, size))
         fy, fx = np.fft.fftfreq(size)[:, None], np.fft.fftfreq(size)[None, :]
         e = np.fft.ifft2(np.fft.fft2(e)

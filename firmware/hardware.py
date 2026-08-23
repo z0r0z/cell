@@ -46,10 +46,11 @@ SPECKLE_ROI = 128   # px, square
 SPECKLE_FRAMES = 16
 # The chamber PUF reads a wider field than the blood path does. Blood needs
 # only enough grains to average a correlation over; the PUF spends grains on
-# key material and on the margin filter that discards the unreliable ones, so
-# it wants roughly four times the linear size. Same sensor, same optics, a
-# larger crop -- see read_chamber_burst.
-PUF_ROI = 512
+# key material, on the margin filter that discards the unreliable ones, and on
+# a rule that no two key bits come from touching grains -- adjacent grains
+# share the tail of one speckle lobe. Same sensor, same optics, a larger crop
+# -- see read_chamber_burst.
+PUF_ROI = 768
 PUF_FRAMES = 16
 SPECKLE_EXPOSURE_US = 2000   # <=2 ms so each frame samples the field, not a time-average
 

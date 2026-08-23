@@ -47,7 +47,7 @@ def _field(shape, grain_px, rng):
 class Chamber:
     """One epoxied diffuser. Its field is its identity."""
 
-    def __init__(self, size=512, grain_px=4, rng=RNG):
+    def __init__(self, size=768, grain_px=4, rng=RNG):
         self.size, self.grain_px, self.rng = size, grain_px, rng
         self.E = _field((size, size), grain_px, rng)
 
@@ -138,7 +138,7 @@ def _checks():
         enrolled = True
     except puf.PufError:
         helper, key, enrolled = None, None, False
-    checks.append(("enrols from a 512px ROI", enrolled))
+    checks.append(("enrols from a 768px ROI", enrolled))
 
     if enrolled:
         checks.append(("key is 256 bits", len(key) == 32))
@@ -229,6 +229,35 @@ def _checks():
                    for r in range(lo, hi) for c in range(lo, hi)}
         checks.append(("no key bit comes from the published fiducial",
                        not (set(helper.mask.tolist()) & fid_idx)))
+
+        # ---- what the published helper is allowed to cost ----------------
+        # The helper discloses at most n-k bits. That is only affordable if
+        # the bits it protects are worth close to one bit each, and the margin
+        # filter is exactly the thing that could quietly stop them being.
+        def _H(p):
+            p = min(max(p, 1e-12), 1 - 1e-12)
+            return -(p * np.log2(p) + (1 - p) * np.log2(1 - p))
+
+        bits0, _ = puf.bits_from_image(enrol[0])
+        chosen = bits0[helper.mask]
+        bias = float(chosen.mean())
+        checks.append((f"selected bits are not biased (got {bias:.3f})",
+                       0.40 < bias < 0.60))
+
+        # Raw intensity is exponential, so an untransformed margin selects the
+        # bright tail and the bits come out ~80% ones. The quantile transform
+        # is what stops that, and this is the check that notices if it goes.
+        gw = ch.size // ch.grain_px
+        chosen_set = set(int(i) for i in helper.mask)
+        touching = sum(1 for i in chosen_set
+                       if (i + 1) in chosen_set and (i + 1) % gw != 0)
+        checks.append((f"no two key bits are adjacent grains ({touching})",
+                       touching == 0))
+
+        code = puf.BCH(m, t)
+        residual = code.n * _H(bias) - (code.n - code.k)
+        checks.append((f"residual entropy clears a 256-bit key "
+                       f"({residual:.0f} bits)", residual > 512))
 
         # The helper is public, so it must not carry the key.
         h2, k2 = puf.enroll(enrol, m=m, t=t, rng=np.random.default_rng(5))

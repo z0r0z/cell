@@ -57,6 +57,17 @@ agreed every time, discard the rest. The mask is public and names positions,
 not values. It converts a soft problem into an easy one, and it is what makes
 the code parameters here comfortable rather than marginal.
 
+AND THE MASK IS WHERE THE ENTROPY GOES, IF NOTHING WATCHES IT. Selecting the
+most reliable bits is selecting on the measurement, so it can select on the
+value too. Speckle intensity is exponential: the bright tail is long, the dark
+side stops at zero, and a raw margin therefore prefers bright cells. Measured,
+that gave 81% ones -- 0.69 bits each against a helper disclosing n-k -- with
+adjacent survivors agreeing 97% of the time because bright speckle clusters.
+bits_from_image ranks cells to a quantile before taking the sign, which makes
+the two sides of the boundary mean the same thing, and enrolment refuses to
+take two touching grains. Selected bias is now near one half and the checks in
+test_optical_puf fail if it drifts.
+
 WHAT IS NOT ANSWERED HERE. Whether a real epoxied diffuser holds its pattern
 across months and temperature, which is the only question that decides whether
 this ships. This module makes that question answerable -- `calibrate.py` grows
@@ -372,12 +383,20 @@ def bits_from_image(img: np.ndarray, grain_px: int = 4
     the same measurement, and counting them again would inflate the entropy
     estimate without adding any.
 
-    The margin is the second return and it is what makes the scheme work. A
-    grain whose filtered value sits near the median is one shot noise event
-    from reading the other way; a grain far from it is not. Drift flips the
-    marginal bits first, so selecting on this at enrolment is worth far more
-    than any amount of extra error correction -- BCH cannot reach 10% at a
-    useful rate, and with the margin it does not have to.
+    RANK, NOT INTENSITY. Each cell is replaced by its quantile among all cells
+    before the sign is taken. This is not cosmetic and it is the second thing
+    that had to be got right. Speckle intensity is exponentially distributed:
+    the bright tail runs a long way and the dark side stops at zero, so
+    "far from the median" almost always means "bright". Selecting on a raw
+    margin therefore selects ones -- measured, 81% of the chosen bits were 1,
+    worth 0.69 bits each instead of 1.0, and adjacent survivors agreed 97% of
+    the time because bright speckle clusters. The margin filter that buys the
+    error budget was quietly spending the entropy budget it protects.
+
+    The quantile transform is monotone, so it changes no bit's value; it only
+    makes the distance from the boundary mean the same thing on both sides.
+    After it, a dark cell is as selectable as a bright one and the selection
+    is unbiased by construction.
 
     Cells inside the fiducial corner are given a margin of -inf so enrolment
     never selects them. Their values are published for registration, and a
@@ -389,13 +408,43 @@ def bits_from_image(img: np.ndarray, grain_px: int = 4
         raise ValueError("ROI smaller than one speckle grain")
     cells = img[:gh * grain_px, :gw * grain_px]
     cells = cells.reshape(gh, grain_px, gw, grain_px).mean(axis=(1, 3))
-    centred = cells - np.median(cells)
-    scale = np.median(np.abs(centred)) or 1.0
-    margin = np.abs(centred) / scale
+
+    flat = cells.ravel()
+    q = np.empty(flat.size, dtype=np.float64)
+    q[np.argsort(flat, kind="stable")] = np.arange(flat.size)
+    q = (q + 0.5) / flat.size - 0.5           # -> (-0.5, 0.5), symmetric
+    margin = np.abs(q).reshape(gh, gw) * 2.0
+
     lo = FIDUCIAL_ORIGIN // grain_px
     hi = -(-(FIDUCIAL_ORIGIN + FIDUCIAL_PX) // grain_px)   # round outward
     margin[lo:hi, lo:hi] = -np.inf
-    return (centred > 0).astype(np.uint8).ravel(), margin.ravel()
+    return (q > 0).astype(np.uint8), margin.ravel()
+
+
+def _spaced(order: np.ndarray, want: int, gw: int) -> np.ndarray:
+    """Take `want` positions from `order`, never two that touch.
+
+    Adjacent grains are not independent -- they share the tail of one speckle
+    lobe -- and selecting on margin makes that worse, because a lobe that is
+    far from the boundary is far from it across its whole width. Refusing the
+    eight neighbours of anything already taken is a cheap way to stop the key
+    being drawn from a handful of blobs. Measured separation d>=2 cells is
+    where the correlation disappears, so one cell of exclusion is enough.
+    """
+    taken = np.zeros(int(order.max()) + gw + 2, dtype=bool)
+    out = []
+    for i in order:
+        i = int(i)
+        r, c = divmod(i, gw)
+        if any(taken[(r + dr) * gw + (c + dc)]
+               for dr in (-1, 0, 1) for dc in (-1, 0, 1)
+               if 0 <= (r + dr) * gw + (c + dc) < taken.size):
+            continue
+        taken[i] = True
+        out.append(i)
+        if len(out) == want:
+            break
+    return np.array(sorted(out), dtype=np.int64)
 
 
 def speckle_features(frames: np.ndarray, envelope_px: float = 12.0,
@@ -485,13 +534,15 @@ def enroll(images: list[np.ndarray], m: int = 12, t: int = 180,
     worst[~(bits == bits[0]).all(axis=0)] = -np.inf
 
     code = BCH(m, t)
-    usable = int(np.count_nonzero(np.isfinite(worst)))
-    if usable < code.n:
+    gw = imgs[0].shape[1] // grain_px
+    order = np.argsort(worst)[::-1]
+    order = order[np.isfinite(worst[order])]
+    mask = _spaced(order, code.n, gw)
+    if mask.size < code.n:
         raise PufError(
-            f"only {usable} usable bits, code needs {code.n}. "
-            f"Enlarge the ROI: at a {code.n}-bit code you want at least "
-            f"{2 * code.n} grains so the margin filter has something to cut.")
-    mask = np.sort(np.argsort(worst)[-code.n:])
+            f"only {mask.size} usable non-adjacent bits, code needs {code.n}. "
+            f"Enlarge the ROI: with one cell of exclusion you want at least "
+            f"{6 * code.n} grains so the margin filter has something to cut.")
     w = bits[0][mask]
 
     rng = rng or np.random.default_rng()
@@ -528,8 +579,15 @@ def reproduce(image: np.ndarray, helper: Helper) -> bytes:
     return _key(helper.offset ^ fixed, helper.salt)
 
 
-def budget(m: int = 12, t: int = 180, per_bit_entropy: float = 0.85) -> dict:
-    """What the parameters buy, so the choice is arguable rather than asserted."""
+def budget(m: int = 12, t: int = 180, per_bit_entropy: float = 0.98) -> dict:
+    """What the parameters buy, so the choice is arguable rather than asserted.
+
+    The default per-bit figure is measured rather than assumed --
+    test_optical_puf checks the bias of the selected bits on every run, and
+    the quantile transform and the adjacency exclusion in bits_from_image are
+    what hold it near one. It was 0.69 before both, which is the number this
+    default would have hidden.
+    """
     code = BCH(m, t)
     leak = code.n - code.k
     return {"n": code.n, "k": code.k, "corrects": t,

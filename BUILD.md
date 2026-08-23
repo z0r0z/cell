@@ -575,7 +575,7 @@ what you are skipping.
 | Position | Chamber wall, lit by the same 650 nm diode, imaged by the same camera. **Clear of the cartridge's optical window** |
 | Standoff | ~20 mm, as for the blood path, so the grain lands at the same 3–5 px |
 | Bond | Two-part epoxy, opaque black, filling the void behind the disc |
-| Capture | 512×512 ROI, 16 frames, averaged |
+| Capture | 768×768 ROI, 16 frames, averaged |
 
 **Clear of the cartridge window** is the constraint that matters. If a seated
 cartridge is in the diffuser's optical path, then changing cartridges changes
@@ -595,10 +595,11 @@ free to wander: keep the standoff rigid and the whole assembly moving together.
 to be in the same place in six months as it is today, because "the same place"
 is what the key is. Epoxy it once and leave it.
 
-**512×512, not the 128×128 the blood path uses.** The PUF spends grains on key
-material and on the margin filter that discards the unreliable ones, so it wants
-about four times the linear size. Same sensor, same optics, a larger crop —
-`hardware.read_chamber_burst` switches the mode and switches it back.
+**768×768, not the 128×128 the blood path uses.** The PUF spends grains on key
+material, on the margin filter that discards the unreliable ones, and on a rule
+that no two key bits come from touching grains — neighbouring grains share the
+tail of one speckle lobe and are not independent. Same sensor, same optics, a
+larger crop; `hardware.read_chamber_burst` switches the mode and switches back.
 
 **Averaged, unlike the blood burst.** There the frames carry the signal and
 averaging would destroy it. Here the pattern is meant to be static, so the
