@@ -342,7 +342,44 @@ IN_PROCESS = [
 ]
 
 
+# The third-party packages the sensing and seed-store suites import. Checked
+# up front because without them ten suites fail on import, and a bare "FAIL --
+# 10 suite(s)" reads as a broken repository to the one audience that matters
+# here: somebody who just cloned this to build the hardware. It is a missing
+# dependency, and the runner should say so rather than leave them bisecting.
+REQUIRED = [("numpy", "the gate maths"), ("scipy", "the gate maths"),
+            ("cryptography", "the seed store")]
+
+
+def _preflight() -> bool:
+    import importlib.util
+    missing = [(m, why) for m, why in REQUIRED
+               if importlib.util.find_spec(m) is None]
+    if not missing:
+        return True
+    print("=" * 66)
+    print("MISSING DEPENDENCIES — this is not a regression.\n")
+    for m, why in missing:
+        print(f"  {m:<16}{why}")
+    print("\n  python3 -m pip install -r firmware/requirements.txt\n")
+    print("  On Raspberry Pi OS, Debian and current macOS, pip refuses to")
+    print("  install into the system interpreter (PEP 668). Either use the")
+    print("  packaged builds:\n")
+    print("      sudo apt install python3-numpy python3-scipy "
+          "python3-cryptography\n")
+    print("  or a virtual environment:\n")
+    print("      python3 -m venv .venv && . .venv/bin/activate")
+    print("      pip install -r firmware/requirements.txt\n")
+    print("  The signing stack itself is pure Python and needs none of this;")
+    print("  run any of firmware/test_curve.py, test_wallet.py or tx.py")
+    print("  directly to exercise it without installing anything.")
+    print("=" * 66)
+    return False
+
+
 def main() -> int:
+    if not _preflight():
+        return 1
     failures = []
     for name, cmd in SUITES:
         print(f"\n=== {name} " + "=" * max(0, 60 - len(name)))
