@@ -226,7 +226,8 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
               script_types: tuple[str, ...] = ("p2wpkh", "p2tr", "p2sh-p2wpkh"),
               network: str = "mainnet",
               duress_pin: str | None = None,
-              decoy: str | None = None) -> Provisioning:
+              decoy: str | None = None,
+              chamber: "bytes | None" = None) -> Provisioning:
     """Wrap a seed and record the watch-only accounts that go with it.
 
     Called once, by tools/provision.py, with the device open. The mnemonic is
@@ -241,6 +242,11 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
     see duress.py. A build that wrote one blob when duress was off would
     announce, to anyone holding the card, exactly which devices have something
     to hide.
+
+    `chamber` is the optical PUF key, on devices that enrolled one. It goes
+    into BOTH wrapping keys, so a decoy wallet is bound to the instrument on
+    the same terms as the real one -- a duress blob that survived opening the
+    case would be a tell about which blob is which.
     """
     if not bip39.validate(mnemonic):
         raise WalletError(
@@ -256,7 +262,7 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
     # counter, which is the whole reason the part is in the design.
     if not se.verify_pin(pin):
         raise WalletError("that PIN was not accepted by the secure element")
-    key = se.kdf(signer.unwrap_context(pin))
+    key = se.kdf(signer.unwrap_context(pin, chamber))
 
     if duress_pin is not None:
         if not se.verify_pin(duress_pin):
@@ -264,7 +270,7 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
                 "that duress PIN was not accepted by the secure element. It "
                 "has to be set on the chip before provisioning — see "
                 "se_atecc.set_pin.")
-        duress_key = se.kdf(signer.unwrap_context(duress_pin))
+        duress_key = se.kdf(signer.unwrap_context(duress_pin, chamber))
     else:
         # No PIN derives this. The second blob is real, well-formed and
         # permanently unopenable, which is what makes its presence say nothing.
@@ -347,7 +353,8 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
               confirm, run_gate, pin: str,
               network: str = "mainnet",
               requested_tier: Tier | None = None,
-              attach_attestation: bool = True) -> SignedPSBT:
+              attach_attestation: bool = True,
+              read_chamber=None) -> SignedPSBT:
     """Run the full unlock chain over a PSBT and return it signed."""
     p = psbtmod.PSBT.parse(blob)
     # The registered quorums travel with the PSBT object, because every
@@ -399,7 +406,8 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
 
     s = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
                       confirm=confirm, run_gate=run_gate,
-                      unwrap_seed=unwrap_seed, sign_digest=sign_digest)
+                      unwrap_seed=unwrap_seed, sign_digest=sign_digest,
+                      read_chamber=read_chamber)
     result = s.authorize_and_sign(
         signer.SignRequest(operation=summary.spend, sighash=digest,
                            requested_tier=requested_tier), pin)
@@ -489,7 +497,8 @@ class SignedEth:
 def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
              pol: Policy, fw_hash: bytes, cal_hash: bytes,
              confirm, run_gate, pin: str, index: int = 0,
-             requested_tier: Tier | None = None) -> SignedEth:
+             requested_tier: Tier | None = None,
+             read_chamber=None) -> SignedEth:
     """Run the unlock chain over an EIP-1559 transaction."""
     account = prov.account_for("eth", "ethereum")
     watch = account.key().derive([0, index])
@@ -524,7 +533,8 @@ def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
 
     s = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
                       confirm=confirm, run_gate=run_gate,
-                      unwrap_seed=unwrap_seed, sign_digest=sign_digest)
+                      unwrap_seed=unwrap_seed, sign_digest=sign_digest,
+                      read_chamber=read_chamber)
     result = s.authorize_and_sign(
         signer.SignRequest(operation=op, sighash=digest,
                            requested_tier=requested_tier), pin)

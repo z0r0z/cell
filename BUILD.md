@@ -1,6 +1,6 @@
 # CELL — Build Specification
 
-Single device, $95.05 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
+Single device, $97.55 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
 
 The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm — and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
@@ -46,7 +46,7 @@ The blood reader is the novel component. The wallet layer is a solved problem th
 |---|---|---|
 | `Reader` | The blood reader hardware — Pi, spectrometer, laser, camera, LEDs, filament | $62.25 |
 | `Reader consumable` | Lancets, alcohol pads, PET window film, tape, sharps container. Needed to run the reader at all. About 100 blood readings, limited by the lancet and pad counts | $31.00 |
-| `Wallet` | The signing half — secure element, display, buttons, QR camera, ring window, fasteners | $32.80 |
+| `Wallet` | The signing half — secure element, display, buttons, QR camera, ring window, fasteners | $35.30 |
 
 Order the reader kit and its consumables together; they are one purchase and the reader is useless without both. The wallet kit is a second purchase you only make if the reader works.
 
@@ -71,7 +71,7 @@ The reader has no security requirements, because nothing is being signed. Leave 
 
 It answers the question that determines whether the rest is worth building: does the gate separate real blood from every fake? Run the spoof panel in §13. If it does not, you never order the wallet kit.
 
-### Kit 2 — the wallet (+$32.80)
+### Kit 2 — the wallet (+$35.30)
 
 | Item | ~USD |
 |---|---|
@@ -82,11 +82,12 @@ It answers the question that determines whether the rest is worth building: does
 | 4 × 12 mm tactile buttons | 3 |
 | USB-C breakout, power only | 2 |
 | M2.5 screws + heat-set inserts, M2 display screws | 2.80 |
+| Ø6 mm ground-glass diffuser + 5-minute epoxy | 2.50 |
 | Ø10 × 0.5 mm ring window, clear acrylic or glass | 1.00 |
 
 The signing firmware is in this repository — see §12. Build it, provision a seed, then do the airgap hardening: radios disabled, antenna trace cut, read-only rootfs.
 
-**Full device: $95.05 of hardware,** plus $31.00 of consumables. $126.05 all in.
+**Full device: $97.55 of hardware,** plus $31.00 of consumables. $128.55 all in.
 
 **What a signature costs.** A touch-tier signature costs nothing — no
 cartridge, no lancet, and touch is the everyday default. A blood-tier
@@ -559,6 +560,41 @@ A second, independent optical path in the same chamber.
 **Light-tightness test:** cartridge inserted, room at 10,000 lux, all LEDs off — the Clear channel must read under 0.5% of its LEDs-on value. Print the chamber in black PETG at ≥4 perimeters and paint the interior matte black. Thin PETG passes more light than you'd expect.
 
 **Cartridge slot:** 34.0 × 3.0 mm on the front edge (model: `front_slot`), with a sprung silicone flap plus a 6 mm offset baffle behind it.
+
+### The chamber diffuser
+
+A Ø6 mm ground-glass disc, epoxied into the chamber wall. It is what makes the
+enclosure part of the key: `firmware/optical_puf.py` reads its speckle at every
+unlock and mixes the result into the seed-wrapping KDF, so a case that has been
+opened derives a different key and the seed does not unwrap. Skip it and the
+device still works — the KDF term is simply absent — but the tamper binding is
+what you are skipping.
+
+| | |
+|---|---|
+| Position | Chamber wall, lit by the same 650 nm diode, imaged by the same camera. **Clear of the cartridge's optical window** |
+| Standoff | ~20 mm, as for the blood path, so the grain lands at the same 3–5 px |
+| Bond | Two-part epoxy, opaque black, filling the void behind the disc |
+| Capture | 512×512 ROI, 16 frames, averaged |
+
+**Clear of the cartridge window** is the constraint that matters. If a seated
+cartridge is in the diffuser's optical path, then changing cartridges changes
+the reading and every cartridge change looks like tampering. The laser
+interlock still applies, so the bay must be closed for the read — the cartridge
+closes the bay, it must not be part of the measurement.
+
+**Not hot glue, and not tape.** Both creep with temperature. The diffuser has
+to be in the same place in six months as it is today, because "the same place"
+is what the key is. Epoxy it once and leave it.
+
+**512×512, not the 128×128 the blood path uses.** The PUF spends grains on key
+material and on the margin filter that discards the unreliable ones, so it wants
+about four times the linear size. Same sensor, same optics, a larger crop —
+`hardware.read_chamber_burst` switches the mode and switches it back.
+
+**Averaged, unlike the blood burst.** There the frames carry the signal and
+averaging would destroy it. Here the pattern is meant to be static, so the
+frames are repeated looks at one thing and averaging buys shot-noise margin.
 
 ---
 
@@ -1171,6 +1207,7 @@ A sequence of checks, not a schedule — with the parts in front of you this is 
 | 8 | ATECC608B configured, zones locked, PIN counter live | `atecc_config.py verify --behaviour` passes every line BEFORE `lock-data`; `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
 | 9 | Firmware installed, `run_tests.py` green on the Pi | 38 suites pass on the device itself, not just your laptop |
 | 10 | Provisioned, and the backup written down | `provision.py` re-reads its own seed; you have the words on paper |
+| 10a | Chamber enrolled (optional) | `provision.py enroll-chamber` — the seed re-wraps and still reopens. Back up `chamber.npz` beside the words |
 | 11 | Regtest round trip | `tools/regtest_e2e.py` — Core accepts and mines what the device signed |
 | 12 | Testnet round trip, gate in the loop | Coins move, and only after a real sample |
 | 13 | Seal the REFERENCE and NULL cartridges, record baselines | Both behave per §2 |
@@ -1192,6 +1229,8 @@ Stated so co-signers and reviewers can reason about them directly.
 **Citrate is reversible, and G6 does not catch a recalcified sample.** Citrate anticoagulates by chelating calcium; adding calcium back restores clotting, which is exactly how a recalcified PT/aPTT assay works. A citrated sample recalcified immediately before loading starts liquid and arrests, so it passes the motion gates as well as the chemistry ones. EDTA chelates far more avidly and is not practically reversible outside a lab, so EDTA tube blood remains rejected — and it is EDTA that a stolen tube of clinical blood is most likely to contain. What G6 defeats is the opportunistic replay of a stored sample. It does not defeat a prepared attacker who holds the owner's blood, the device and the PIN together; nothing optical at this price does, and the quorum in §4 is the answer to that threat rather than a better gate.
 
 **Physical possession of both device and PIN is the boundary.** As with every hardware wallet, hold what you would not be attacked for, and use the multisig quorum in §4 when the amount justifies it. `verify_quorum()` makes "everyone signed with blood" a mechanical check.
+
+**No secure boot, and what stands in for it.** An attacker who opens the case can replace the firmware, return the device, and let the owner type the PIN into it. The ATECC608B bounds a blind guesser — its counter never decreases and stops permanently at 2,097,151, against a 10⁸ keyspace — but a counter cannot help when the owner supplies the PIN willingly. What answers this is the chamber diffuser in §9: its speckle is an input to the seed-wrapping KDF, not a check, so opening the case does not fail a comparison, it derives a different key. Firmware can skip a boolean; it cannot skip a term in a derivation. For that to bind, the microSD must sit inside the sealed volume — otherwise the card comes out without the optics being disturbed. Enrolment is optional and a device without it behaves exactly as before. Move to a CM4 if you want a verified boot chain rather than a tamper-responsive one; the Pi Zero 2 W has no secure boot.
 
 **Attestation trusts the firmware and the tamper seal.** Same assumption as a TPM quote or a Secure Enclave receipt. Co-signers register firmware and calibration hashes alongside attestation keys, and `verify()` refuses builds and threshold sets it does not recognise. The Pi Zero 2 W has no secure boot; move to a CM4 if your threat model needs one.
 

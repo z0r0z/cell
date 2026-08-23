@@ -378,6 +378,30 @@ def run() -> int:
     check("a swapped chamber yields a different unwrap key",
           log_swapped["unwrap_key"] != log_enrolled["unwrap_key"])
 
+    # Provisioning with a chamber must produce a seed that needs it. This is
+    # the end of the argument: not that the device checks, but that the
+    # ciphertext does not open.
+    import duress as _duress
+    import wallet as _wallet
+    _se = SoftSE(pin=PIN)
+    _words = ("abandon " * 11 + "about")
+    _prov = _wallet.provision(_words, _se, PIN, chamber=b"\xaa" * 32)
+    _se.verify_pin(PIN)
+    opened = _duress.unwrap_any(
+        _prov.seed_pair, _se.kdf(signer.unwrap_context(PIN, b"\xaa" * 32)))
+    check("a chamber-wrapped seed opens with its chamber",
+          bytes(opened).decode().startswith("abandon"))
+    for wrong in (None, b"\xbb" * 32):
+        _se.verify_pin(PIN)
+        try:
+            _duress.unwrap_any(
+                _prov.seed_pair, _se.kdf(signer.unwrap_context(PIN, wrong)))
+            check(f"a chamber-wrapped seed stays shut without it ({wrong is None})",
+                  False)
+        except _duress.NoBlobOpened:
+            check(f"a chamber-wrapped seed stays shut without it ({wrong is None})",
+                  True)
+
     # A chamber that cannot be decoded must refuse, not fall back.
     def _broken():
         raise RuntimeError("outside the enrolled radius")

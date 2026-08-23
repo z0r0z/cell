@@ -83,6 +83,11 @@ class Device:
     fw_hash: bytes
     cal_hash: bytes
     network: str = "mainnet"
+    # None on a device that never enrolled its chamber. See
+    # signer.unwrap_context: leaving it None derives exactly what such a
+    # device has always derived, and a device that DID enrol cannot be
+    # downgraded by dropping it, because its seed will not open.
+    read_chamber: "Callable[[], bytes] | None" = None
     sleep: Callable[[float], None] = lambda _s: None
     # Injected so the tests can drive the confirmation guard, which measures
     # how long a screen has been up before it will accept consent. Faking the
@@ -210,7 +215,7 @@ class Device:
             result = wallet.sign_psbt(
                 payload, self.prov, self.se, self.policy, self.fw_hash,
                 self.cal_hash, confirm_cb, gate_cb, self._pin,
-                network=self.network)
+                network=self.network, read_chamber=self.read_chamber)
         except (psbtmod.BadPSBT, WalletError, ValueError) as e:
             self._fail("refused", str(e))
             return "refused"
@@ -254,7 +259,8 @@ class Device:
         try:
             result = wallet.sign_eth(
                 tx, self.prov, self.se, self.policy, self.fw_hash,
-                self.cal_hash, confirm_cb, gate_cb, self._pin)
+                self.cal_hash, confirm_cb, gate_cb, self._pin,
+                read_chamber=self.read_chamber)
         except (WalletError, eth.BadEthTransaction, ValueError) as e:
             self._fail("refused", str(e))
             return "refused"
@@ -469,7 +475,28 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
     cal = d / "thresholds.json"
     cal_hash = hashlib.sha256(cal.read_bytes() if cal.exists() else b"defaults").digest()
 
+    # The chamber binding, if this device enrolled one. Absent is the normal
+    # state for a device provisioned before enrolment, and it is not a
+    # downgrade: a seed wrapped with the chamber does not open without it, so
+    # removing the helper turns the device into a brick rather than into an
+    # unlocked one. provision.py enroll-chamber writes it.
+    read_chamber = None
+    chamber_file = d / prov_tool.CHAMBER
+    if chamber_file.exists():
+        import optical_puf
+        helper = optical_puf.load_helper(str(chamber_file))
+
+        def read_chamber():                                 # noqa: F811
+            import hardware
+            head = hardware.RealSensorHead()
+            try:
+                return optical_puf.chamber_reader(
+                    head.read_chamber_burst, helper)()
+            finally:
+                head.close()
+
     return Device(prov=prov, se=se, display=open_display(console),
+                  read_chamber=read_chamber,
                   buttons=btn.open_buttons(console),
                   camera=cam.open_camera(console), run_gate=run_gate,
                   policy=Policy(), fw_hash=fw_hash, cal_hash=cal_hash, **kw)

@@ -672,6 +672,126 @@ def cmd_touch_roc(args):
     return 0
 
 
+PUF_DIR = DATA / "chamber"
+
+
+def cmd_puf_capture(args):
+    """One burst of the chamber, filed with the conditions it was taken in.
+
+    The conditions are the point. A PUF panel that is twenty bursts taken in
+    one sitting answers nothing: it measures shot noise, which was never the
+    risk. What decides whether this ships is whether a diffuser reads the same
+    after a cold night and six months of the resin settling, so every burst
+    carries the temperature and the session it belongs to and the panel is
+    only worth as much as their spread.
+    """
+    import numpy as np
+
+    PUF_DIR.mkdir(parents=True, exist_ok=True)
+    if args.synthetic:
+        rng = np.random.default_rng(args.seed)
+        size = 512
+        e = rng.normal(size=(size, size)) + 1j * rng.normal(size=(size, size))
+        fy, fx = np.fft.fftfreq(size)[:, None], np.fft.fftfreq(size)[None, :]
+        e = np.fft.ifft2(np.fft.fft2(e)
+                         * np.exp(-0.5 * (fy ** 2 + fx ** 2) * (2 * np.pi * 4) ** 2))
+        burst = np.repeat((np.abs(e) ** 2)[None], 16, axis=0).astype(np.float32)
+        burst += rng.normal(0, 0.02, burst.shape)
+    else:
+        from hardware import RealSensorHead
+        head = RealSensorHead()
+        try:
+            input("Close the bay and press Enter...")
+            burst = head.read_chamber_burst()
+        finally:
+            head.close()
+
+    n = len(list(PUF_DIR.glob("*.npy")))
+    path = PUF_DIR / f"chamber_{n:04d}.npy"
+    np.save(path, burst)
+    (PUF_DIR / f"chamber_{n:04d}.txt").write_text(
+        f"temp_c={args.temp_c}\nsession={args.session}\n")
+    print(f"saved {path}  ({args.temp_c} C, session {args.session})")
+
+
+def cmd_puf_panel(args):
+    """What the panel says about stability, and whether it clears the code.
+
+    Reports the bit error rate ACROSS SESSIONS, because that is the number
+    that matters -- within one sitting a diffuser will always look perfect.
+    Enrols on the earliest session and measures every later one against it,
+    which is what a device does: enrol once, live with it.
+    """
+    import numpy as np
+
+    import optical_puf as puf
+
+    paths = sorted(PUF_DIR.glob("*.npy"))
+    if len(paths) < 3:
+        sys.exit(f"Need >=3 bursts, have {len(paths)}. "
+                 f"`calibrate.py puf-capture` takes them.")
+
+    meta = []
+    for p in paths:
+        t = p.with_suffix(".txt")
+        d = dict(ln.split("=", 1) for ln in t.read_text().split()) if t.exists() else {}
+        meta.append((p, d.get("session", "?"), d.get("temp_c", "?")))
+
+    sessions = sorted({m[1] for m in meta})
+    print(f"{len(paths)} bursts over {len(sessions)} session(s), "
+          f"temps {sorted({m[2] for m in meta})}")
+    if len(sessions) < 2:
+        print("\nOne session. This will look better than it is -- the question "
+              "is\nwhether the chamber survives being left alone, and a panel "
+              "taken in\none sitting cannot answer it.")
+
+    first = [m for m in meta if m[1] == sessions[0]]
+    if len(first) < 2:
+        sys.exit("Enrolment needs >=2 bursts in the earliest session.")
+
+    reads = [puf.speckle_features(np.load(p)) for p, _, _ in first]
+    try:
+        helper, key = puf.enroll(reads, m=args.m, t=args.t)
+    except puf.PufError as e:
+        sys.exit(f"Did not enrol: {e}")
+
+    b = puf.budget(args.m, args.t)
+    print(f"\nBCH(n={b['n']}, k={b['k']}, t={b['corrects']}) "
+          f"corrects {b['max_ber']:.2%}")
+    print(f"{'burst':<28}{'session':>9}{'temp':>7}{'BER':>9}{'key':>10}")
+    print("-" * 63)
+
+    worst, reproduced, total = 0.0, 0, 0
+    for path, sess, temp in meta:
+        bits, _ = puf.speckle_features(np.load(path))
+        # Against the enrolled reading, on the positions enrolment kept --
+        # the bits the device will actually decode.
+        ber = float((bits[helper.mask] != reads[0][0][helper.mask]).mean())
+        try:
+            same = puf.reproduce(bits, helper) == key
+        except puf.PufError:
+            same = False
+        total += 1
+        reproduced += same
+        worst = max(worst, ber)
+        print(f"{path.name:<28}{sess:>9}{temp:>7}{ber:>8.2%}"
+              f"{'ok' if same else 'LOST':>10}")
+
+    print("-" * 63)
+    print(f"worst BER {worst:.2%} against a {b['max_ber']:.2%} budget; "
+          f"{reproduced}/{total} reproduced")
+    if reproduced == total and worst < b["max_ber"] / 2:
+        print("\nComfortable. The margin filter is doing its job and there is "
+              "room\nleft for conditions this panel has not seen yet.")
+    elif reproduced == total:
+        print("\nReproduces, but inside half the budget rather than clear of "
+              "it.\nTake more sessions before binding a seed to this chamber.")
+    else:
+        print("\nA burst failed to reproduce, so this chamber would have "
+              "refused to\nsign. Either the diffuser is moving or the bay is "
+              "not closing the\nsame way twice; fix that before enrolling.")
+
+
 def cmd_selftest(args):
     print(f"Synthetic self-test — 6 gates, 2 sensors, {len(PANEL)} classes.")
     print("Exercises the pipeline only. These are NOT calibration data.\n")
@@ -751,6 +871,20 @@ def main():
     tr.add_argument("--frr-budget", type=float, default=0.05)
     tr.add_argument("--drift", type=float, default=0.0)
     tr.set_defaults(fn=cmd_touch_roc)
+    pc = sub.add_parser("puf-capture",
+                        help="one burst of the chamber diffuser")
+    pc.add_argument("--temp-c", default="?", help="ambient, so drift is attributable")
+    pc.add_argument("--session", default="1",
+                    help="bump it when the device has been left alone since")
+    pc.add_argument("--synthetic", action="store_true")
+    pc.add_argument("--seed", type=int, default=0)
+    pc.set_defaults(fn=cmd_puf_capture)
+    pp = sub.add_parser("puf-panel",
+                        help="does the chamber reproduce across sessions")
+    pp.add_argument("--m", type=int, default=12)
+    pp.add_argument("--t", type=int, default=180)
+    pp.set_defaults(fn=cmd_puf_panel)
+
     s = sub.add_parser("selftest"); s.add_argument("--n", type=int, default=20)
     s.set_defaults(fn=cmd_selftest)
     a = p.parse_args()

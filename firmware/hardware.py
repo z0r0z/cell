@@ -44,6 +44,13 @@ PIN_CARTRIDGE = 22  # microswitch, pull-up, LOW when a cartridge is seated
 
 SPECKLE_ROI = 128   # px, square
 SPECKLE_FRAMES = 16
+# The chamber PUF reads a wider field than the blood path does. Blood needs
+# only enough grains to average a correlation over; the PUF spends grains on
+# key material and on the margin filter that discards the unreliable ones, so
+# it wants roughly four times the linear size. Same sensor, same optics, a
+# larger crop -- see read_chamber_burst.
+PUF_ROI = 512
+PUF_FRAMES = 16
 SPECKLE_EXPOSURE_US = 2000   # <=2 ms so each frame samples the field, not a time-average
 
 # AS7341 integration = (ATIME+1) * (ASTEP+1) * 2.78 us.
@@ -235,6 +242,65 @@ class RealSensorHead(SensorHead):
             for i in range(SPECKLE_FRAMES):
                 frames[i] = self.cam.capture_array("main")[:SPECKLE_ROI, :SPECKLE_ROI]
         return frames
+
+    # -- the chamber itself ------------------------------------------------
+
+    def read_chamber_burst(self) -> np.ndarray:
+        """PUF_FRAMES frames of the diffuser, for optical_puf.
+
+        This measures the INSTRUMENT, not a sample. The diffuser is epoxied
+        into the chamber at build time and its speckle is a property of the
+        assembly, so opening the case changes the answer and the seed does not
+        unwrap. See signer.unwrap_context.
+
+        AVERAGED, unlike the blood burst. There the frames carry the signal --
+        how fast the pattern decorrelates IS the measurement, and averaging
+        would destroy it. Here the pattern is meant to be static, so the
+        frames are repeated looks at one thing and averaging buys shot-noise
+        margin. Same rig, opposite treatment; optical_puf.speckle_features
+        does the averaging.
+
+        THE LASER INTERLOCK STILL APPLIES. This goes through _exclusive() like
+        every other lit path, so the bay must be closed before the diode is
+        energised. The diffuser must therefore sit clear of the cartridge's
+        optical window, or the reading would depend on which cartridge happens
+        to be seated and every cartridge change would look like tampering.
+        BUILD.md section 9 places it.
+        """
+        frames = np.empty((PUF_FRAMES, PUF_ROI, PUF_ROI), dtype=np.float32)
+        with self._exclusive(laser=True):
+            with self._crop(PUF_ROI):
+                for i in range(PUF_FRAMES):
+                    frames[i] = self.cam.capture_array("main")[:PUF_ROI, :PUF_ROI]
+        return frames
+
+    @contextmanager
+    def _crop(self, roi: int):
+        """Widen the capture to `roi` px square, then put it back.
+
+        The camera is configured once at start-up for the speckle path and
+        left alone, because reconfiguring mid-burst is exactly the kind of
+        auto-adjustment the correlation measurement cannot survive. The PUF
+        read is not inside a burst, so it may switch modes -- but it must
+        switch back, and it must not inherit any auto control on the way.
+        """
+        if roi == SPECKLE_ROI:
+            yield
+            return
+        cfg = self.cam.create_still_configuration(
+            main={"size": (roi, roi), "format": "YUV420"},
+            controls={"ExposureTime": SPECKLE_EXPOSURE_US, "AnalogueGain": 1.0,
+                      "AeEnable": False, "AwbEnable": False,
+                      "NoiseReductionMode": 0})
+        self.cam.switch_mode(cfg)
+        try:
+            yield
+        finally:
+            self.cam.switch_mode(self.cam.create_still_configuration(
+                main={"size": (SPECKLE_ROI, SPECKLE_ROI), "format": "YUV420"},
+                controls={"ExposureTime": SPECKLE_EXPOSURE_US,
+                          "AnalogueGain": 1.0, "AeEnable": False,
+                          "AwbEnable": False, "NoiseReductionMode": 0}))
 
     def close(self):
         self.cam.stop()

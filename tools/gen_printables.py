@@ -52,6 +52,7 @@ LED_ANGLE, LED_RADIUS = 45.0, 12.0            # 45 deg, 12 mm from spot centre
 LASER_ANGLE = 30.0                            # 30 deg off normal
 CAMERA_STANDOFF = 20.0                        # lensless, ~20 mm from spot
 SLOT_W, SLOT_H = 34.0, 3.0                    # front slot, 34.0 x 3.0
+BAY_W, BAY_H = 72.0, 16.0                     # compute bay, rear face
 BAFFLE_OFFSET = 6.0                           # baffle 6 mm behind the flap
 
 # --- DERIVED: nothing in BUILD.md fixes these ------------------------------
@@ -214,6 +215,28 @@ def optical_head():
     return stl.sdf_mesh(f, ((-R - 2, -R - 2, -2), (R + 2, R + 2, top + 2)), 0.35)
 
 
+def bay_blank():
+    """Closes the rear compute bay after provisioning.
+
+    The bay is how the Pi and its microSD are reached during a build. Left
+    open it is also how an attacker reaches them without disturbing the
+    optical chamber, which is the one thing the chamber binding cannot
+    survive -- pull the card, alter the firmware, put it back, and the
+    diffuser never moved. See BUILD.md section 16.
+
+    A plate and a lip, not a lid: it is meant to be bonded or sealed over,
+    and taken off only by someone who accepts that re-enrolment follows.
+    Sized from BAY_W/BAY_H so it cannot drift from the opening it closes.
+    """
+    clear = 0.3                       # total, so it drops in rather than presses
+    w, h, t = BAY_W - clear, BAY_H - clear, 2.0
+    lip = 1.6                         # sits proud of the wall, gives a bond area
+    tris = stl.box(-w / 2, 0.0, -h / 2, w / 2, t, h / 2)
+    tris += stl.box(-(w / 2 + lip), t, -(h / 2 + lip),
+                    w / 2 + lip, t + 1.2, h / 2 + lip)
+    return tris
+
+
 def display_bezel():
     """Frame that fills the 49.7 x 37.7 window down to the module's active area.
 
@@ -256,6 +279,8 @@ PARTS = [
     ("slot_baffle", slot_baffle, "PETG black, 0.16 mm, 4 perim, 40%"),
     ("display_bezel", display_bezel,
      "PETG black, 0.12 mm, 4 perim, 100%; masks the window to your screen"),
+    ("bay_blank", bay_blank,
+     "PETG black, 0.16 mm, 4 perim, 40%; fit AFTER provisioning, then seal"),
     ("window_jig", window_jig, "any filament; not a device part"),
 ]
 

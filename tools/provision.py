@@ -40,6 +40,7 @@ from se import SoftSE                                           # noqa: E402
 
 BLOB = "seed.blob"
 ACCOUNTS = "accounts.json"
+CHAMBER = "chamber.npz"
 
 
 def _se(args):
@@ -195,7 +196,8 @@ def _write(mnemonic: str, se, args) -> int:
     return 0
 
 
-def _reopens(se, stored, pin: str, expect: str, what: str) -> bool:
+def _reopens(se, stored, pin: str, expect: str, what: str,
+             chamber: "bytes | None" = None) -> bool:
     """Prove the round trip before declaring success.
 
     Provisioning a device that cannot reopen its own seed is the worst possible
@@ -208,7 +210,8 @@ def _reopens(se, stored, pin: str, expect: str, what: str) -> bool:
         print(f"\nFAIL — the secure element rejected a PIN it was just given.")
         return False
     try:
-        reopened = duress.unwrap_any(stored, se.kdf(signer.unwrap_context(pin)))
+        reopened = duress.unwrap_any(
+            stored, se.kdf(signer.unwrap_context(pin, chamber)))
     except duress.NoBlobOpened:
         print(f"\nFAIL — {what} was written but nothing reopens it. Nothing "
               f"about this device should be trusted; do not fund it.")
@@ -442,6 +445,129 @@ def cmd_show(args) -> int:
     return 0
 
 
+def _chamber_reads(args):
+    """The bursts enrolment learns from.
+
+    From the device unless --from is given, in which case they are .npy files
+    -- which is how this is rehearsed, and how a stability panel taken on one
+    machine can be enrolled on another.
+    """
+    import numpy as np
+    import optical_puf
+
+    if args.frm:
+        paths = sorted(Path(args.frm).glob("*.npy"))
+        if len(paths) < 2:
+            print(f"{args.frm} holds {len(paths)} bursts; enrolment needs at "
+                  f"least two, and wants them taken in different conditions.")
+            raise SystemExit(1)
+        return [optical_puf.speckle_features(np.load(p)) for p in paths]
+
+    import hardware
+    head = hardware.RealSensorHead()
+    try:
+        reads = []
+        print("Enrolment reads the chamber several times. The point is to see\n"
+              "it in the states it will be read in later, so let the device sit\n"
+              "between them rather than taking five in a row.\n")
+        for i in range(args.reads):
+            input(f"  [{i + 1}/{args.reads}] close the bay and press enter: ")
+            reads.append(optical_puf.speckle_features(head.read_chamber_burst()))
+        return reads
+    finally:
+        head.close()
+
+
+def cmd_enroll_chamber(args) -> int:
+    """Bind this device's seed to the speckle of its own optical chamber.
+
+    Re-wraps both blobs under keys that include the chamber. That is the whole
+    operation and it is not reversible without the words: after this the seed
+    opens on this instrument and nowhere else.
+    """
+    import optical_puf
+
+    d = Path(args.dir)
+    prov = load(d)
+    se = _se(args)
+
+    helper_path = d / CHAMBER
+    if helper_path.exists() and not args.force:
+        print(f"{helper_path} already exists. Re-enrolling replaces the "
+              f"binding; pass --force if that is what you mean.")
+        return 1
+
+    # Open both blobs FIRST, under the keys that work today. Enrolling before
+    # proving we can still read what we are about to re-wrap would be a way to
+    # destroy a wallet with a typo.
+    if not se.verify_pin(args.pin):
+        print("That PIN was not accepted by the secure element.")
+        return 1
+    old_key = se.kdf(signer.unwrap_context(args.pin))
+    try:
+        mnemonic = bytes(duress.unwrap_any(prov.seed_pair, old_key)).decode()
+    except duress.NoBlobOpened:
+        print("Nothing on this device opens with that PIN. If a chamber is "
+              "already enrolled, the seed is bound to it and this is the "
+              "expected answer — there is no way back except the words.")
+        return 1
+
+    decoy = None
+    if args.duress_pin:
+        if not se.verify_pin(args.duress_pin):
+            print("That duress PIN was not accepted by the secure element.")
+            return 1
+        try:
+            decoy = bytes(duress.unwrap_any(
+                prov.seed_pair, se.kdf(signer.unwrap_context(args.duress_pin)))).decode()
+        except duress.NoBlobOpened:
+            print("That duress PIN opens nothing on this device.")
+            return 1
+    else:
+        print("No --duress-pin given. If this device has one, its wallet is\n"
+              "about to become unreachable. Stop now and pass it if so.\n")
+
+    reads = _chamber_reads(args)
+    try:
+        helper, chamber = optical_puf.enroll(reads)
+    except optical_puf.PufError as e:
+        print(f"\nThe chamber did not enrol: {e}")
+        print("A diffuser that reads differently every time is one that is "
+              "loose, or a bay that is not closing the same way twice.")
+        return 1
+
+    prov2 = wallet.provision(mnemonic, se, args.pin, network=args.network,
+                             duress_pin=args.duress_pin, decoy=decoy,
+                             chamber=chamber)
+
+    # Prove the round trip BEFORE overwriting anything, for the same reason
+    # provisioning does: a device that cannot reopen its own seed is the worst
+    # outcome here and it is cheap to rule out.
+    if not _reopens(se, prov2.seed_pair, args.pin, mnemonic, "the seed",
+                    chamber=chamber):
+        print("Nothing has been written; the device is as it was.")
+        return 1
+    if args.duress_pin and not _reopens(se, prov2.seed_pair, args.duress_pin,
+                                        decoy, "the decoy seed", chamber=chamber):
+        print("Nothing has been written; the device is as it was.")
+        return 1
+
+    optical_puf.save_helper(helper, str(helper_path))
+    (d / BLOB).write_bytes(prov2.seed_pair.pack())
+    (d / BLOB).chmod(0o600)
+
+    b = optical_puf.budget(helper.m, helper.t)
+    print(f"\nEnrolled from {len(reads)} reads.")
+    print(f"  {CHAMBER:<14} public, {helper.mask.size} positions, "
+          f"BCH(n={b['n']}, k={b['k']}, t={b['corrects']})")
+    print(f"  {BLOB:<14} re-wrapped, both blobs")
+    print("\nThe seed now opens on this instrument and nowhere else. Back up "
+          f"{CHAMBER}\nbeside the words: without it the chamber cannot be "
+          "decoded, and the\ndevice is a brick that your words still restore "
+          "from.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -482,6 +608,22 @@ def main() -> int:
     p.add_argument("--unsorted", action="store_true",
                    help="do NOT sort keys (BIP-67 is the default)")
     p.set_defaults(fn=cmd_multisig)
+
+    p = sub.add_parser("enroll-chamber",
+                       help="bind the seed to this device's optical chamber")
+    p.add_argument("--dir", default="/boot/cell")
+    p.add_argument("--pin", required=True)
+    p.add_argument("--duress-pin", default=None,
+                   help="required if this device has one, or its wallet is lost")
+    p.add_argument("--network", default="mainnet",
+                   choices=["mainnet", "testnet", "regtest"])
+    p.add_argument("--reads", type=int, default=5,
+                   help="how many bursts to enrol from")
+    p.add_argument("--from", dest="frm", default=None,
+                   help="directory of .npy bursts, instead of the camera")
+    p.add_argument("--soft", action="store_true")
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(fn=cmd_enroll_chamber)
 
     p = sub.add_parser("chain", help="register an EVM chain the device may sign for")
     p.add_argument("--dir", default="/boot/cell")
