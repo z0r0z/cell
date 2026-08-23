@@ -721,8 +721,8 @@ The ATECC608B check wipes the chip, which is the point: a counter that
 survives being tested was never tested. Run it before there is a seed to lose,
 and re-provision afterwards. If "the wrapping key CANNOT be derived without a
 PIN" fails, stop — slot 0 is not bound to the PIN slot, the attempt counter is
-decoration, and a six-digit PIN is a million offline guesses against the
-encrypted seed.
+decoration, and an eight-digit PIN is a hundred million offline guesses
+against the encrypted seed, with nothing debited for any of them.
 
 Then:
 
@@ -899,12 +899,48 @@ It writes two files:
 
 | File | Contents |
 |---|---|
-| `seed.blob` | The mnemonic, AES-256-GCM, under a key derived inside the ATECC608B from your PIN and a secret that never leaves the chip. Mode 0600 |
-| `accounts.json` | Master fingerprint and the account xpubs. Watch-only, public, safe to copy to a coordinator |
+| `seed.blob` | **Two** wrapped mnemonics, AES-256-GCM, each under a key derived inside the ATECC608B from a PIN and a secret that never leaves the chip. Mode 0600 |
+| `accounts.json` | Master fingerprints and the account xpubs, for both wallets. Watch-only, public, safe to copy to a coordinator |
 
-Before it reports success it re-reads the blob through the same path signing uses — verify_pin, then the chip's KDF, then decrypt — and refuses to declare the device provisioned unless the words come back byte for byte. A device that cannot reopen its own seed is the worst outcome available here, and it costs nothing to rule out.
+Two seeds, always, whether or not you asked for a duress PIN — see §12's duress note and `firmware/duress.py`. With one, the second seed is the decoy. Without one, it is a real 24-word mnemonic wrapped under a key nobody can derive, and it is unreachable forever. One file of a fixed size either way: a card carrying one blob would announce that this device has no decoy, and a card carrying two would announce that it has one.
 
-Then lock the ATECC608B's config and data zones. `se_atecc.py` refuses to run against an unlocked chip: an unlocked chip's slots can still be read or rewritten, which gives every appearance of security and none of it.
+Before it reports success it re-reads the store through the same path signing uses — verify_pin, then the chip's KDF, then decrypt — and refuses to declare the device provisioned unless the words come back byte for byte. With a duress PIN it does this twice, and checks that the duress PIN opens the *decoy* rather than the real wallet. A device that cannot reopen its own seed is the worst outcome available here, and it costs nothing to rule out.
+
+### Configuring the ATECC608B
+
+**This is the step that used to be missing, and it is the one that is permanent.** The slot map below is not something to transcribe by hand from the datasheet; `tools/atecc_config.py` builds it, shows it to you, writes it, reads it back and only then locks.
+
+| Slot | Holds | Configured |
+|---|---|---|
+| 0 | Wrapping secret | Secret, HMAC use only, **ReqAuth → slot 2**, metered by Counter0 |
+| 1 | Attestation secret | Secret, HMAC use only, no authorisation — the idle screen must be able to show the pubkey |
+| 2 | Normal PIN key | Secret. Holds `SHA-256("CELL/pin/v1" ‖ serial ‖ PIN)` |
+| 3 | Normal PIN baseline | Clear read, **encrypted write under slot 2** |
+| 4 | Duress PIN key | Secret. Identical configuration to slot 2 |
+| 5 | Decoy wrapping secret | Secret, HMAC use only, **ReqAuth → slot 4** |
+| 6 | Duress PIN baseline | Clear read, encrypted write under slot 4 |
+| 7–15 | Nothing | Secret and unwritable, so nothing else can use them as scratch |
+
+The procedure, in this order:
+
+```bash
+python3 tools/atecc_config.py plan            # read the AFTER table. Actually read it.
+python3 tools/atecc_config.py write --i-have-read-the-plan
+python3 tools/atecc_config.py lock-config --permanent
+python3 tools/provision.py new --pin ... --out /boot/cell    # writes the slot secrets
+python3 tools/atecc_config.py verify --behaviour             # BEFORE the last lock
+python3 tools/atecc_config.py lock-data --permanent
+```
+
+The secrets go in between the two locks, because data slots stay writable until the *data* zone locks and the slot policy only takes effect once the *config* zone has.
+
+`verify --behaviour` is the step that matters and the only one that proves anything. Reading the config zone back tells you the bytes are there; it does not tell you the chip enforces them. So it asks the chip to misbehave — read a secret slot, derive with no CheckMac, write a baseline in the clear — and every one must be refused. Do that before `lock-data`, while a wrong answer is still recoverable.
+
+**Two things about `atecc_config.py` you should know before trusting it.** It never invents a byte it does not understand: it reads your chip's own config, replaces only the SlotConfig and KeyConfig entries, and passes the serial number, both counters and every reserved field through untouched. And the bit positions in it are *transcribed from the datasheet*, which means they could be wrong. That is why `write` refuses without `--i-have-read-the-plan` and why `verify --behaviour` exists. You are the check on the transcription, and after the lock there is no other.
+
+**ReqAuth is the line to get right.** Slot 0 must refuse to derive until a CheckMac against slot 2 has just succeeded. Skip it and the PIN counter does nothing: an attacker never calls `verify_pin` at all, they call the derive once per candidate PIN and let AES-GCM's tag tell them when they are right.
+
+**What the chip enforces, and what it does not.** There is no silicon retry counter on this part. The ten-attempt limit is firmware arithmetic over a monotonic counter and an encrypted baseline, and firmware is what an attacker with the case open replaces. What the chip *does* enforce is that Counter0 stops at 2,097,151 uses, permanently. That is the real ceiling on how many PIN guesses any firmware can ever make — and it is why the PIN is **eight digits, not six**. 10⁶ fits inside that budget; 10⁸ does not, so the chip bricks before the keyspace is exhausted. `firmware/se_atecc.py`'s module docstring is the long version.
 
 One design difference is worth naming, because it is where the gate lives. SeedSigner is stateless: it re-derives from a seed you type in each time, so there is nothing on the device to gate. CELL stores the seed encrypted and gates its decryption, which is what lets a liveness proof stand between an attacker and a key that is already there.
 
@@ -957,7 +993,9 @@ Three orderings carry the security, and reordering them breaks it even though th
 - **Gate before unwrap.** No sample, no seed: the chain refuses above step 6, and `EXPECTED_ORDER` is asserted in the tests rather than described in prose, so a reordering fails loudly.
 - **Measurements into the record.** The attestation commits to the gate's actual numbers via `liveness_digest()`, so "signed at blood tier" is checkable by a co-signer against one specific capture instead of being a boolean the device asserts about itself.
 
-**Configure the wrapping slot to require prior authorisation.** This is the single most important line of ATECC608B configuration in the build, and it is config rather than code: the slot holding the wrapping secret must require a successful CheckMac before it will derive, so the derive is physically unreachable without an attempt the counter already debited. Skip it and the PIN counter does nothing — an attacker never calls `verify_pin` at all, they call the derive once per candidate PIN and test each result against the encrypted seed, where AES-GCM's tag tells them when they are right. A six-digit PIN is 10⁶ tries with nothing debited and no wipe. `SoftSE` models the rule so the unlock chain is tested against it: one PIN verification authorises exactly one derive.
+**Configure the wrapping slot to require prior authorisation.** This is the single most important line of ATECC608B configuration in the build, and it is config rather than code: the slot holding the wrapping secret must require a successful CheckMac before it will derive, so the derive is physically unreachable without an attempt the counter already debited. Skip it and the PIN counter does nothing — an attacker never calls `verify_pin` at all, they call the derive once per candidate PIN and test each result against the encrypted seed, where AES-GCM's tag tells them when they are right. An eight-digit PIN is 10⁸ tries with nothing debited and no wipe. `SoftSE` models the rule so the unlock chain is tested against it: one PIN verification authorises exactly one derive.
+
+`tools/atecc_config.py` writes that binding — see "Configuring the ATECC608B" above — and `firmware/se_atecc.py` performs the CheckMac it demands. The two are one change: a driver that skips the CheckMac cannot open its own seed on a chip configured this way, which is how the previous version of this firmware would have failed on a bench.
 
 **The wrapping key uses stable inputs only — the PIN and the on-chip secret.** This is what makes the seed recoverable: a key must open tomorrow the seed it wrapped today. Liveness measurements are a fresh physical event with no reproducibility, and the sighash changes every transaction, so mixing either into the KDF yields a key that can never reopen anything. Both are still bound tight, in the place where binding them is worth something: the signed attestation, which a third party can verify. The signature already commits to the sighash cryptographically, so nothing is lost by taking it out of the KDF.
 
@@ -1081,8 +1119,8 @@ A sequence of checks, not a schedule — with the parts in front of you this is 
 | 5 | **Spectrum of dye vs. your blood** | 415 nm separates them cleanly. This is the "it works" moment |
 | 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure — early D, late D, the drop and its direction — not on a curve fit |
 | 7 | **Spoof panel** — the reader is done | ROC generated, thresholds set, documented. **This is the result the whole design rests on** |
-| 8 | ATECC608B configured, zones locked, PIN counter live | `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
-| 9 | Firmware installed, `run_tests.py` green on the Pi | 35 suites pass on the device itself, not just your laptop |
+| 8 | ATECC608B configured, zones locked, PIN counter live | `atecc_config.py verify --behaviour` passes every line BEFORE `lock-data`; `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
+| 9 | Firmware installed, `run_tests.py` green on the Pi | 36 suites pass on the device itself, not just your laptop |
 | 10 | Provisioned, and the backup written down | `provision.py` re-reads its own seed; you have the words on paper |
 | 11 | Regtest round trip | `tools/regtest_e2e.py` — Core accepts and mines what the device signed |
 | 12 | Testnet round trip, gate in the loop | Coins move, and only after a real sample |

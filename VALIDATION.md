@@ -13,7 +13,7 @@ samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — 35 suites, no hardware required.
+`python firmware/run_tests.py` — 36 suites, no hardware required.
 
 ### The signing stack
 
@@ -219,12 +219,13 @@ misbehave and watching it refuse tests the property itself.
 
 | Component | Why | How to verify |
 |---|---|---|
-| `firmware/se_atecc.py` | Needs the chip. The logic around it is now covered against a fake transport; nothing that touches I2C is | `python3 firmware/se_atecc.py --probe` on a built device |
+| `firmware/se_atecc.py` | Needs the chip. The logic around it is covered against a fake transport that now ENFORCES the config zone — secret slots refuse reads, ReqAuth slots refuse to derive without a CheckMac, baselines refuse clear writes — so a driver that only works on an unconfigured chip fails in CI. Nothing that touches I2C is covered | `python3 firmware/se_atecc.py --probe` on a built device |
 | `firmware/display.py` | Needs the panel. Layout limits and library calls are covered; SPI timing and font metrics are not | `bench.py display` for the origin, any screen for the rest |
 | `firmware/buttons.py` | Needs the switches. Consent and debounce logic and the library calls are covered; whether 30 ms settles YOUR switches is not | `bench.py buttons` |
 | `firmware/camera.py` | Needs the webcam. Collection, framing and the OpenCV calls are covered; whether a cheap lens focuses on a 240x240 panel is not | Scan a signed PSBT into a coordinator and back |
-| The ATECC608B config zone | The ReqAuth binding on slot 0 is what makes the attempt counter real, and no software can read it back and be sure | `bench.py atecc --i-can-wipe-this-chip` |
-| **The duress PIN, on real hardware** | **Absent, not merely unverified.** `SoftSE` implements it and 19 tests cover it; `se_atecc.RealSecureElement` returns a plain bool and cannot express a second PIN. A device built today has NO duress protection, whatever the firmware tests say | A second PIN slot in the config zone, then `bench.py atecc`. Same region as the ReqAuth line above, and blocked behind it |
+| The ATECC608B config zone | `tools/atecc_config.py` now writes it, and its encoder is checked in CI. What CI cannot check is whether the transcribed bit positions are the ones the datasheet means | `atecc_config.py verify --behaviour` on a built device, before `lock-data` |
+| The CheckMac digest | `se_atecc.checkmac_response()` is transcribed from the datasheet. Get one field boundary wrong and every PIN is rejected on a chip that is behaving perfectly | The first `verify_pin` on a configured chip. It is confirmed or refuted in seconds, before anything is permanent |
+| **The duress PIN, on real hardware** | Now present in the driver and in the device: slot 4 holds the second PIN key, slot 5 the decoy's wrapping secret, and `wallet.provision` records both wallets. Unverified in the sense everything on this chip is unverified — nobody has run it on silicon | `atecc_config.py verify --behaviour`, then provision with `--duress-pin` and spend from the decoy |
 | `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
 | `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |
 | Attestation key custody | The ATECC608B signs NIST P-256 only, so the secp256k1 attestation scalar is derived from a chip secret and exists in RAM while signing, rather than never leaving the chip | Stated in `se_atecc.py`; switch `attest.py` to P-256 if you need the stronger property |
@@ -272,23 +273,35 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
 
 ## Not yet built
 
-- **Duress, on a built device.** `firmware/duress.py` is real and tested, but
-  only against `SoftSE`. The hardware driver returns a bool, so it cannot say
-  *which* PIN was entered, and the second seed blob is unreachable. This is
-  worth stating twice because the failure mode is the worst kind: someone
-  reads the tests, sees duress covered, and believes they are protected under
-  coercion when the device they built cannot do it. Closing it needs a second
-  PIN slot in the config zone, which is behind the same unprobed chip as the
-  ReqAuth binding below.
+- **Duress, on the read-only screens.** Signing is closed: two PINs, two
+  wrapped seeds, two recorded wallets, and `test_wallet.py` drives both through
+  the whole device — the decoy signs with the decoy's key, its change is
+  recognised as its own, and crossing the wires refuses. What is NOT closed is
+  what the device *displays*. IDLE, RECEIVE and THIS DEVICE are watch-only and
+  need no PIN, so they show the primary wallet's fingerprint and addresses. A
+  coercer who says "show me your receive address" is shown the real wallet, and
+  a duress signature will not match it. Closing it means those screens asking
+  for a PIN first, which trades a real usability property against a threat that
+  only applies under coercion — a decision for whoever builds this, not one to
+  make silently. Until then: the duress PIN protects what you SIGN, not what
+  your device SHOWS.
 
-- **The ATECC608B's ReqAuth binding.** `BUILD.md` §12 requires slot 0 to
-  refuse to derive without a prior authorisation against the PIN slot. That is
-  the rule that makes the attempt counter mean anything: without it an
-  attacker never calls `verify_pin`, they call the derive once per candidate
-  PIN and let AES-GCM's tag tell them when they are right. It is configuration
-  rather than code, this firmware cannot read it back, and the firmware-side
-  check in `se_atecc.py` is the weaker stand-in. Confirm it on a built device
-  by spending eleven wrong PINs on one you can afford to wipe.
+- **The ATECC608B's ReqAuth binding, on silicon.** `tools/atecc_config.py`
+  writes it and `firmware/se_atecc.py` performs the CheckMac it demands — the
+  two used to contradict each other, and a device built to the old spec could
+  not have opened its own seed. What remains open is whether the transcribed
+  bit positions and the transcribed CheckMac digest are what the datasheet
+  actually means. Both are confirmed or refuted in the first minute on a bench:
+  `atecc_config.py verify --behaviour` asks the chip to misbehave, and the
+  first `verify_pin` either works or does not. Do both before `lock-data`.
+
+- **The ten-attempt limit, as a silicon guarantee.** It is not one, and never
+  was. This part has no retry counter. Ten attempts is firmware arithmetic over
+  a monotonic counter and a baseline that cannot be moved without the PIN —
+  good against someone who picks the device up, nothing against someone who
+  opens it and replaces the firmware. What the chip does enforce is that
+  Counter0 stops at 2,097,151. The PIN is eight digits so that ceiling sits
+  below the keyspace rather than above it.
 - **Long dormancy.** The sealed REFERENCE and NULL cartridges exist to catch
   optics drift over a year in a drawer; they are checked at every pre-flight.
 - **Population-scale false-reject rate.** Clotting time moves with hydration,

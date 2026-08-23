@@ -685,6 +685,35 @@ class PSBT:
                 found.append((keybytes, path))
         return found
 
+    def quoted_fingerprints(self) -> set:
+        """Every master fingerprint the inputs claim a key origin under.
+
+        A device that holds two wallets — see duress.py — has to know which of
+        them a PSBT is for BEFORE it can render it, because rendering happens
+        before the PIN and the PIN is the only other thing that could say. The
+        PSBT already answers: a coordinator building a spend quotes the origin
+        fingerprint of the wallet whose coins it is spending.
+
+        Read-only, and it commits to nothing: the answer only selects which
+        account xpubs to check ownership against, and every derivation is
+        rebuilt and compared afterwards regardless.
+        """
+        out = set()
+        for m in self.inputs:
+            entries = dict(_get_all(m, IN_BIP32_DERIVATION))
+            for _xonly, val in _get_all(m, IN_TAP_BIP32_DERIVATION).items():
+                r = Reader(val)
+                for _ in range(r.compact()):
+                    r.read(32)
+                entries[_xonly] = r.data[r.pos:]
+            for val in entries.values():
+                try:
+                    origin_fp, _path = _parse_derivation(val)
+                except Exception:                               # noqa: BLE001
+                    continue                    # malformed origins are caught later
+                out.add(origin_fp)
+        return out
+
     def _output_is_ours(self, i: int, root: ExtendedKey) -> bool:
         """Rederive and rebuild. The host's label is not evidence."""
         m = self.outputs[i]

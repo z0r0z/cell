@@ -91,8 +91,8 @@ def cmd_atecc(args) -> int:
     check("the wrapping key CANNOT be derived without a PIN", denied,
           "" if denied else
           "SLOT 0 IS NOT BOUND TO THE PIN SLOT. The attempt counter does not "
-          "protect the seed. Reconfigure before provisioning — see "
-          "se_atecc.CONFIG_REQUIREMENTS.")
+          "protect the seed. Reconfigure before provisioning:\n"
+          "        python3 tools/atecc_config.py plan")
 
     ok_pin = se.verify_pin(args.pin)
     if not check("the correct PIN is accepted", ok_pin,
@@ -137,6 +137,10 @@ def cmd_atecc(args) -> int:
         inert = True
     check("a wiped chip derives nothing", inert)
 
+    print("\n  This asks whether the chip BEHAVES. For whether its config zone")
+    print("  says what it should, and whether the two PIN slots are")
+    print("  indistinguishable, run this before you lock the data zone:")
+    print("        python3 tools/atecc_config.py verify --behaviour")
     print("\n  Re-provision before use: tools/provision.py new --out /boot/cell")
     return 0 if all(ok for _, ok, _ in RESULTS) else 1
 
@@ -260,7 +264,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("atecc", help="the PIN counter, tested by behaviour")
-    p.add_argument("--pin", default="123456")
+    p.add_argument("--pin", default="12345678")
     p.add_argument("--i-can-wipe-this-chip", action="store_true")
     p.set_defaults(fn=cmd_atecc)
 

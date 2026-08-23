@@ -38,12 +38,12 @@ import wallet
 from bip32 import ExtendedKey
 from policy import Policy, Tier
 from psbt import PSBT
-from se import SoftSE
+from se import MAX_PIN_ATTEMPTS, SoftSE
 from tx import Transaction, TxIn, TxOut, ser_compact
 
 MNEMONIC = ("abandon abandon abandon abandon abandon abandon abandon abandon "
             "abandon abandon abandon about")
-PIN = "123456"
+PIN = "12345678"
 FW = hashlib.sha256(b"test firmware").digest()
 CAL = hashlib.sha256(b"test thresholds").digest()
 
@@ -313,9 +313,15 @@ def main() -> int:
     check("master fingerprint recorded", prov.master_fingerprint == root.fingerprint())
     check("accounts are watch-only",
           all(ExtendedKey.deserialize(a.xpub).seckey is None for a in prov.accounts))
-    check("seed blob does not contain the words",
-          MNEMONIC.encode() not in prov.seed_blob
-          and b"abandon" not in prov.seed_blob)
+    packed = prov.seed_pair.pack()
+    check("the seed store does not contain the words",
+          MNEMONIC.encode() not in packed and b"abandon" not in packed)
+    # Two blobs, always. With no duress PIN asked for, the second is a real
+    # mnemonic under a key nobody can derive -- so the store's shape says
+    # nothing about whether this device has a decoy. See duress.py.
+    check("two seeds are wrapped even with no duress PIN",
+          len(prov.seed_pair.primary) > 0
+          and len(prov.seed_pair.secondary) == len(prov.seed_pair.primary))
     check("account xpub matches the seed",
           prov.account_for("p2wpkh").xpub
           == root.derive("m/84h/0h/0h").neutered().serialize("xpub"))
@@ -375,7 +381,7 @@ def main() -> int:
 
     # An unregistered quorum must be refused, not signed on the strength of
     # holding one of its keys.
-    bare = wallet.Provisioning(seed_blob=prov.seed_blob, accounts=prov.accounts,
+    bare = wallet.Provisioning(seed_pair=prov.seed_pair, accounts=prov.accounts,
                                master_fingerprint=prov.master_fingerprint)
     refuses("an unregistered quorum is refused",
             lambda: run_psbt(ms_blob, se, bare), psbtmod.BadPSBT)
@@ -662,15 +668,151 @@ def main() -> int:
     refuses("refuses an already-signed unsigned transaction",
             lambda: PSBT.parse(_with_scriptsig(good)), psbtmod.BadPSBT)
 
+    # ---- duress, through the whole device -----------------------------
+    #
+    # duress.py has its own suite, but until now nothing joined it to the
+    # wallet: `wallet.provision` wrote one blob and the signer opened one, so
+    # the module was correct and unreachable. These checks are the seam. What
+    # they prove is that the SAME call, with a different PIN, signs from a
+    # different seed -- no branch, no mode, no flag.
+    print("\n duress: a second PIN, a second wallet")
+    DPIN = "87654321"
+    DECOY = bip39.entropy_to_mnemonic(b"\x5a" * 32)
+    dse = SoftSE(pin=PIN, duress_pin=DPIN)
+    dprov = wallet.provision(MNEMONIC, dse, PIN, duress_pin=DPIN, decoy=DECOY)
+    decoy_root = bip32.from_mnemonic(DECOY)
+
+    # A spend of the REAL wallet's coins, and a spend of the DECOY's. Which
+    # wallet a PSBT is for is read off the origin fingerprints it quotes, not
+    # off the PIN -- the PIN comes after rendering and cannot be consulted in
+    # time. A coercer who has been shown the decoy builds against the decoy.
+    real_psbt = build_psbt(root, "p2wpkh")
+    decoy_psbt = build_psbt(decoy_root, "p2wpkh")
+
+    real_sig = run_psbt(real_psbt, dse, dprov, pin=PIN)
+    decoy_sig = run_psbt(decoy_psbt, dse, dprov, pin=DPIN)
+    check("the normal PIN signs the real wallet's spend", real_sig is not None)
+    check("the duress PIN signs the decoy's — no refusal, no hesitation",
+          decoy_sig is not None)
+
+    # The decoy's signature has to come from the DECOY key. A duress PIN that
+    # quietly signs with the real key is worse than no duress PIN at all.
+    def _sig_pubkeys(blob):
+        return {k[1:] for k in psbtmod.PSBT.parse(blob.psbt).inputs[0]
+                if k[:1] == bytes([psbtmod.IN_PARTIAL_SIG])}
+    decoy_key = decoy_root.derive(wallet.account_path("p2wpkh")).derive([0, 0])
+    real_key = root.derive(wallet.account_path("p2wpkh")).derive([0, 0])
+    check("...signed by the decoy's key",
+          decoy_key.pubkey in _sig_pubkeys(decoy_sig))
+    check("...and the real spend by the real one",
+          real_key.pubkey in _sig_pubkeys(real_sig))
+    check("neither signature is the other's key",
+          real_key.pubkey not in _sig_pubkeys(decoy_sig)
+          and decoy_key.pubkey not in _sig_pubkeys(real_sig))
+
+    # The decoy is a whole wallet, so its own change is recognised as change.
+    # If it were not, every duress spend would show the coercer a WARNING and
+    # the mechanism would announce itself the first time it was used.
+    dshown = {}
+    run_psbt(decoy_psbt, dse, dprov, pin=DPIN,
+             confirm=lambda ln: dshown.setdefault("l", ln) is None or True)
+    dtxt = "\n".join(dshown["l"])
+    check("the decoy's change is recognised as the decoy's own",
+          "-> your wallet" in dtxt and "WARNING" not in dtxt)
+
+    # Crossing the wires must fail closed rather than sign something. The
+    # refusal lands after the gate rather than before it, and that is not an
+    # oversight: which seed a PIN opens is not knowable until the PIN is
+    # entered, and the PIN is deliberately the last thing asked for. What
+    # matters is that it is a refusal and a readable one -- app.py turns a
+    # WalletError into a screen, never a traceback.
+    def _fails(fn):
+        try:
+            fn()
+            return False
+        except (signer.Refused, wallet.WalletError):
+            return True
+
+    check("the duress PIN cannot sign the real wallet's spend",
+          _fails(lambda: run_psbt(real_psbt, dse, dprov, pin=DPIN)))
+    check("...and the normal PIN cannot sign the decoy's",
+          _fails(lambda: run_psbt(decoy_psbt, dse, dprov, pin=PIN)))
+
+    check("both PINs restore the attempt budget the same way",
+          dse.attempts_remaining() == MAX_PIN_ATTEMPTS)
+
+    # A device provisioned WITHOUT a duress PIN must be shaped identically to
+    # one provisioned with it. This is what stops "does this device have a
+    # decoy" being answerable by looking at the card.
+    check("the seed store is the same size either way",
+          len(dprov.seed_pair.pack()) == len(prov.seed_pair.pack()))
+    check("...and every device records a decoy account for each of its own",
+          len(prov.decoy_accounts) == len(prov.accounts)
+          and len(dprov.decoy_accounts) == len(dprov.accounts))
+    # The decoy of a device with no duress PIN is a real, well-formed wallet
+    # that no PIN can reach. Its accounts are recorded, so the record looks the
+    # same as a device that has one -- but nothing opens its seed.
+    check("a device with no duress PIN still records a decoy wallet",
+          prov.decoy_fingerprint not in (b"", b"\x00\x00\x00\x00")
+          and prov.decoy_fingerprint != prov.master_fingerprint)
+    # ...and its seed is sealed: the normal PIN's key opens exactly one of the
+    # two blobs. The other was wrapped under 32 random bytes that were never
+    # stored, so nothing opens it, ever.
+    import seedstore as _ss
+    se.verify_pin(PIN)
+    _key = se.kdf(signer.unwrap_context(PIN))
+    opened = 0
+    for _blob in prov.seed_pair.blobs():
+        try:
+            _ss.unwrap(_blob, _key)
+            opened += 1
+        except Exception:                                       # noqa: BLE001
+            pass
+    check("...and its seed is sealed under a key that was never stored",
+          opened == 1)
+
+    # THROUGH THE FILES ON THE CARD, not just in memory. The decoy's accounts
+    # and fingerprint have to survive a power cycle: without them the device
+    # unwraps the decoy seed after a reboot and then refuses to sign with it,
+    # because signing checks the seed against a recorded fingerprint. Duress
+    # would work until the first power cycle and then silently stop, which is
+    # the worst way for this particular feature to fail.
+    import sys as _sys, tempfile as _tf
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parent.parent / "tools"))
+    import provision as _pt
+    with _tf.TemporaryDirectory() as _d:
+        _out = _P(_d)
+        (_out / _pt.BLOB).write_bytes(dprov.seed_pair.pack())
+        _pt._save(_out, dprov, "mainnet")
+        reloaded = _pt.load(_out)
+        check("the decoy survives a round trip through the card",
+              reloaded.decoy_fingerprint == dprov.decoy_fingerprint
+              and len(reloaded.decoy_accounts) == len(dprov.decoy_accounts))
+        check("...and both seeds come back byte for byte",
+              reloaded.seed_pair.blobs() == dprov.seed_pair.blobs())
+        check("...and the reloaded device still signs the decoy's spend",
+              run_psbt(decoy_psbt, dse, reloaded, pin=DPIN) is not None)
+
     # ---- FOOTGUN: the seed at rest ------------------------------------
     print("\n footgun: the seed at rest")
     refuses("a wrong PIN does not unwrap the seed",
-            lambda: run_psbt(good, se, prov, pin="000000"), signer.Refused)
-    bad_prov = wallet.Provisioning(seed_blob=bytearray(prov.seed_blob),
-                                   accounts=prov.accounts,
-                                   master_fingerprint=prov.master_fingerprint)
-    bad_prov.seed_blob = bytes(bad_prov.seed_blob[:-1]
-                               + bytes([bad_prov.seed_blob[-1] ^ 0x01]))
+            lambda: run_psbt(good, se, prov, pin="00000000"), signer.Refused)
+    import duress as duress_mod
+
+    def _flip(blob: bytes) -> bytes:
+        return blob[:-1] + bytes([blob[-1] ^ 0x01])
+
+    # BOTH blobs, not one. wrap_pair shuffles them, so "the primary is the
+    # real seed" is true about half the time -- a test that tampered with only
+    # the first would pass on the tosses where it corrupted the decoy and the
+    # real seed opened anyway.
+    bad_prov = wallet.Provisioning(
+        seed_pair=duress_mod.SeedPair(
+            primary=_flip(prov.seed_pair.primary),
+            secondary=_flip(prov.seed_pair.secondary)),
+        accounts=prov.accounts,
+        master_fingerprint=prov.master_fingerprint)
     refuses("a tampered seed blob is detected, not decrypted",
             lambda: run_psbt(good, SoftSE(pin=PIN), bad_prov),
             Exception)

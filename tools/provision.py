@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "firmware"))
 
 import bip39                                                    # noqa: E402
+import duress                                                   # noqa: E402
 import eth                                                      # noqa: E402
 import seedstore                                                # noqa: E402
 import signer                                                   # noqa: E402
@@ -47,7 +48,7 @@ def _se(args):
         print("! Using the SOFTWARE secure element. This is for rehearsal on a")
         print("! laptop only — it is not a security boundary, and a seed")
         print("! provisioned this way must never hold real funds.\n")
-        return SoftSE(pin=args.pin)
+        return SoftSE(pin=args.pin, duress_pin=args.duress_pin)
     try:
         from se_atecc import ATECC608B
         return ATECC608B()
@@ -146,11 +147,22 @@ def _write(mnemonic: str, se, args) -> int:
     # reprovisioning from the backup words, which is also the only path that
     # proves you still have them.
     if hasattr(se, "set_pin"):
-        se.set_pin(args.pin)
+        # Both PIN slots, always. The chip is written the same way whether or
+        # not a duress PIN was asked for -- with none, slot 4 gets a secret
+        # nobody can produce. See se_atecc.set_pin and duress.py.
+        try:
+            se.set_pin(args.pin, args.duress_pin)
+        except TypeError:                                   # SoftSE, set at construction
+            se.set_pin(args.pin)
 
-    prov = wallet.provision(mnemonic, se, args.pin, network=args.network)
+    decoy = None
+    if args.duress_pin:
+        decoy = _decoy_mnemonic(args)
 
-    (out / BLOB).write_bytes(prov.seed_blob)
+    prov = wallet.provision(mnemonic, se, args.pin, network=args.network,
+                            duress_pin=args.duress_pin, decoy=decoy)
+
+    (out / BLOB).write_bytes(prov.seed_pair.pack())
     (out / BLOB).chmod(0o600)
     _save(out, prov, args.network)
 
@@ -159,20 +171,18 @@ def _write(mnemonic: str, se, args) -> int:
     # cheap to rule out. This goes through verify_pin because the chip answers
     # the KDF only after one, and only once per one — the same path signing
     # takes, so what is proven here is what will happen later.
-    if not se.verify_pin(args.pin):
-        print("\nFAIL — the secure element rejected the PIN it was just given.")
+    stored = duress.SeedPair.unpack((out / BLOB).read_bytes())
+    if not _reopens(se, stored, args.pin, mnemonic, "the seed"):
         return 1
-    reopened = seedstore.unwrap((out / BLOB).read_bytes(),
-                                se.kdf(signer.unwrap_context(args.pin)))
-    if bytes(reopened).decode() != bip39.normalise(mnemonic):
-        print("\nFAIL — the seed was written but does not read back. Nothing "
-              "about this device should be trusted; do not fund it.")
-        return 1
-    signer.zeroise(reopened)
+    if args.duress_pin:
+        # The decoy has to open too, and it has to open to the DECOY. A duress
+        # PIN that silently opens the real wallet is worse than none at all.
+        if not _reopens(se, stored, args.duress_pin, decoy, "the decoy seed"):
+            return 1
 
     print(f"Written to {out}/")
-    print(f"  {BLOB:<14} encrypted, {len(prov.seed_blob)} bytes, "
-          f"id {seedstore.fingerprint(prov.seed_blob)}")
+    print(f"  {BLOB:<14} encrypted, {len(prov.seed_pair.pack())} bytes, "
+          f"id {seedstore.fingerprint(prov.seed_pair.primary)}")
     print(f"  {ACCOUNTS:<14} watch-only, safe to copy")
     print(f"\n  master fingerprint {prov.master_fingerprint.hex()}")
     for a in prov.accounts:
@@ -185,13 +195,69 @@ def _write(mnemonic: str, se, args) -> int:
     return 0
 
 
+def _reopens(se, stored, pin: str, expect: str, what: str) -> bool:
+    """Prove the round trip before declaring success.
+
+    Provisioning a device that cannot reopen its own seed is the worst possible
+    outcome here, and it is cheap to rule out. This goes through verify_pin
+    because the chip answers the KDF only after one, and only once per one --
+    the same path signing takes, so what is proven here is what will happen
+    later.
+    """
+    if not se.verify_pin(pin):
+        print(f"\nFAIL — the secure element rejected a PIN it was just given.")
+        return False
+    try:
+        reopened = duress.unwrap_any(stored, se.kdf(signer.unwrap_context(pin)))
+    except duress.NoBlobOpened:
+        print(f"\nFAIL — {what} was written but nothing reopens it. Nothing "
+              f"about this device should be trusted; do not fund it.")
+        return False
+    good = bytes(reopened).decode() == bip39.normalise(expect)
+    signer.zeroise(reopened)
+    if not good:
+        print(f"\nFAIL — {what} reads back as a different mnemonic than the "
+              f"one that went in. Do not fund this device.")
+    return good
+
+
+def _decoy_mnemonic(args) -> str:
+    """The wallet the duress PIN opens.
+
+    THE DECOY HAS TO BE REAL, and that is a judgement this code cannot make --
+    see duress.py. An empty wallet tells the coercer they were given the wrong
+    PIN, which puts you back where you started and angrier. What this does is
+    generate the words and make you write them down, because a decoy you
+    cannot restore is a decoy you cannot fund.
+    """
+    print("\nThe duress PIN opens a SECOND wallet. Generating its seed.\n")
+    words = bip39.entropy_to_mnemonic(os.urandom(32))
+    print("  THE DECOY'S 24 WORDS — write them on separate paper NOW.\n")
+    for i, w in enumerate(words.split(), 1):
+        print(f"    {i:2}. {w}")
+    print("\n  Fund this wallet with an amount that is plausible for you to")
+    print("  hold and survivable to lose. An empty decoy protects nobody.")
+    if not args.no_confirm:
+        _confirm_words(words)
+    return words
+
+
 def _save(out: Path, prov: wallet.Provisioning, network: str) -> None:
     (out / ACCOUNTS).write_text(json.dumps({
         "master_fingerprint": prov.master_fingerprint.hex(),
+        # The second wallet's watch-only half, written whether or not a duress
+        # PIN was configured. Without it the device unwraps the decoy seed
+        # after a reboot and then refuses to sign with it, because signing
+        # checks the seed against a recorded fingerprint -- so duress would
+        # work until the first power cycle and silently stop.
+        "decoy_fingerprint": prov.decoy_fingerprint.hex(),
         "network": network,
         "accounts": [{"script_type": a.script_type, "path": a.path,
                       "xpub": a.xpub, "network": a.network}
                      for a in prov.accounts],
+        "decoy_accounts": [{"script_type": a.script_type, "path": a.path,
+                            "xpub": a.xpub, "network": a.network}
+                           for a in prov.decoy_accounts],
         "multisig": [{"label": m.label, "threshold": m.threshold,
                       "sorted_keys": m.sorted_keys, "wrapped": m.wrapped,
                       "network": m.network,
@@ -208,9 +274,13 @@ def load(d: Path) -> wallet.Provisioning:
     """Read a provisioned device's public record and its wrapped seed."""
     data = json.loads((d / ACCOUNTS).read_text())
     prov = wallet.Provisioning(
-        seed_blob=(d / BLOB).read_bytes(),
+        seed_pair=duress.SeedPair.unpack((d / BLOB).read_bytes()),
         master_fingerprint=bytes.fromhex(data["master_fingerprint"]),
-        accounts=[wallet.Account(**a) for a in data["accounts"]])
+        accounts=[wallet.Account(**a) for a in data["accounts"]],
+        decoy_fingerprint=bytes.fromhex(data.get("decoy_fingerprint")
+                                        or "00000000"),
+        decoy_accounts=[wallet.Account(**a)
+                        for a in data.get("decoy_accounts", [])])
     for m in data.get("multisig", []):
         prov.multisig.append(wallet.Multisig(
             label=m["label"], threshold=m["threshold"],
@@ -347,6 +417,10 @@ def main() -> int:
         p = sub.add_parser(name)
         p.add_argument("--out", default="/boot/cell")
         p.add_argument("--pin", required=True)
+        p.add_argument("--duress-pin", default=None,
+                       help="a second PIN that opens a second wallet. Read "
+                            "firmware/duress.py before using this — an "
+                            "unfunded decoy protects nobody")
         p.add_argument("--network", default="mainnet",
                        choices=["mainnet", "testnet", "regtest"])
         p.add_argument("--soft", action="store_true",
@@ -388,10 +462,22 @@ def main() -> int:
     if getattr(args, "pin", None) is not None and not args.pin.isdigit():
         print("The PIN must be digits — it is entered on four buttons.")
         return 1
-    if getattr(args, "pin", None) is not None and len(args.pin) < 6:
-        print("Use at least six digits. The chip allows ten attempts before it")
-        print("wipes, so a short PIN is the weakest link in the whole device.")
-        return 1
+    if getattr(args, "duress_pin", None) is not None:
+        if not args.duress_pin.isdigit():
+            print("The duress PIN must be digits too.")
+            return 1
+        if args.duress_pin == args.pin:
+            print("The duress PIN must differ from the normal one.")
+            return 1
+    for label in ("pin", "duress_pin"):
+        value = getattr(args, label, None)
+        if value is not None and len(value) < 8:
+            print("Use at least eight digits. Ten attempts is a firmware rule;")
+            print("what the chip enforces is that its counter stops at")
+            print("2,097,151 uses, so a keyspace smaller than that is one an")
+            print("attacker with their own firmware can walk through. 10^6")
+            print("fits inside it and 10^8 does not. See se_atecc.py.")
+            return 1
     return args.fn(args)
 
 

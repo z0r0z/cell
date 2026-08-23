@@ -9,7 +9,7 @@ is easy to over-trust:
 
   A monotonic PIN attempt counter that survives power loss.
     This is the whole reason it is here. A counter in flash on the Pi can be
-    rolled back by anyone with the SD card, which turns a 6-digit PIN into a
+    rolled back by anyone with the SD card, which turns an 8-digit PIN into a
     weekend of guessing. The counter increments BEFORE the comparison, so
     yanking power mid-attempt costs an attempt rather than refunding one.
 
@@ -74,9 +74,10 @@ class SecureElement(ABC):
         truthy. It just cannot express duress, so on that device the second
         seed blob is unreachable and the feature is simply absent.
 
-        se_atecc.RealSecureElement is currently in that position: it returns
-        bool, and needs a second PIN slot on the chip before it can do more.
-        See duress.py.
+        Both implementations here return a PinResult. `se_atecc.ATECC608B`
+        does it with two PIN key slots on the chip, tried in a fixed order and
+        costing the same three CheckMacs whichever one matched — see its module
+        docstring and duress.py.
         """
 
     @abstractmethod
@@ -93,7 +94,8 @@ class SecureElement(ABC):
         if the derive can be called without it, an attacker never calls
         verify_pin at all. They call kdf once per candidate PIN and try the
         result against the encrypted seed — AES-GCM's tag tells them when they
-        are right — and a six-digit PIN is 10^6 tries with nothing debited.
+        are right — and even an eight-digit PIN is 10^8 tries with nothing
+        debited.
 
         Single use, not session-scoped: one PIN verification authorises one
         unwrap. Otherwise one legitimate verification leaves the derive open to
@@ -253,7 +255,7 @@ def _selftest() -> int:
     # A derive must be UNREACHABLE without spending an attempt. This is the
     # property that makes the counter mean anything: if kdf answers without a
     # PIN verification, an attacker skips verify_pin entirely and brute-forces
-    # the PIN against the encrypted seed, 10^6 tries, nothing debited.
+    # the PIN against the encrypted seed, 10^8 tries, nothing debited.
     se_g = SoftSE(pin="123456")
     try:
         se_g.kdf(b"ctx")

@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 
 import bip32
 import bip39
+import duress
 import eth
 import ops
 import psbt as psbtmod
@@ -158,13 +159,24 @@ class Multisig:
 class Provisioning:
     """What the device knows about itself between power cycles.
 
-    None of it is secret. The seed blob is encrypted, and the accounts are
+    None of it is secret. The seed store is encrypted, and the accounts are
     watch-only — this record can be backed up in the clear.
     """
 
-    seed_blob: bytes
+    # Both wrapped seeds, always. Which one a PIN opens is decided by which
+    # key it derives, and nothing here knows or needs to know which is the
+    # decoy — see duress.py. A device with no duress PIN configured still
+    # carries a second blob, under a key nobody can produce.
+    seed_pair: "duress.SeedPair"
     accounts: list[Account] = field(default_factory=list)
     master_fingerprint: bytes = b"\x00\x00\x00\x00"
+    # The second wallet's watch-only half. Present whether or not a duress PIN
+    # was configured, for the same reason the second blob is: a record that
+    # appears only on devices with a decoy is a record that announces them.
+    # Which of the two a spend is for is read off the PSBT, not off the PIN —
+    # see _watch_root(). Nothing here is secret; both halves are xpubs.
+    decoy_accounts: list[Account] = field(default_factory=list)
+    decoy_fingerprint: bytes = b"\x00\x00\x00\x00"
     multisig: list[Multisig] = field(default_factory=list)
     # EVM chains the owner registered, {chain_id: (name, ticker)}. Applied to
     # eth.CHAINS when the record is loaded; see tools/provision.py chain.
@@ -212,18 +224,31 @@ class Provisioning:
 
 def provision(mnemonic: str, se: SecureElement, pin: str,
               script_types: tuple[str, ...] = ("p2wpkh", "p2tr", "p2sh-p2wpkh"),
-              network: str = "mainnet") -> Provisioning:
+              network: str = "mainnet",
+              duress_pin: str | None = None,
+              decoy: str | None = None) -> Provisioning:
     """Wrap a seed and record the watch-only accounts that go with it.
 
     Called once, by tools/provision.py, with the device open. The mnemonic is
     validated first: a phrase that fails its checksum would restore nowhere,
     and discovering that during a recovery is discovering it too late.
+
+    TWO SEEDS ARE ALWAYS WRAPPED, whether or not a duress PIN was asked for.
+    With one, the second seed is the decoy and `duress_pin` opens it. Without
+    one, the second seed is a real 24-word mnemonic wrapped under a key derived
+    from a PIN nobody can enter, and it is unreachable forever. The device is
+    byte-for-byte the same shape either way, which is the entire mechanism —
+    see duress.py. A build that wrote one blob when duress was off would
+    announce, to anyone holding the card, exactly which devices have something
+    to hide.
     """
     if not bip39.validate(mnemonic):
         raise WalletError(
             "that mnemonic fails its BIP-39 checksum. A word is wrong or out "
             "of order — fix it now, because a backup that does not restore is "
             "not a backup.")
+    if duress_pin is not None and duress_pin == pin:
+        raise WalletError("the duress PIN must differ from the normal one")
     root = bip32.from_mnemonic(mnemonic)
     # The secure element hands out a wrapping key only after a successful PIN,
     # and only once per PIN. Provisioning is no exception: a path that could
@@ -232,7 +257,21 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
     if not se.verify_pin(pin):
         raise WalletError("that PIN was not accepted by the secure element")
     key = se.kdf(signer.unwrap_context(pin))
-    blob = seedstore.wrap(mnemonic, key)
+
+    if duress_pin is not None:
+        if not se.verify_pin(duress_pin):
+            raise WalletError(
+                "that duress PIN was not accepted by the secure element. It "
+                "has to be set on the chip before provisioning — see "
+                "se_atecc.set_pin.")
+        duress_key = se.kdf(signer.unwrap_context(duress_pin))
+    else:
+        # No PIN derives this. The second blob is real, well-formed and
+        # permanently unopenable, which is what makes its presence say nothing.
+        import os
+        duress_key = os.urandom(32)
+    decoy = decoy or duress.decoy_mnemonic()
+    pair = duress.wrap_pair(mnemonic, decoy, key, duress_key)
 
     accounts = []
     for st in MULTISIG_SCRIPT:
@@ -254,8 +293,21 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
                             xpub=root.derive(f"m/44h/{ETH_COIN}h/0h")
                             .neutered().serialize("xpub"),
                             network="ethereum"))
-    return Provisioning(seed_blob=blob.pack(), accounts=accounts,
-                        master_fingerprint=root.fingerprint())
+    # The decoy's watch-only half, derived the same way. Without it the device
+    # can unwrap the decoy seed and then refuse to sign with it, because
+    # sign_digest checks the unwrapped seed against a recorded fingerprint —
+    # which is exactly what happened the first time duress was wired through.
+    decoy_root = bip32.from_mnemonic(decoy)
+    decoy_accounts = [
+        Account(script_type=a.script_type, path=a.path,
+                xpub=decoy_root.derive(a.path).neutered().serialize(
+                    "xpub" if a.network != "ethereum" else "xpub"),
+                network=a.network)
+        for a in accounts]
+    return Provisioning(seed_pair=pair, accounts=accounts,
+                        master_fingerprint=root.fingerprint(),
+                        decoy_accounts=decoy_accounts,
+                        decoy_fingerprint=decoy_root.fingerprint())
 
 
 # --------------------------------------------------------------------------
@@ -305,7 +357,8 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
     # Analyse against the watch-only keys. This is what makes it possible to
     # display the transaction — including which output is really our change —
     # without the seed being anywhere in memory yet.
-    watch = _watch_root(prov, network)
+    quoted = p.quoted_fingerprints()
+    watch = _watch_root(prov, network, quoted)
     infos = [p._input_info(i, watch) for i in range(len(p.tx.vin))]
     summary = p.summarize(watch, network)
     if summary.signable == 0:
@@ -323,7 +376,11 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
         if bound != digest:
             raise WalletError("the digest changed between display and signing")
         root = _root_from(seed)
-        if root.fingerprint() != prov.master_fingerprint:
+        # The seed that opened has to be the one this PSBT is for. Both of the
+        # device's wallets are legitimate; a seed matching NEITHER means the
+        # blob and the record disagree, and signing then would sign with a key
+        # nobody provisioned.
+        if root.fingerprint() != watch.fingerprint():
             raise WalletError(
                 "the unwrapped seed does not match this device's recorded "
                 "master fingerprint; refusing to sign with an unexpected key")
@@ -338,7 +395,7 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
                          bytes([psbtmod.IN_TAP_KEY_SIG])))
 
     def unwrap_seed(key: bytes) -> bytearray:
-        return seedstore.unwrap(prov.seed_blob, key)
+        return duress.unwrap_any(prov.seed_pair, key)
 
     s = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
                       confirm=confirm, run_gate=run_gate,
@@ -357,17 +414,37 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
                       signatures=signed_count["n"])
 
 
-def _watch_root(prov: Provisioning, network: str) -> ExtendedKey:
+def _wallet_for(prov: Provisioning, quoted=None):
+    """Which of this device's two wallets a request is for.
+
+    A CELL holds two: the one the normal PIN opens and the one the duress PIN
+    opens. Which one a spend concerns cannot be decided by the PIN, because the
+    transaction is rendered before the PIN is asked for and that ordering is
+    the whole unlock chain. So it is decided by the PSBT, which already says:
+    a coordinator spending the decoy's coins quotes the decoy's fingerprint.
+
+    Ambiguity resolves to the primary wallet. A PSBT quoting both, or neither,
+    is one the device will fail to find a signable input in anyway.
+    """
+    if (quoted and prov.decoy_accounts
+            and prov.decoy_fingerprint in quoted
+            and prov.master_fingerprint not in quoted):
+        return prov.decoy_accounts, prov.decoy_fingerprint
+    return prov.accounts, prov.master_fingerprint
+
+
+def _watch_root(prov: Provisioning, network: str, quoted=None) -> ExtendedKey:
     """A synthetic root that answers owns() for our accounts.
 
     An account xpub sits at depth 3, so paths inside a PSBT — which are quoted
     from the master — cannot be walked from it directly. This wrapper walks the
     account's own suffix instead, and refuses anything outside it.
     """
-    accounts = [a for a in prov.accounts if a.network == network]
+    all_accounts, fingerprint = _wallet_for(prov, quoted)
+    accounts = [a for a in all_accounts if a.network == network]
     if not accounts:
         raise WalletError(f"no accounts provisioned for {network}")
-    return _AccountRoot(accounts, prov.master_fingerprint)
+    return _AccountRoot(accounts, fingerprint)
 
 
 class _AccountRoot(ExtendedKey):
@@ -443,7 +520,7 @@ def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
         return r.to_bytes(32, "big") + s_.to_bytes(32, "big") + bytes([y])
 
     def unwrap_seed(key: bytes) -> bytearray:
-        return seedstore.unwrap(prov.seed_blob, key)
+        return duress.unwrap_any(prov.seed_pair, key)
 
     s = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
                       confirm=confirm, run_gate=run_gate,

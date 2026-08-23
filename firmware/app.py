@@ -55,7 +55,13 @@ from policy import Policy, Tier
 from se import PinLockout, SecureElement
 from wallet import Provisioning, WalletError
 
-PIN_LENGTH = 6
+# Eight, not six. The ATECC608B has no silicon retry counter — the ten-attempt
+# limit is firmware arithmetic over a monotonic counter, and firmware is what
+# an attacker with the case open replaces. What the chip DOES enforce is that
+# its counter stops at 2**21, so a keyspace larger than that is one the part
+# runs out before an attacker does. 10**6 fits inside 2,097,151; 10**8 does
+# not. See the module docstring in se_atecc.py.
+PIN_LENGTH = 8
 
 
 class Abort(Exception):
@@ -448,7 +454,7 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
     prov = prov_tool.load(d)
 
     if console:
-        se = __import__("se").SoftSE(pin="000000")
+        se = __import__("se").SoftSE(pin="0" * PIN_LENGTH)
     else:
         from se_atecc import ATECC608B
         se = ATECC608B()

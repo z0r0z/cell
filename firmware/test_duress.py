@@ -23,7 +23,7 @@ import bip39
 # that fails exactly when you need it.
 REAL = bip39.entropy_to_mnemonic(bytes(range(32)))
 DECOY = bip39.entropy_to_mnemonic(bytes(range(32, 64)))
-PIN, DPIN = "123456", "654321"
+PIN, DPIN = "12345678", "87654321"
 
 
 def _device(duress_pin=DPIN):
@@ -65,7 +65,7 @@ def run() -> int:
         check("another device opens neither", True)
 
     try:
-        _key(se, "000000")
+        _key(se, "00000000")
         check("a wrong PIN yields no key", False)
     except Exception:
         check("a wrong PIN yields no key", True)

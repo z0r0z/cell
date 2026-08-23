@@ -51,7 +51,7 @@ from tx import Transaction, TxIn, TxOut, ser_compact            # noqa: E402
 
 MNEMONIC = ("abandon abandon abandon abandon abandon abandon abandon abandon "
             "abandon abandon abandon about")
-PIN = "123456"
+PIN = "12345678"
 FW = hashlib.sha256(b"regtest firmware").digest()
 CAL = hashlib.sha256(b"regtest thresholds").digest()
 NETWORK = "regtest"

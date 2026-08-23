@@ -33,11 +33,41 @@ WHAT MAKES IT CREDIBLE, which is harder than making it work:
   A duress PIN resets the attempt counter exactly as the normal one does, so
   entering one then the other leaves nothing different to read afterwards.
 
+HOW THE DEVICE KNOWS WHICH WALLET A SPEND IS FOR, given that it must not ask.
+Not from the PIN. The transaction is rendered before the PIN is entered --
+that ordering is the unlock chain and it does not bend for this -- so by the
+time the PIN could say, the screen is already drawn. It comes from the PSBT
+instead: a coordinator spending the decoy's coins quotes the decoy's origin
+fingerprint, because that is what its own descriptor says. `wallet._wallet_for`
+reads it and picks the matching account xpubs. Nothing is trusted on that
+basis; every derivation is rebuilt and compared afterwards exactly as before.
+It only decides which of two recorded wallets to check against.
+
+So both halves are recorded at provisioning: two wrapped seeds AND two sets of
+watch-only accounts. A device that stored only the real wallet's accounts can
+unwrap the decoy seed and then refuse to sign with it, because the signer
+checks the unwrapped seed against a recorded fingerprint. That is not a
+theory; it is what the first attempt at this did.
+
 WHAT IT DOES NOT DO. The firmware is public, so an attacker knows the feature
 exists. What they cannot learn is whether THIS device has one configured, or
 which of two PINs they were given. That is the whole of the protection: not
 that the mechanism is secret, but that its use is unfalsifiable. Anyone who
 tells you a duress PIN hides more than that is selling something.
+
+AND ONE THING IT DOES NOT YET DO, stated here rather than left to be
+discovered. The read-only screens -- IDLE, RECEIVE and THIS DEVICE in app.py --
+show the PRIMARY wallet's fingerprint and addresses. They are watch-only and
+deliberately need no PIN, which is right for every other reason and wrong for
+this one: a coercer who says "show me your receive address" is shown the real
+wallet, and a duress signature will not match it. Signing is fully covered;
+being interrogated about your addresses is not.
+
+Closing it means those screens asking for a PIN before they will show anything,
+which trades a real usability property for a threat that only applies under
+coercion. It is a decision for whoever builds this, not one to make silently in
+a module docstring -- so until it is made, treat the duress PIN as protecting
+what you SIGN and not what your device DISPLAYS. VALIDATION.md carries it.
 
 THE DECOY HAS TO BE REAL. An empty wallet tells the coercer they were given
 the wrong PIN, which puts you back where you started and angrier. Fund it with
@@ -82,14 +112,45 @@ class SeedPair:
     def blobs(self) -> tuple[bytes, bytes]:
         return (self.primary, self.secondary)
 
+    def pack(self) -> bytes:
+        """Both blobs in one file, length-prefixed.
+
+        ONE file, not two. Two files on the card is a count an attacker can
+        read, and a count is all it takes: a device with one blob has no duress
+        PIN and a device with two does. One file of a fixed size says nothing
+        either way, which is the same argument as always writing the second
+        blob in the first place.
+        """
+        if len(self.primary) > 0xFFFF:
+            raise ValueError("a wrapped seed does not fit its length prefix")
+        return (len(self.primary).to_bytes(2, "big") + self.primary
+                + self.secondary)
+
+    @classmethod
+    def unpack(cls, raw: bytes) -> "SeedPair":
+        if len(raw) < 2:
+            raise ValueError("seed store is truncated")
+        n = int.from_bytes(raw[:2], "big")
+        if len(raw) < 2 + n:
+            raise ValueError("seed store is truncated")
+        return cls(primary=raw[2:2 + n], secondary=raw[2 + n:])
+
 
 def wrap_pair(mnemonic: str, decoy: str,
               normal_key: bytes, duress_key: bytes) -> SeedPair:
     """Wrap both seeds, each under the key its own PIN derives."""
     if normal_key == duress_key:
         raise ValueError("both PINs derived the same key; they must differ")
-    return SeedPair(primary=seedstore.wrap(mnemonic, normal_key).pack(),
-                    secondary=seedstore.wrap(decoy, duress_key).pack())
+    real = seedstore.wrap(mnemonic, normal_key).pack()
+    fake = seedstore.wrap(decoy, duress_key).pack()
+    # Shuffled, so the real seed is not reliably the first one. unwrap_any
+    # tries both regardless, so the order carries no information the device
+    # needs -- which is exactly why it should carry none an attacker can use
+    # either. Without this, "the first blob is the real wallet" is true of
+    # every CELL ever provisioned.
+    if os.urandom(1)[0] & 1:
+        real, fake = fake, real
+    return SeedPair(primary=real, secondary=fake)
 
 
 def unwrap_any(pair: SeedPair, key: bytes) -> bytearray:

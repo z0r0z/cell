@@ -53,6 +53,10 @@ SUITES = [
      [sys.executable, "qr.py"]),
     ("secure element driver — interface conformance",
      [sys.executable, "se_atecc.py"]),
+    # The config zone is the one part of the build a mistake in is permanent,
+    # so its encoder is checked here even though the tool lives in tools/.
+    ("ATECC608B config zone — encoding, invariants, and the slot map",
+     [sys.executable, "../tools/atecc_config.py", "selfcheck"]),
     ("secure element driver — the arithmetic, against a fake chip",
      [sys.executable, "test_se_atecc.py"]),
     ("display — layout limits and the colour rule",

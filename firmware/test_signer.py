@@ -19,7 +19,7 @@ from signer import Refused, SignRequest, Signer, liveness_digest
 
 FW = hashlib.sha256(b"cell-fw-test").digest()
 CAL = hashlib.sha256(b"cell-thresholds-test").digest()
-PIN = "123456"
+PIN = "12345678"
 SIGHASH = hashlib.sha256(b"tx-under-test").digest()
 
 GATE_OK = (True, {"gate_scores": {"G1": 0.15, "G6": 0.02}})
@@ -240,7 +240,7 @@ def run() -> int:
     s13, _ = make(se=se_lock)
     for _ in range(MAX_PIN_ATTEMPTS):
         try:
-            s13.authorize_and_sign(SignRequest(spend, SIGHASH), "000000")
+            s13.authorize_and_sign(SignRequest(spend, SIGHASH), "00000000")
         except Refused:
             pass
     refuses("device wipes after repeated wrong PINs",

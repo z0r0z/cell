@@ -167,7 +167,7 @@ def confirm(buttons: Buttons, present: Callable[[], None],
         # somewhere other than where you think you are.
 
 
-def pin_entry(buttons: Buttons, display, length: int = 6,
+def pin_entry(buttons: Buttons, display, length: int = 8,
               prompt: str = "ENTER PIN") -> str | None:
     """Digit picker on four buttons. Returns None if the owner backs out.
 
@@ -293,22 +293,28 @@ def _selftest() -> int:
 
     # ---- PIN entry ----
     d = ConsoleDisplay(out=open("/dev/null", "w"))
-    # 1, then 2, then four zeros.
-    script = ([UP, CONFIRM] + [UP, UP, CONFIRM] + [CONFIRM] * 4)
+    # 1, then 2, then six zeros. Eight digits by default -- see app.PIN_LENGTH.
+    script = ([UP, CONFIRM] + [UP, UP, CONFIRM] + [CONFIRM] * 6)
     checks.append(("PIN entry assembles the digits",
-                   pin_entry(FakeButtons(script), d) == "120000"))
+                   pin_entry(FakeButtons(script), d) == "12000000"))
     checks.append(("BACK on an empty PIN cancels",
                    pin_entry(FakeButtons([BACK]), d) is None))
     checks.append(("BACK deletes a digit",
-                   pin_entry(FakeButtons([UP, CONFIRM, BACK, CONFIRM] + [CONFIRM] * 5),
-                             d) == "000000"))
+                   pin_entry(FakeButtons([UP, CONFIRM, BACK, CONFIRM] + [CONFIRM] * 7),
+                             d) == "00000000"))
     checks.append(("DOWN wraps to nine",
-                   pin_entry(FakeButtons([DOWN, CONFIRM] + [CONFIRM] * 5), d)
-                   == "900000"))
+                   pin_entry(FakeButtons([DOWN, CONFIRM] + [CONFIRM] * 7), d)
+                   == "90000000"))
     checks.append(("a timeout cancels rather than submitting",
                    pin_entry(FakeButtons([UP, CONFIRM]), d) is None))
     checks.append(("PIN length is honoured",
-                   len(pin_entry(FakeButtons([CONFIRM] * 8), d, length=8)) == 8))
+                   len(pin_entry(FakeButtons([CONFIRM] * 6), d, length=6)) == 6))
+    # The default has to match what the device actually asks for, or a build
+    # ships a screen that collects six digits for a PIN of eight.
+    import app
+    checks.append(("...and the default is the device's PIN length",
+                   len(pin_entry(FakeButtons([CONFIRM] * app.PIN_LENGTH), d))
+                   == app.PIN_LENGTH))
 
     ok = True
     for label, good in checks:

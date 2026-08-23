@@ -38,7 +38,7 @@ from policy import Policy
 from se import SoftSE
 from test_wallet import MNEMONIC, build_multisig_psbt, build_psbt, multisig_parts
 
-PIN = "123456"
+PIN = "12345678"
 FW = hashlib.sha256(b"test firmware").digest()
 CAL = hashlib.sha256(b"test thresholds").digest()
 
@@ -174,7 +174,7 @@ def main() -> int:
     se = SoftSE(pin=PIN)
     prov = wallet.provision(MNEMONIC, se, PIN,
                             script_types=("p2wpkh", "p2tr", "p2sh-p2wpkh", "p2pkh"))
-    d5, order5 = make_device(presses=[CONFIRM, CONFIRM] + pin_presses("999999")
+    d5, order5 = make_device(presses=[CONFIRM, CONFIRM] + pin_presses("99999999")
                              + [CONFIRM],
                              frames=frames, se=se, prov=prov)
     check("a wrong PIN is refused", d5.run_once() == "refused")

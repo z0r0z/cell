@@ -18,7 +18,7 @@ Orbit it, and export OBJ or glTF straight from the viewer. The turntable above i
 
 ## Status
 
-The design is complete and the firmware self-tests on every commit: 35 suites covering the signing stack against published test vectors, both liveness gates, and the whole device loop. Bitcoin Core accepts and mines what it signs.
+The design is complete and the firmware self-tests on every commit: 36 suites covering the signing stack against published test vectors, both liveness gates, and the whole device loop. Bitcoin Core accepts and mines what it signs.
 
 Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written but unverified against hardware — `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half.
 
@@ -123,7 +123,15 @@ Implementation in `firmware/attest.py`.
 
 The device defeats remote malware, automated signing, signing at scale, and signing without the owner's knowledge. A compromised host cannot produce a pulse or a clotting sample, and there is no batch mode. Every signature costs a physical act, and at blood tier the rate is set by your body rather than by the attacker's budget.
 
-The gate asks whether someone alive is here. The PIN asks who. It is required at both tiers, and the secure element's attempt counter increments before it checks, so cutting power mid-guess costs an attempt rather than refunding one. Ten wrong and the device wipes.
+The gate asks whether someone alive is here. The PIN asks who. It is eight digits, required at both tiers, and the secure element's attempt counter increments before it checks, so cutting power mid-guess costs an attempt rather than refunding one. Ten wrong and the device wipes.
+
+Ten is a firmware rule — this chip has no retry counter in silicon, and firmware is what someone who opens the case replaces. What the chip does enforce is a counter that never decreases and stops permanently at 2,097,151, which is why the PIN is eight digits and not six: 10⁸ guesses is more than the part will ever answer. `firmware/se_atecc.py` states exactly which half of this is silicon and which is arithmetic.
+
+### Under coercion
+
+Sensing cannot help here — no measurement tells willing blood from coerced blood. A second PIN can. Set one and the device carries two wrapped seeds and two wallets; the duress PIN unlocks, signs and behaves identically, and opens the other one. Both seeds are written whether or not you configure a duress PIN, so the card never says which kind of device this is.
+
+It protects what you sign, not what your device shows: the receive and identity screens are watch-only and still display the primary wallet. `firmware/duress.py` is honest about that, and `VALIDATION.md` carries it as open. Fund the decoy plausibly — an empty one tells the coercer they were given the wrong PIN.
 
 `BUILD.md` §16 carries the full threat model.
 
@@ -214,7 +222,9 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/camera.py` | QR capture, and the only way data gets in |
 | `firmware/app.py` | The loop, as a person uses it |
 | `firmware/test_app.py` | The whole device, driven end to end with fakes |
-| `firmware/se_atecc.py` | ATECC608B driver. Unverified until probed on hardware |
+| `firmware/se_atecc.py` | ATECC608B driver. CheckMac PIN, duress slots. Unverified until probed on hardware |
+| `tools/atecc_config.py` | Builds, shows, writes, verifies and locks the chip's config zone |
+| `firmware/duress.py` | The second PIN, and why its use has to be unfalsifiable |
 | `firmware/test_wallet.py` | End to end, and every footgun we could name |
 | `firmware/test_se_atecc.py` | The chip driver's arithmetic, against a fake chip |
 | `firmware/test_curve.py` | The fast scalar multiplies against the definition they replaced |
