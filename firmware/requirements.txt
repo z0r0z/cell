@@ -12,12 +12,19 @@ cryptography>=41.0
 # party dependency, and is checked against the published test vectors by
 # run_tests.py.
 
-# Optional second opinions, for firmware/test_consensus.py and
-# firmware/test_drivers.py. Not needed to run the firmware, and not needed for
-# the suites to pass — both skip when these are absent. Install them to have
+# Optional second opinions, for firmware/test_consensus.py,
+# firmware/test_drivers.py, firmware/test_se_atecc.py and
+# tools/atecc_config.py. Not needed to run the firmware, and not needed for the
+# suites to pass — all of them skip when these are absent. Install them to have
 # an independent implementation check our output rather than only our own
 # assertions:
 #   pip install python-bitcointx coincurve cryptoauthlib
+#
+# cryptoauthlib earns its place twice over. Beyond checking that we call the
+# binding correctly, it carries Microchip's own definition of the ATECC608B
+# config zone and their own implementation of the CheckMac digest — the two
+# things in tools/atecc_config.py and firmware/se_atecc.py that were otherwise
+# one person's reading of a datasheet. Install it before you configure a chip.
 #
 # Device only, Raspberry Pi. Uncomment when building the hardware.
 # Sensors and the secure element:

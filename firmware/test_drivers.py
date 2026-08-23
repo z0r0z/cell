@@ -180,10 +180,18 @@ def check_secure_element() -> None:
     check("...and the two really do differ",
           se_atecc.ATCA_ZONE_DATA != se_atecc.LOCK_ZONE_DATA)
 
-    # CheckMac is deliberately unused. It compares a MAC the HOST computed,
-    # which means the host must know the slot secret — and here it does not.
+    # CheckMac IS the PIN check, and this assertion used to say the opposite.
+    # The old reasoning was that CheckMac compares a MAC the HOST computed, so
+    # the host must know the slot secret — true, and here that is the
+    # mechanism rather than the objection: the PIN slot holds a secret derived
+    # from the PIN, so a host with the PIN can satisfy it and one without
+    # cannot. It is also the only thing a ReqAuth slot will accept, so a driver
+    # that avoids CheckMac cannot use the config BUILD.md 12 requires.
     src = (__import__("pathlib").Path(se_atecc.__file__)).read_text()
-    check("we do not call atcab_checkmac", "atcab_checkmac(" not in src)
+    check("the PIN check goes through atcab_checkmac",
+          "atcab_checkmac(" in src)
+    check("...and the encrypted baseline write through atcab_write_enc",
+          "atcab_write_enc(" in src)
 
 
 def main() -> int:

@@ -936,7 +936,14 @@ The secrets go in between the two locks, because data slots stay writable until 
 
 `verify --behaviour` is the step that matters and the only one that proves anything. Reading the config zone back tells you the bytes are there; it does not tell you the chip enforces them. So it asks the chip to misbehave — read a secret slot, derive with no CheckMac, write a baseline in the clear — and every one must be refused. Do that before `lock-data`, while a wrong answer is still recoverable.
 
-**Two things about `atecc_config.py` you should know before trusting it.** It never invents a byte it does not understand: it reads your chip's own config, replaces only the SlotConfig and KeyConfig entries, and passes the serial number, both counters and every reserved field through untouched. And the bit positions in it are *transcribed from the datasheet*, which means they could be wrong. That is why `write` refuses without `--i-have-read-the-plan` and why `verify --behaviour` exists. You are the check on the transcription, and after the lock there is no other.
+**Two things about `atecc_config.py` you should know before trusting it.** It never invents a byte it does not understand: it reads your chip's own config, replaces only the SlotConfig and KeyConfig entries, and passes the serial number, both counters and every reserved field through untouched. And the bit positions in it were *transcribed from the datasheet* — but they are no longer only that.
+
+**Install `cryptoauthlib` before you run any of this.** With it present, `run_tests.py` checks two things it otherwise skips, and both are worth the install on their own:
+
+* every config-zone offset and both bitfields against `cryptoauthlib.device.Atecc608Config`, which is Microchip's own definition of the same 128 bytes;
+* `se_atecc.checkmac_response()` against `atcah_check_mac()` in cryptoauthlib's bundled shared object, which is Microchip's C implementation of the same digest.
+
+Both agree exactly today. That retires most of the transcription risk — two independent readings of one datasheet page giving the same answer — but it does **not** tell you the chip enforces what those bytes describe. Only `verify --behaviour` does. Run it.
 
 **ReqAuth is the line to get right.** Slot 0 must refuse to derive until a CheckMac against slot 2 has just succeeded. Skip it and the PIN counter does nothing: an attacker never calls `verify_pin` at all, they call the derive once per candidate PIN and let AES-GCM's tag tell them when they are right.
 
@@ -955,7 +962,9 @@ Raspberry Pi OS Lite 64-bit
        ├─ numpy, scipy                           (gates 5–6)
        ├─ adafruit-circuitpython-as7341          (spectrometer)
        ├─ picamera2                              (speckle capture)
-       ├─ cryptoauthlib                          (ATECC608B)
+       ├─ cryptoauthlib                          (ATECC608B; also cross-checks
+       │                                           the config map and the
+       │                                           CheckMac digest in the tests)
        ├─ adafruit-circuitpython-rgb-display,
        │  pillow, qrcode, gpiozero, opencv       (screen, buttons, QR)
        └─ firmware/                              (the signing stack itself:

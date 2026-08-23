@@ -223,8 +223,9 @@ misbehave and watching it refuse tests the property itself.
 | `firmware/display.py` | Needs the panel. Layout limits and library calls are covered; SPI timing and font metrics are not | `bench.py display` for the origin, any screen for the rest |
 | `firmware/buttons.py` | Needs the switches. Consent and debounce logic and the library calls are covered; whether 30 ms settles YOUR switches is not | `bench.py buttons` |
 | `firmware/camera.py` | Needs the webcam. Collection, framing and the OpenCV calls are covered; whether a cheap lens focuses on a 240x240 panel is not | Scan a signed PSBT into a coordinator and back |
-| The ATECC608B config zone | `tools/atecc_config.py` now writes it, and its encoder is checked in CI. What CI cannot check is whether the transcribed bit positions are the ones the datasheet means | `atecc_config.py verify --behaviour` on a built device, before `lock-data` |
-| The CheckMac digest | `se_atecc.checkmac_response()` is transcribed from the datasheet. Get one field boundary wrong and every PIN is rejected on a chip that is behaving perfectly | The first `verify_pin` on a configured chip. It is confirmed or refuted in seconds, before anything is permanent |
+| **The config zone field map** | Every offset and both bitfields compared against `cryptoauthlib.device.Atecc608Config`, which is Microchip's own ctypes definition of the same 128 bytes | **All 12 offsets and all 16 slot policies decode identically.** Two independent transcriptions of one datasheet page, agreeing |
+| **The CheckMac digest** | `se_atecc.checkmac_response()` called against `atcah_check_mac()` in cryptoauthlib's bundled shared object — Microchip's C implementation of the same 88-byte message | **Byte-identical on every case.** This was the most fragile thing in the driver: one field boundary wrong and every PIN is rejected on a chip behaving perfectly |
+| cryptoauthlib call signatures | Every call the driver makes, introspected against the installed binding | All match. **Found one real defect**: `atcab_write_enc` takes six parameters and the fake declared five, which is the same arity class as the original `atcab_checkmac` bug |
 | **The duress PIN, on real hardware** | Now present in the driver and in the device: slot 4 holds the second PIN key, slot 5 the decoy's wrapping secret, and `wallet.provision` records both wallets. Unverified in the sense everything on this chip is unverified — nobody has run it on silicon | `atecc_config.py verify --behaviour`, then provision with `--duress-pin` and spend from the decoy |
 | `firmware/hardware.py` | Needs the sensor head | The bring-up checklist in that file |
 | `firmware/qr.py` on real optics | The framing and reassembly are tested; scanning a real 240×240 screen with a real webcam is not | Scan a signed PSBT into a coordinator and back |
@@ -289,11 +290,19 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
 - **The ATECC608B's ReqAuth binding, on silicon.** `tools/atecc_config.py`
   writes it and `firmware/se_atecc.py` performs the CheckMac it demands — the
   two used to contradict each other, and a device built to the old spec could
-  not have opened its own seed. What remains open is whether the transcribed
-  bit positions and the transcribed CheckMac digest are what the datasheet
-  actually means. Both are confirmed or refuted in the first minute on a bench:
-  `atecc_config.py verify --behaviour` asks the chip to misbehave, and the
-  first `verify_pin` either works or does not. Do both before `lock-data`.
+  not have opened its own seed.
+
+  The transcription risk is now largely retired, and by a second source rather
+  than by re-reading: the field map is checked against Microchip's own
+  `Atecc608Config`, and the CheckMac digest against Microchip's own
+  `atcah_check_mac()`. Both agree exactly. Install `cryptoauthlib` and those
+  checks run as part of `run_tests.py`; without it they skip and say so.
+
+  What that still does not settle is whether the CHIP enforces what the bytes
+  describe — whether ReqAuth really refuses the derive, whether a secret slot
+  really refuses a read. No library can answer that. `atecc_config.py verify
+  --behaviour` asks the chip directly, and it must be run before `lock-data`,
+  while a wrong answer is still recoverable.
 
 - **The ten-attempt limit, as a silicon guarantee.** It is not one, and never
   was. This part has no retry counter. Ten attempts is firmware arithmetic over
