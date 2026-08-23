@@ -797,6 +797,12 @@ class PSBT:
 
         warnings: list[str] = []
         recipients, change_sats, change_addr, change_ours = [], 0, "", True
+        # Addresses that were LABELLED change and could not be derived. Kept as
+        # a list rather than a single slot: BitcoinSpend has one change line, so
+        # a second unverified output used to overwrite the first one's address
+        # while still adding its value to the total -- the owner saw the right
+        # number and only one of the two addresses it went to.
+        unverified: list[str] = []
         for i, out in enumerate(self.tx.vout):
             try:
                 addr = addresses.script_to_address(out.script_pubkey, network)
@@ -818,11 +824,25 @@ class PSBT:
                 change_sats += out.value
                 change_addr = addr
                 change_ours = False
+                unverified.append(addr)
                 warnings.append(
                     f"output {i} is labelled as change but this wallet cannot "
                     f"derive it")
             else:
                 recipients.append((addr, out.value))
+
+        if len(unverified) > 1:
+            # One unverified change output gets a WARNING with its address in
+            # full, which is the screen that catches it. Two cannot both be
+            # shown on a 20-row display, and showing one while summing both is
+            # worse than refusing: the total looks right and an address the
+            # money went to is simply absent.
+            raise BadPSBT(
+                f"this transaction sends to {len(unverified)} outputs labelled "
+                f"as change that this wallet cannot derive. The device shows "
+                f"one such address in full and will not summarise several into "
+                f"a total; ask the coordinator for the derivation paths, or "
+                f"split the transaction.")
 
         if len(recipients) != 1:
             raise BadPSBT(

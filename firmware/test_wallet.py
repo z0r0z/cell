@@ -600,6 +600,24 @@ def main() -> int:
     check("...and it is not called change to the owner",
           "-> your wallet" not in txt)
 
+    # TWO outputs labelled as change that we cannot derive. BitcoinSpend has a
+    # single change line, so the second address used to overwrite the first
+    # while its value was still added to the total: the owner saw the correct
+    # total and only one of the two addresses the money went to. Refused now.
+    two = PSBT.parse(build_psbt(
+        root, "p2wpkh", send=100_000, change=45_000,
+        extra_outputs=((40_000, "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"),)))
+    for idx, sub in ((1, 0), (2, 1)):
+        tk = thief.derive([1, sub])
+        two.tx.vout[idx].script_pubkey = addresses.p2wpkh_script(tk.pubkey)
+        two.outputs[idx] = {_kv(psbtmod.OUT_BIP32_DERIVATION, tk.pubkey):
+                            root.fingerprint() + b"".join(
+                                i.to_bytes(4, "little")
+                                for i in bip32.parse_path("m/84h/0h/0h/1/0"))}
+    two.globals[_kv(psbtmod.GLOBAL_UNSIGNED_TX)] = two.tx.serialize(witness=False)
+    refuses("two underivable change outputs are refused, not summed",
+            lambda: run_psbt(two.serialize(), se, prov), psbtmod.BadPSBT)
+
     # The subtler version: the change output really is ours, but the PSBT
     # quotes it at a path that does not derive it. A wallet that trusts the
     # quoted path over its own arithmetic accepts a substituted key here.
