@@ -1,7 +1,6 @@
 # Bounty: build one and sign with it
 
-Be the first. The design is finished, public domain, and everything you need
-to build one is in this repo.
+Everything you need to build one is in this repo.
 
 **Build the device. Sign with a pulse. Sign with fresh blood. Post pictures.**
 
@@ -10,7 +9,7 @@ On [poidh](https://poidh.xyz), topped up over time.
 ## Cost
 
 **~$94 in hardware, ~$31 in consumables.** `BOM.csv` lists every part with
-sourcing. A weekend for the reader half, a second for the wallet half.
+sourcing. (Obviously the bounty will be for more than this amount.)
 
 ## Build it
 
@@ -26,7 +25,7 @@ Post pictures or video of:
 3. A signature authorised by a fresh blood sample
 4. The transaction on chain — testnet is fine
 
-And say what you had to change to make it work. Every build finds something.
+And say what you had to change to make it work (if anything).
 
 ## Partial claims count
 
@@ -39,11 +38,9 @@ optics, post it. That answer is worth paying for.
 
 ## Before you start
 
-Read `SAFETY.md` — two minutes. Commercial sterile single-use lancets, one
-cartridge per use, sharps container, and a device is personal to whoever
-lances for it.
+Read `SAFETY.md` — two minutes. Use common sense.
 
-Nothing here asks you to bleed for it. The gate wants a fresh sample, not a
+The gate wants a fresh sample, not a
 particular donor. Anyone on anticoagulants will be rejected every time, since
 clotting is the thing being measured.
 
