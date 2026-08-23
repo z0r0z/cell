@@ -679,14 +679,68 @@ def reproduce(image: np.ndarray, helper: Helper) -> bytes:
     return _key(helper.offset ^ fixed, helper.salt)
 
 
-def budget(m: int = 12, t: int = 180, per_bit_entropy: float = 0.98) -> dict:
+def min_entropy(bits: np.ndarray) -> float:
+    """Conservative per-bit MIN-entropy of a bit string.
+
+    MIN-entropy, not Shannon, and the difference is the whole point. A fuzzy
+    extractor's leakage argument is about the best single guess an attacker
+    can make -- H_inf = -log2(p_max) -- not about the average surprise. They
+    are not close where it matters: a bias of 0.44 is 0.989 bits of Shannon
+    and 0.836 of min-entropy, and it is the second number the helper's n-k
+    disclosure has to be paid out of.
+
+    Two estimators, both from NIST SP 800-90B, and the smaller is returned:
+
+      most common value (6.3.1)  the frequency of the commoner symbol, taken
+                                 at its 99% upper confidence bound so a lucky
+                                 sample cannot flatter the source
+      Markov, order 1 (6.3.3)    the largest transition probability, which is
+                                 what catches a source that is unbiased
+                                 overall while still being predictable from
+                                 its own previous bit
+
+    The second one is here because this source has a specific way of failing
+    that the first cannot see. Neighbouring grains share the tail of one
+    speckle lobe, so a selection that happened to take adjacent cells would
+    look perfectly balanced and still be guessable. Enrolment refuses touching
+    grains for that reason; this measures whether that worked.
+
+    Per-bit min-entropy does not compose to joint min-entropy under arbitrary
+    correlation, so treat n * this as an estimate rather than a proof, and
+    keep the margin over the key size wide.
+    """
+    b = np.asarray(bits, dtype=np.uint8).ravel()
+    n = b.size
+    if n < 2:
+        return 0.0
+
+    ones = float(b.mean())
+    p_max = max(ones, 1.0 - ones)
+    # 99% upper bound, so a short panel cannot report more entropy than it saw.
+    p_u = min(1.0, p_max + 2.576 * np.sqrt(p_max * (1.0 - p_max) / (n - 1)))
+    h_mcv = -np.log2(p_u)
+
+    prev, nxt = b[:-1], b[1:]
+    worst = 0.0
+    for v in (0, 1):
+        m = prev == v
+        if m.sum() < 2:
+            continue
+        q = float(nxt[m].mean())
+        worst = max(worst, max(q, 1.0 - q))
+    h_markov = -np.log2(worst) if worst > 0 else h_mcv
+
+    return float(min(h_mcv, h_markov))
+
+
+def budget(m: int = 12, t: int = 180, per_bit_entropy: float = 0.78) -> dict:
     """What the parameters buy, so the choice is arguable rather than asserted.
 
-    The default per-bit figure is measured rather than assumed --
-    test_optical_puf checks the bias of the selected bits on every run, and
-    the quantile transform and the adjacency exclusion in bits_from_image are
-    what hold it near one. It was 0.69 before both, which is the number this
-    default would have hidden.
+    `per_bit_entropy` is MIN-entropy per selected bit. The default is what
+    min_entropy() measures on the simulated chamber; test_optical_puf
+    re-measures it on every run and fails if it drops, so this is a recorded
+    measurement rather than a figure carried from one version to the next. It
+    was 0.42 before the quantile transform and the adjacency rule went in.
     """
     code = BCH(m, t)
     leak = code.n - code.k

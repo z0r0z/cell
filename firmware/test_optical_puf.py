@@ -322,11 +322,7 @@ def _checks():
         # The helper discloses at most n-k bits. That is only affordable if
         # the bits it protects are worth close to one bit each, and the margin
         # filter is exactly the thing that could quietly stop them being.
-        def _H(p):
-            p = min(max(p, 1e-12), 1 - 1e-12)
-            return -(p * np.log2(p) + (1 - p) * np.log2(1 - p))
-
-        bits0, _ = puf.bits_from_image(enrol[0])
+        bits0, _ = puf.bits_from_image(enrol[0], fid_b=helper.fid_b)
         chosen = bits0[helper.mask]
         bias = float(chosen.mean())
         checks.append((f"selected bits are not biased (got {bias:.3f})",
@@ -342,9 +338,17 @@ def _checks():
         checks.append((f"no two key bits are adjacent grains ({touching})",
                        touching == 0))
 
+        # MIN-entropy, not Shannon. The helper's n-k disclosure has to be paid
+        # out of the attacker's best single guess, and the two part company
+        # exactly where it matters: this selection is 0.99 bits of Shannon and
+        # 0.79 of min-entropy. Asserting the first would have passed while
+        # claiming roughly 800 bits that do not exist.
+        h_min = puf.min_entropy(chosen)
         code = puf.BCH(m, t)
-        residual = code.n * _H(bias) - (code.n - code.k)
-        checks.append((f"residual entropy clears a 256-bit key "
+        residual = code.n * h_min - (code.n - code.k)
+        checks.append((f"min-entropy per selected bit stays high "
+                       f"({h_min:.3f})", h_min > 0.65))
+        checks.append((f"residual MIN-entropy clears a 256-bit key "
                        f"({residual:.0f} bits)", residual > 512))
 
         # The helper is public, so it must not carry the key.

@@ -712,9 +712,16 @@ def cmd_puf_capture(args):
         finally:
             head.close()
 
+    # The MEAN frame, not the burst. A 768 px burst of 16 float32 frames is
+    # 37 MB, so a twenty-burst panel would be 750 MB on a device whose card is
+    # 16 GB -- and the frames are not what anything reads. The diffuser is
+    # static, so the burst exists only to be averaged; keeping the frames
+    # would be keeping shot noise. float32 of the mean is 2.4 MB and is
+    # exactly what prepare() would have computed.
     n = len(list(PUF_DIR.glob("*.npy")))
     path = PUF_DIR / f"chamber_{n:04d}.npy"
-    np.save(path, burst)
+    np.save(path, np.asarray(burst, dtype=np.float64).mean(axis=0)
+            .astype(np.float32))
     (PUF_DIR / f"chamber_{n:04d}.txt").write_text(
         f"temp_c={args.temp_c}\nsession={args.session}\n")
     print(f"saved {path}  ({args.temp_c} C, session {args.session})")
@@ -762,9 +769,21 @@ def cmd_puf_panel(args):
     except puf.PufError as e:
         sys.exit(f"Did not enrol: {e}")
 
-    b = puf.budget(args.m, args.t)
+    # Measured on THIS chamber rather than carried from the simulator. The
+    # helper discloses n-k bits and they have to be paid out of the selected
+    # bits' min-entropy; a diffuser that turns out to be more predictable than
+    # the model is a diffuser whose key is shorter than it looks.
+    h_min = puf.min_entropy(enrolled_bits[helper.mask])
+    b = puf.budget(args.m, args.t, h_min)
     print(f"\nBCH(n={b['n']}, k={b['k']}, t={b['corrects']}) "
           f"corrects {b['max_ber']:.2%}")
+    print(f"selected bits: min-entropy {h_min:.3f}/bit, "
+          f"helper discloses {b['leaked_bits']}, "
+          f"residual {b['residual_entropy']:.0f} bits")
+    if b["residual_entropy"] < 512:
+        print("  ^ thin. This chamber does not carry enough independent "
+              "structure;\n    a coarser grain or a wider ROI would help, and "
+              "a diffuser with\n    finer texture would help more.")
     print(f"{'burst':<26}{'session':>8}{'temp':>6}{'shift':>10}"
           f"{'BER':>8}{'key':>7}")
     print("-" * 65)
