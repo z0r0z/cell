@@ -36,6 +36,7 @@ fakes. `test_app.py` does exactly that.
 from __future__ import annotations
 
 import json
+import sys
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -474,6 +475,34 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
                   policy=Policy(), fw_hash=fw_hash, cal_hash=cal_hash, **kw)
 
 
+def _fail_to_boot(args, err: Exception) -> int:            # pragma: no cover
+    """Show why the device will not start, and stay showing it.
+
+    Deliberately does not retry. Whatever is wrong with the card will still be
+    wrong in a second, and a device flickering through a boot loop tells the
+    owner less than one holding a sentence.
+    """
+    reason = str(err) or type(err).__name__
+    try:
+        from display import open_display
+        disp = open_display(console=args.console)
+        # Wrapped to the panel's width rather than trusted to fit: the reason
+        # comes from a damaged file and could be any length, and a line that
+        # runs off the screen is the half of the message that mattered.
+        lines = ["CANNOT START", ""]
+        for i in range(0, len(reason), 34):
+            lines.append(reason[i:i + 34])
+        lines += ["", "Seed is not lost.", "Restore from your backup words."]
+        disp.show(lines)
+    except Exception:                                           # noqa: BLE001
+        # No screen either. The console is all that is left, so make it a
+        # sentence rather than a stack trace.
+        print(f"CELL cannot start: {reason}", file=sys.stderr)
+        print("The seed is not lost. Restore from your backup words.",
+              file=sys.stderr)
+    return 2
+
+
 def main() -> int:                                              # pragma: no cover
     import argparse
     ap = argparse.ArgumentParser(description="The CELL signing loop.")
@@ -482,7 +511,20 @@ def main() -> int:                                              # pragma: no cov
                     help="run against stubs, for a dry run on a laptop")
     args = ap.parse_args()
 
-    device = load_device(args.dir, console=args.console)
+    try:
+        device = load_device(args.dir, console=args.console)
+    except Exception as e:                                      # noqa: BLE001
+        # load_device runs BEFORE the loop that exists so the device never
+        # dies, and before a display exists to say anything on. A damaged
+        # record therefore used to end as a traceback on a console nobody is
+        # looking at, on a device that simply will not start.
+        #
+        # Bring the screen up on its own and put the reason on it. The seed is
+        # not lost when this happens -- the record is public data and the
+        # backup words still restore -- so the one thing the device must do is
+        # say which failure this is instead of exiting silently.
+        return _fail_to_boot(args, e)
+
     while True:
         try:
             device.run_once()

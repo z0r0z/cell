@@ -85,6 +85,8 @@ SUITES = [
      [sys.executable, "test_duress.py"]),
     ("cardiac identity — pipeline, and what it actually separates",
      [sys.executable, "test_cardiac_id.py"]),
+    ("boot record — a damaged card says so instead of dying",
+     [sys.executable, "test_boot_record.py"]),
     ("post-quantum attestation — LMS against RFC 8554 vectors",
      [sys.executable, "test_lms.py"]),
     ("secure element — PIN counter, KDF binding, wipe",

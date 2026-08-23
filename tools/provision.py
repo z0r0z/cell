@@ -270,8 +270,42 @@ def _save(out: Path, prov: wallet.Provisioning, network: str) -> None:
     }, indent=2) + "\n")
 
 
+class BadRecord(Exception):
+    """The provisioning record could not be read.
+
+    A distinct type so the boot path can tell "this card is damaged" from any
+    other failure and say so on the screen, rather than dying with a traceback
+    before a display exists. Nobody is standing at a serial console; they are
+    holding a device that will not start.
+    """
+
+
 def load(d: Path) -> wallet.Provisioning:
-    """Read a provisioned device's public record and its wrapped seed."""
+    """Read a provisioned device's public record and its wrapped seed.
+
+    Every failure in here becomes a BadRecord carrying a readable reason. The
+    record lives on /boot/cell, so this is not an attack surface -- anyone who
+    can edit it already holds the device. It is an availability one: a partial
+    write during provisioning, or a bit flipped on an SD card that spent a year
+    in a drawer, and the device stops booting. The seed is fine and the backup
+    words still work; the device just has to say which of those two things has
+    happened instead of exiting.
+    """
+    try:
+        return _load(d)
+    except BadRecord:
+        raise
+    except FileNotFoundError as e:
+        raise BadRecord(f"{Path(e.filename).name} is missing from {d}") from None
+    except json.JSONDecodeError as e:
+        raise BadRecord(f"{ACCOUNTS} is not valid JSON (line {e.lineno})") from None
+    except KeyError as e:
+        raise BadRecord(f"{ACCOUNTS} has no {e.args[0]!r} field") from None
+    except (TypeError, ValueError) as e:
+        raise BadRecord(f"{ACCOUNTS} is malformed: {e}") from None
+
+
+def _load(d: Path) -> wallet.Provisioning:
     data = json.loads((d / ACCOUNTS).read_text())
     prov = wallet.Provisioning(
         seed_pair=duress.SeedPair.unpack((d / BLOB).read_bytes()),

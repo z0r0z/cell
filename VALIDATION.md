@@ -13,7 +13,7 @@ samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — 36 suites, no hardware required.
+`python firmware/run_tests.py` — 37 suites, no hardware required.
 
 ### The signing stack
 
