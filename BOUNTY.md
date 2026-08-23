@@ -1,9 +1,9 @@
 # Bounty: build one and sign with it
 
-Nobody has built CELL. The design is complete and public. This bounty is to
-prove someone can take it and produce working hardware.
+Be the first. The design is finished, public domain, and everything you need
+to build one is in this repo.
 
-**Build the device. Sign with your pulse. Sign with your blood. Post pictures.**
+**Build the device. Sign with a pulse. Sign with fresh blood. Post pictures.**
 
 On [poidh](https://poidh.xyz), topped up over time.
 
@@ -22,32 +22,37 @@ head in `diagrams/build-sheet.svg`, printables in `models/print/`.
 Post pictures or video of:
 
 1. The assembled device, running
-2. A signature authorised by your pulse
-3. A signature authorised by your blood
+2. A signature authorised by a pulse
+3. A signature authorised by a fresh blood sample
 4. The transaction on chain — testnet is fine
 
 And say what you had to change to make it work. Every build finds something.
 
 ## Partial claims count
 
-**Reader only** (milestone 7 — spoof panel run, `thresholds.json` and
-`captures/` posted) is a real claim. It's the half that decides whether the
-rest is worth building.
+**Reader only** — milestone 7, spoof panel run, `thresholds.json` and
+`captures/` posted — is a real claim. It's the half that carries the novel
+physics, and the cheaper one to reach at $62.
 
 **A failure is a claim too.** If dye passes a gate or real blood fails on your
 optics, post it. That answer is worth paying for.
 
 ## Before you start
 
-Read `SAFETY.md` — two minutes. One device one person, sterile lancets, sharps
-container. If you take anticoagulants the blood tier will reject you every
-time; it measures clotting.
+Read `SAFETY.md` — two minutes. Commercial sterile single-use lancets, one
+cartridge per use, sharps container, and a device is personal to whoever
+lances for it.
 
-Two things that will cost you an evening otherwise:
+Nothing here asks you to bleed for it. The gate wants a fresh sample, not a
+particular donor. Anyone on anticoagulants will be rejected every time, since
+clotting is the thing being measured.
+
+Two things worth knowing before you start:
 
 - `firmware/hardware.py` has never touched hardware. Treat it as a wiring
   diagram in Python; it has a bring-up checklist.
 - Run `atecc_config.py verify --behaviour` **before** `lock-data`. Locking the
   chip is permanent.
 
-`VALIDATION.md` lists everything else that's written but unverified.
+`VALIDATION.md` tracks what's been verified and what's waiting on a first
+build. You're the one who moves rows from the second list to the first.
