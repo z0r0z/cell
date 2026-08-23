@@ -318,6 +318,53 @@ def check_envelope(meshes):
     return got
 
 
+def check_viewer_envelope():
+    """The printed shells and the RENDERED model must be one instrument.
+
+    check_envelope() above proves the meshes match the constants at the top of
+    this file. That is only half the seam: those constants were copied from
+    viewer/model.js by hand, and nothing until now noticed if the viewer
+    moved. Someone printing these STLs expects the thing in the turntable, so
+    the exported model is measured rather than trusted.
+
+    models/instrument.obj is the viewer's own export (tools/export_model.py),
+    in three.js axes: X across, Y up, Z back. This file puts height on Z, so
+    the mapping is the one _TO_VIEWER states, read backwards.
+
+    Absent is not a failure -- a checkout that has not run export_model.py yet
+    is a normal state, and this check simply has nothing to compare against.
+    """
+    obj = os.path.join(ROOT, "models", "instrument.obj")
+    if not os.path.exists(obj):
+        return None
+    lo = [float("inf")] * 3
+    hi = [float("-inf")] * 3
+    with open(obj) as fh:
+        for line in fh:
+            if line.startswith("v "):
+                p = [float(v) for v in line.split()[1:4]]
+                for k in range(3):
+                    lo[k] = min(lo[k], p[k])
+                    hi[k] = max(hi[k], p[k])
+    if lo[0] > hi[0]:
+        return None                       # no vertices; not an OBJ we can read
+    # viewer (x, y=height, z=depth) -> this file's (X, Y=depth, Z=height)
+    got = (hi[0] - lo[0], hi[2] - lo[2], hi[1] - lo[1])
+    want = (ENV_X, ENV_Y, ENV_Z)
+    names = ("length", "depth", "height")
+    bad = [(names[k], got[k], want[k])
+           for k in range(3) if abs(got[k] - want[k]) > PITCH]
+    if bad:
+        raise SystemExit(
+            "the printed shells and viewer/model.js describe different "
+            "instruments:\n  "
+            + "\n  ".join("%s: instrument.obj %.2f mm, gen_enclosure %.2f mm"
+                          % b for b in bad)
+            + "\n  Change the parametric source, re-run tools/export_model.py, "
+              "and bring ENV_X/ENV_Y/ENV_Z here into step.")
+    return got
+
+
 def check_fit(lower, upper):
     """Clearance checks, run every time the shells are generated.
 
@@ -426,11 +473,16 @@ def generate(verbose=True):
                   % (name, len(tris), vol, os.path.getsize(path) / 1024))
     check_fit(fields["shell_lower"], fields["shell_upper"])
     env = check_envelope(meshes)
+    viewer_env = check_viewer_envelope()
     if verbose:
         print("fit checks pass: cartridge path, blind vents, Pi bay, sensor "
               "port, part line")
         print("envelope %.2f x %.2f x %.2f mm -- matches BUILD.md section 10"
               % tuple(env))
+        print("viewer model agrees: %s"
+              % ("%.2f x %.2f x %.2f mm from models/instrument.obj" % viewer_env
+                 if viewer_env else
+                 "models/instrument.obj absent -- run tools/export_model.py"))
     return rows
 
 
