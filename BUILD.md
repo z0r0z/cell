@@ -340,7 +340,7 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 
 ---
 
-## 6. Parts (~US$95 complete, ~US$62 for the reader alone)
+## 6. Parts (~US$98 complete, ~US$62 for the reader alone)
 
 | Item | Part | ~USD | Notes |
 |---|---|---|---|

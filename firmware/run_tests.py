@@ -235,6 +235,7 @@ def docs_match_the_code() -> bool:
     validation = (root / "VALIDATION.md").read_text()
     build = (root / "BUILD.md").read_text()
     contributing = (root / "CONTRIBUTING.md").read_text()
+    bounty = (root / "BOUNTY.md").read_text()
 
     n_blood = len(calibrate.PANEL)
     n_touch = len(tg.PANEL)
@@ -289,6 +290,18 @@ def docs_match_the_code() -> bool:
     # BOM, or it is only a matter of time.
     want("CONTRIBUTING reader cost", contributing,
          f"${round(kits['Reader'])} of hardware")
+    # BOUNTY.md quotes both, and it is the document a stranger reads before
+    # spending their own money. It went stale the moment the BOM moved,
+    # because it was the one priced file this suite did not read.
+    want("BOUNTY hardware cost", bounty, f"~${round(hw)} in hardware")
+    want("BOUNTY consumables", bounty, f"~${round(kits['Reader consumable'])} in consumables")
+    want("BOUNTY reader-only cost", bounty, f"${round(kits['Reader'])}")
+    # Section 6's heading rounds and writes the currency differently, so the
+    # exact-total checks above walked straight past it while it sat two
+    # dollars stale. Prices get written more than one way; each way needs a
+    # check or it is only the unchecked spelling that rots.
+    want("BUILD section 6 heading", build,
+         f"~US${round(hw)} complete, ~US${round(kits['Reader'])} for the reader alone")
 
     # How many suites this runner runs. Four documents quote the number and
     # all four were stale at once -- README said 33, VALIDATION said thirty,

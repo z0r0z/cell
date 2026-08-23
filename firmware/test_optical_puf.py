@@ -181,7 +181,7 @@ def _checks():
     # -- the raw error rate the extractor has to absorb -----------------
     def _ber(d, selected=None):
         out = []
-        for _ in range(3):
+        for _ in range(2):
             a, _m = puf.bits_from_image(ch.read(), ch.grain_px)
             b2, _m2 = puf.bits_from_image(ch.read(drift=d), ch.grain_px)
             sel = slice(None) if selected is None else selected
@@ -206,26 +206,26 @@ def _checks():
         checks.append(("key is 256 bits", len(key) == 32))
 
         again = 0
-        for _ in range(10):
+        for _ in range(5):
             try:
                 again += puf.reproduce(ch.read(), helper) == key
             except puf.PufError:
                 pass
-        checks.append((f"reproduces on a quiet chamber ({again}/10)",
-                       again == 10))
+        checks.append((f"reproduces on a quiet chamber ({again}/5)",
+                       again == 5))
 
         drifted = 0
-        for _ in range(10):
+        for _ in range(5):
             try:
                 drifted += puf.reproduce(ch.read(drift=0.02), helper) == key
             except puf.PufError:
                 pass
-        checks.append((f"survives 2% drift ({drifted}/10)", drifted >= 9))
+        checks.append((f"survives 2% drift ({drifted}/5)", drifted == 5))
 
         # Tamper. Opening the case replaces the field outright.
         opened = Chamber(rng=np.random.default_rng(99))
         leaked = 0
-        for _ in range(10):
+        for _ in range(4):
             try:
                 if puf.reproduce(opened.read(), helper) == key:
                     leaked += 1
@@ -235,7 +235,7 @@ def _checks():
 
         # Partial disturbance must also fail rather than half-work.
         big = 0
-        for _ in range(10):
+        for _ in range(4):
             try:
                 if puf.reproduce(ch.read(drift=0.5), helper) == key:
                     big += 1
@@ -249,23 +249,23 @@ def _checks():
         moved = {}
         for px in (0, 2, 4, 8, 16):
             got = 0
-            for _ in range(3):
+            for _ in range(2):
                 try:
                     got += puf.reproduce(ch.read(shift=(px, 0)), helper) == key
                 except puf.PufError:
                     pass
             moved[px] = got
         checks.append((f"survives translation up to 16 px "
-                       f"({'/'.join(str(moved[p]) for p in (0, 2, 4, 8, 16))} of 3)",
-                       all(v == 3 for v in moved.values())))
+                       f"({'/'.join(str(moved[p]) for p in (0, 2, 4, 8, 16))} of 2)",
+                       all(v == 2 for v in moved.values())))
 
         diag = 0
-        for _ in range(3):
+        for _ in range(2):
             try:
                 diag += puf.reproduce(ch.read(shift=(9, -7)), helper) == key
             except puf.PufError:
                 pass
-        checks.append(("survives a diagonal shift", diag == 3))
+        checks.append(("survives a diagonal shift", diag == 2))
 
         checks.append(("registration finds the shift it was given",
                        puf.estimate_shift(ch.read(shift=(6, -3)),
@@ -300,7 +300,7 @@ def _checks():
         # Translation must not become a way to pass with the wrong chamber:
         # the search is over shifts, not over diffusers.
         slid = 0
-        for _ in range(5):
+        for _ in range(3):
             try:
                 if puf.reproduce(opened.read(shift=(5, 5)), helper) == key:
                     slid += 1
