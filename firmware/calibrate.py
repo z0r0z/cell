@@ -749,7 +749,8 @@ def cmd_puf_panel(args):
     if len(first) < 2:
         sys.exit("Enrolment needs >=2 bursts in the earliest session.")
 
-    reads = [puf.speckle_features(np.load(p)) for p, _, _ in first]
+    reads = [puf.prepare(np.load(p)) for p, _, _ in first]
+    enrolled_bits, _ = puf.bits_from_image(reads[0])
     try:
         helper, key = puf.enroll(reads, m=args.m, t=args.t)
     except puf.PufError as e:
@@ -758,26 +759,31 @@ def cmd_puf_panel(args):
     b = puf.budget(args.m, args.t)
     print(f"\nBCH(n={b['n']}, k={b['k']}, t={b['corrects']}) "
           f"corrects {b['max_ber']:.2%}")
-    print(f"{'burst':<28}{'session':>9}{'temp':>7}{'BER':>9}{'key':>10}")
-    print("-" * 63)
+    print(f"{'burst':<26}{'session':>8}{'temp':>6}{'shift':>10}"
+          f"{'BER':>8}{'key':>7}")
+    print("-" * 65)
 
     worst, reproduced, total = 0.0, 0, 0
     for path, sess, temp in meta:
-        bits, _ = puf.speckle_features(np.load(path))
-        # Against the enrolled reading, on the positions enrolment kept --
-        # the bits the device will actually decode.
-        ber = float((bits[helper.mask] != reads[0][0][helper.mask]).mean())
+        img = puf.prepare(np.load(path))
+        dy, dx = puf.estimate_shift(img, helper.fiducial)
+        # Against the enrolled reading, on the positions enrolment kept, AFTER
+        # registration -- the bits the device will actually decode. Reporting
+        # it before registration would blame the diffuser for the mount.
+        bits, _ = puf.bits_from_image(
+            np.roll(np.roll(img, -dy, axis=0), -dx, axis=1))
+        ber = float((bits[helper.mask] != enrolled_bits[helper.mask]).mean())
         try:
-            same = puf.reproduce(bits, helper) == key
+            same = puf.reproduce(img, helper) == key
         except puf.PufError:
             same = False
         total += 1
         reproduced += same
         worst = max(worst, ber)
-        print(f"{path.name:<28}{sess:>9}{temp:>7}{ber:>8.2%}"
-              f"{'ok' if same else 'LOST':>10}")
+        print(f"{path.name:<26}{sess:>8}{temp:>6}{f'{dy:+d},{dx:+d}':>10}"
+              f"{ber:>7.2%}{'ok' if same else 'LOST':>7}")
 
-    print("-" * 63)
+    print("-" * 65)
     print(f"worst BER {worst:.2%} against a {b['max_ber']:.2%} budget; "
           f"{reproduced}/{total} reproduced")
     if reproduced == total and worst < b["max_ber"] / 2:

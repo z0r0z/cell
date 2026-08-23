@@ -298,14 +298,75 @@ def _highpass(img: np.ndarray, sigma: float) -> np.ndarray:
     return img.astype(np.float64) - a
 
 
-def speckle_features(frames: np.ndarray, envelope_px: float = 12.0,
-                     grain_px: int = 4) -> tuple[np.ndarray, np.ndarray]:
-    """One speckle burst -> (bit per grain, how far that bit is from flipping).
+# The outer corner reserved for registration. Its speckle is stored in the
+# clear inside the helper and is NEVER key material, which is what makes
+# publishing it free: speckle decorrelates over one grain, so a patch here says
+# nothing about a grain over there.
+FIDUCIAL_PX = 128
+MAX_SHIFT_PX = 24
+# The fiducial is INSET by the search radius rather than sitting in the very
+# corner. At the corner a pattern that moved up or left takes the reference
+# off the edge of the frame, so only half the shifts are findable -- and the
+# unfindable half is not the rare one.
+FIDUCIAL_ORIGIN = MAX_SHIFT_PX
+
+
+def prepare(frames: np.ndarray, envelope_px: float = 12.0) -> np.ndarray:
+    """One speckle burst -> the high-passed image everything else works from.
 
     The diffuser is static, so unlike the blood path we AVERAGE the burst: the
-    pattern does not move and averaging buys shot-noise SNR. Then remove the
-    illumination envelope and take the sign. Sign is what makes this survive
-    exposure and gain drift -- an intensity threshold would not.
+    pattern does not move and averaging buys shot-noise SNR. Removing the
+    illumination envelope is what lets the sign of what is left mean
+    something, and sign is what makes this survive exposure and gain drift.
+    """
+    f = np.asarray(frames, dtype=np.float64)
+    if f.ndim == 2:
+        f = f[None, ...]
+    return _highpass(f.mean(axis=0), envelope_px)
+
+
+def estimate_shift(img: np.ndarray, fiducial: np.ndarray,
+                   max_shift: int = MAX_SHIFT_PX) -> tuple[int, int]:
+    """How far the pattern has moved since enrolment, in whole pixels.
+
+    THIS IS NOT AN OPTIMISATION. A speckle grain here is about 4 px, so the
+    features are destroyed by a shift of one grain -- measured, 4 px takes the
+    error rate past 17% and the key is gone. The mount does not have to fail
+    for that to happen: PETG over the 20 mm standoff moves roughly a pixel per
+    kelvin, so a device enrolled in a warm room and opened on a cold morning
+    would refuse its owner and call it tampering. Registration is the
+    difference between a tamper detector and a thermometer.
+
+    Normalised cross-correlation of the fiducial corner against the same
+    corner of the fresh read, searched over +/-max_shift. Whole pixels only:
+    sub-pixel resampling would blur the grains it is trying to preserve.
+    """
+    f = np.asarray(fiducial, dtype=np.float64)
+    n = f.shape[0]
+    f = f - f.mean()
+    denom = np.sqrt((f * f).sum())
+    best, best_score = (0, 0), -np.inf
+    for dy in range(-max_shift, max_shift + 1):
+        for dx in range(-max_shift, max_shift + 1):
+            y0, x0 = FIDUCIAL_ORIGIN + dy, FIDUCIAL_ORIGIN + dx
+            if y0 < 0 or x0 < 0:
+                continue
+            patch = img[y0:y0 + n, x0:x0 + n]
+            if patch.shape != f.shape:
+                continue
+            p = patch - patch.mean()
+            d = np.sqrt((p * p).sum()) * denom
+            if d <= 0:
+                continue
+            score = float((p * f).sum() / d)
+            if score > best_score:
+                best_score, best = score, (dy, dx)
+    return best
+
+
+def bits_from_image(img: np.ndarray, grain_px: int = 4
+                    ) -> tuple[np.ndarray, np.ndarray]:
+    """-> (bit per grain, how far that bit is from flipping).
 
     One bit per grain, not per pixel: neighbouring pixels inside a grain are
     the same measurement, and counting them again would inflate the entropy
@@ -317,25 +378,34 @@ def speckle_features(frames: np.ndarray, envelope_px: float = 12.0,
     marginal bits first, so selecting on this at enrolment is worth far more
     than any amount of extra error correction -- BCH cannot reach 10% at a
     useful rate, and with the margin it does not have to.
+
+    Cells inside the fiducial corner are given a margin of -inf so enrolment
+    never selects them. Their values are published for registration, and a
+    published bit is not key material.
     """
-    f = np.asarray(frames, dtype=np.float64)
-    if f.ndim == 2:
-        f = f[None, ...]
-    hp = _highpass(f.mean(axis=0), envelope_px)
-    h, w = hp.shape
+    h, w = img.shape
     gh, gw = h // grain_px, w // grain_px
     if gh == 0 or gw == 0:
         raise ValueError("ROI smaller than one speckle grain")
-    cells = hp[:gh * grain_px, :gw * grain_px]
+    cells = img[:gh * grain_px, :gw * grain_px]
     cells = cells.reshape(gh, grain_px, gw, grain_px).mean(axis=(1, 3))
-    centred = (cells - np.median(cells)).ravel()
+    centred = cells - np.median(cells)
     scale = np.median(np.abs(centred)) or 1.0
-    return (centred > 0).astype(np.uint8), np.abs(centred) / scale
+    margin = np.abs(centred) / scale
+    lo = FIDUCIAL_ORIGIN // grain_px
+    hi = -(-(FIDUCIAL_ORIGIN + FIDUCIAL_PX) // grain_px)   # round outward
+    margin[lo:hi, lo:hi] = -np.inf
+    return (centred > 0).astype(np.uint8).ravel(), margin.ravel()
+
+
+def speckle_features(frames: np.ndarray, envelope_px: float = 12.0,
+                     grain_px: int = 4) -> tuple[np.ndarray, np.ndarray]:
+    """Burst -> (bits, margin), for callers that do their own registration."""
+    return bits_from_image(prepare(frames, envelope_px), grain_px)
 
 
 def speckle_bits(frames: np.ndarray, envelope_px: float = 12.0,
                  grain_px: int = 4) -> np.ndarray:
-    """Just the bits, for callers that do not select on reliability."""
     return speckle_features(frames, envelope_px, grain_px)[0]
 
 
@@ -357,6 +427,11 @@ class Helper:
     m: int
     t: int
     salt: bytes
+    # The enrolment fiducial, in the clear. Registration needs a reference and
+    # this is it; it is excluded from key material by bits_from_image, so
+    # publishing it costs nothing. See estimate_shift.
+    fiducial: np.ndarray = None
+    grain_px: int = 4
 
     def leakage_bits(self) -> int:
         """Upper bound on what the offset discloses: the code's redundancy."""
@@ -372,35 +447,48 @@ def _key(bits: np.ndarray, salt: bytes) -> bytes:
     return hashlib.sha256(b"CELL-puf-v1" + salt + packed).digest()
 
 
-def enroll(reads: list[tuple[np.ndarray, np.ndarray]], m: int = 12,
-           t: int = 180, salt: bytes = b"",
+def enroll(images: list[np.ndarray], m: int = 12, t: int = 180,
+           salt: bytes = b"", grain_px: int = 4,
            rng: Optional[np.random.Generator] = None) -> tuple[Helper, bytes]:
-    """Several (bits, margin) reads of an undisturbed chamber -> helper, key.
+    """Several prepared images of an undisturbed chamber -> helper, key.
 
-    Reads should span whatever conditions the device will see -- cold, warm,
+    Images should span whatever conditions the device will see -- cold, warm,
     after a knock. Two filters run here and they do different jobs. A position
     that disagreed between reads is already known to be bad. A position that
     agreed but sits close to the sign boundary has not failed YET, and is the
     one that will fail in six months. Ranking the survivors by their weakest
     margin and taking the strongest n is what buys the error budget.
 
+    Later images are registered against the first before they are compared, so
+    a mount that moved between enrolment reads costs nothing. Without that the
+    agreement filter would discard almost every position and enrolment would
+    fail with a misleading complaint about the ROI being too small.
+
     The mask is public. It names positions, not values, and a position being
     reliable says nothing about which way it reads.
     """
-    if len(reads) < 2:
+    if len(images) < 2:
         raise ValueError("enrolment needs at least two reads")
-    bits = np.stack([np.asarray(b, dtype=np.uint8) for b, _ in reads])
-    margins = np.stack([np.asarray(g, dtype=np.float64) for _, g in reads])
+    imgs = [np.asarray(i, dtype=np.float64) for i in images]
+    o, n = FIDUCIAL_ORIGIN, FIDUCIAL_PX
+    fiducial = imgs[0][o:o + n, o:o + n].copy()
 
-    agree = (bits == bits[0]).all(axis=0)
-    worst = margins.min(axis=0)
-    worst[~agree] = -1.0
+    stack, margins = [], []
+    for i, img in enumerate(imgs):
+        if i:
+            img = _shift_to(img, fiducial)
+        b, g = bits_from_image(img, grain_px)
+        stack.append(b)
+        margins.append(g)
+    bits = np.stack(stack)
+    worst = np.stack(margins).min(axis=0)
+    worst[~(bits == bits[0]).all(axis=0)] = -np.inf
 
     code = BCH(m, t)
-    usable = int(np.count_nonzero(agree))
+    usable = int(np.count_nonzero(np.isfinite(worst)))
     if usable < code.n:
         raise PufError(
-            f"only {usable} stable bits, code needs {code.n}. "
+            f"only {usable} usable bits, code needs {code.n}. "
             f"Enlarge the ROI: at a {code.n}-bit code you want at least "
             f"{2 * code.n} grains so the margin filter has something to cut.")
     mask = np.sort(np.argsort(worst)[-code.n:])
@@ -409,21 +497,32 @@ def enroll(reads: list[tuple[np.ndarray, np.ndarray]], m: int = 12,
     rng = rng or np.random.default_rng()
     msg = rng.integers(0, 2, code.k, dtype=np.uint8)
     offset = code.encode(msg) ^ w
-    return Helper(mask, offset, m, t, salt), _key(w, salt)
+    return (Helper(mask, offset, m, t, salt, fiducial, grain_px),
+            _key(w, salt))
 
 
-def reproduce(read: np.ndarray, helper: Helper) -> bytes:
-    """A fresh read plus the public helper -> the same key, or PufError.
+def _shift_to(img: np.ndarray, fiducial: np.ndarray) -> np.ndarray:
+    """Undo whole-pixel translation, so the grains land where they enrolled."""
+    dy, dx = estimate_shift(img, fiducial)
+    if dy or dx:
+        img = np.roll(np.roll(img, -dy, axis=0), -dx, axis=1)
+    return img
+
+
+def reproduce(image: np.ndarray, helper: Helper) -> bytes:
+    """A fresh prepared image plus the public helper -> the key, or PufError.
 
     PufError is the tamper signal. It is not a comparison the firmware may
     skip: without the key there is nothing to unwrap the seed with.
     """
-    r = np.asarray(read, dtype=np.uint8)
-    if helper.mask.size and helper.mask.max() >= r.size:
+    img = np.asarray(image, dtype=np.float64)
+    if helper.fiducial is not None:
+        img = _shift_to(img, helper.fiducial)
+    bits, _ = bits_from_image(img, helper.grain_px)
+    if helper.mask.size and helper.mask.max() >= bits.size:
         raise PufError("read is smaller than the enrolled ROI")
-    w2 = r[helper.mask]
     code = BCH(helper.m, helper.t)
-    fixed = code.decode(helper.offset ^ w2)
+    fixed = code.decode(helper.offset ^ bits[helper.mask])
     if fixed is None:
         raise PufError("chamber response is outside the enrolled radius")
     return _key(helper.offset ^ fixed, helper.salt)
@@ -459,14 +558,18 @@ def save_helper(helper: Helper, path: str) -> None:
     words. Losing it is losing the device, not the coins.
     """
     np.savez(path, mask=helper.mask, offset=helper.offset,
-             m=helper.m, t=helper.t, salt=np.frombuffer(helper.salt, np.uint8))
+             m=helper.m, t=helper.t, salt=np.frombuffer(helper.salt, np.uint8),
+             fiducial=np.asarray(helper.fiducial, dtype=np.float32),
+             grain_px=helper.grain_px)
 
 
 def load_helper(path: str) -> Helper:
     z = np.load(path)
     return Helper(mask=z["mask"], offset=z["offset"].astype(np.uint8),
                   m=int(z["m"]), t=int(z["t"]),
-                  salt=z["salt"].tobytes())
+                  salt=z["salt"].tobytes(),
+                  fiducial=z["fiducial"].astype(np.float64),
+                  grain_px=int(z["grain_px"]))
 
 
 def chamber_reader(capture, helper: Helper, grain_px: int = 4):
@@ -478,6 +581,5 @@ def chamber_reader(capture, helper: Helper, grain_px: int = 4):
     merely close.
     """
     def read() -> bytes:
-        bits, _margin = speckle_features(capture(), grain_px=grain_px)
-        return reproduce(bits, helper)
+        return reproduce(prepare(capture()), helper)
     return read

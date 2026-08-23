@@ -51,16 +51,20 @@ class Chamber:
         self.size, self.grain_px, self.rng = size, grain_px, rng
         self.E = _field((size, size), grain_px, rng)
 
-    def read(self, drift=0.0, frames=16, shot=0.02, gain=1.0):
-        """A burst as (bits, margin). `drift` is the fraction replaced."""
+    def read(self, drift=0.0, frames=16, shot=0.02, gain=1.0, shift=(0, 0)):
+        """A prepared image. `drift` is the fraction of the field replaced,
+        `shift` is whole-pixel translation of the whole pattern -- what a
+        mount does when the resin warms."""
         E = self.E
+        if any(shift):
+            E = np.roll(np.roll(E, shift[0], axis=0), shift[1], axis=1)
         if drift > 0:
             fresh = _field((self.size, self.size), self.grain_px, self.rng)
             E = np.sqrt(1 - drift) * E + np.sqrt(drift) * fresh
         I = np.abs(E) ** 2
         I = I / I.mean() * gain
         out = I[None, ...] + self.rng.normal(0, shot, (frames,) + I.shape)
-        return puf.speckle_features(out, grain_px=self.grain_px)
+        return puf.prepare(out)
 
 
 def _checks():
@@ -95,19 +99,20 @@ def _checks():
 
     # -- feature extraction --------------------------------------------
     ch = Chamber()
-    b, _ = ch.read()
+    img = ch.read()
+    b, _ = puf.bits_from_image(img, ch.grain_px)
     checks.append(("one bit per grain, not per pixel",
                    b.size == (ch.size // ch.grain_px) ** 2))
     checks.append(("bits are balanced", 0.45 < b.mean() < 0.55))
 
     # Sign features must ignore illumination and exposure changes.
-    b_gain, _ = ch.read(gain=3.0)
+    b_gain, _ = puf.bits_from_image(ch.read(gain=3.0), ch.grain_px)
     checks.append(("survives a 3x gain change",
                    (b != b_gain).mean() < 0.02))
 
     # Two chambers must not resemble each other.
     other = Chamber(rng=np.random.default_rng(7))
-    inter = (b != other.read()[0]).mean()
+    inter = (b != puf.bits_from_image(other.read(), ch.grain_px)[0]).mean()
     checks.append((f"different chambers differ ~50% (got {inter:.1%})",
                    0.45 < inter < 0.55))
 
@@ -115,8 +120,8 @@ def _checks():
     def _ber(d, selected=None):
         out = []
         for _ in range(3):
-            a, _m = ch.read()
-            b2, _m2 = ch.read(drift=d)
+            a, _m = puf.bits_from_image(ch.read(), ch.grain_px)
+            b2, _m2 = puf.bits_from_image(ch.read(drift=d), ch.grain_px)
             sel = slice(None) if selected is None else selected
             out.append((a[sel] != b2[sel]).mean())
         return float(np.mean(out))
@@ -141,7 +146,7 @@ def _checks():
         again = 0
         for _ in range(10):
             try:
-                again += puf.reproduce(ch.read()[0], helper) == key
+                again += puf.reproduce(ch.read(), helper) == key
             except puf.PufError:
                 pass
         checks.append((f"reproduces on a quiet chamber ({again}/10)",
@@ -150,7 +155,7 @@ def _checks():
         drifted = 0
         for _ in range(10):
             try:
-                drifted += puf.reproduce(ch.read(drift=0.02)[0], helper) == key
+                drifted += puf.reproduce(ch.read(drift=0.02), helper) == key
             except puf.PufError:
                 pass
         checks.append((f"survives 2% drift ({drifted}/10)", drifted >= 9))
@@ -160,7 +165,7 @@ def _checks():
         leaked = 0
         for _ in range(10):
             try:
-                if puf.reproduce(opened.read()[0], helper) == key:
+                if puf.reproduce(opened.read(), helper) == key:
                     leaked += 1
             except puf.PufError:
                 pass
@@ -170,11 +175,60 @@ def _checks():
         big = 0
         for _ in range(10):
             try:
-                if puf.reproduce(ch.read(drift=0.5)[0], helper) == key:
+                if puf.reproduce(ch.read(drift=0.5), helper) == key:
                     big += 1
             except puf.PufError:
                 pass
         checks.append(("heavy disturbance fails closed", big == 0))
+
+        # Registration. A grain is ~4 px, so an unregistered 4 px shift loses
+        # the key outright -- and PETG over the 20 mm standoff moves about a
+        # pixel per kelvin, so this is a cold morning, not an attack.
+        moved = {}
+        for px in (0, 2, 4, 8, 16):
+            got = 0
+            for _ in range(3):
+                try:
+                    got += puf.reproduce(ch.read(shift=(px, 0)), helper) == key
+                except puf.PufError:
+                    pass
+            moved[px] = got
+        checks.append((f"survives translation up to 16 px "
+                       f"({'/'.join(str(moved[p]) for p in (0, 2, 4, 8, 16))} of 3)",
+                       all(v == 3 for v in moved.values())))
+
+        diag = 0
+        for _ in range(3):
+            try:
+                diag += puf.reproduce(ch.read(shift=(9, -7)), helper) == key
+            except puf.PufError:
+                pass
+        checks.append(("survives a diagonal shift", diag == 3))
+
+        checks.append(("registration finds the shift it was given",
+                       puf.estimate_shift(ch.read(shift=(6, -3)),
+                                          helper.fiducial) == (6, -3)))
+
+        # Translation must not become a way to pass with the wrong chamber:
+        # the search is over shifts, not over diffusers.
+        slid = 0
+        for _ in range(5):
+            try:
+                if puf.reproduce(opened.read(shift=(5, 5)), helper) == key:
+                    slid += 1
+            except puf.PufError:
+                pass
+        checks.append(("registration does not rescue a swapped chamber",
+                       slid == 0))
+
+        # The fiducial is published, so it must not be key material.
+        lo = puf.FIDUCIAL_ORIGIN // ch.grain_px
+        hi = -(-(puf.FIDUCIAL_ORIGIN + puf.FIDUCIAL_PX) // ch.grain_px)
+        cells_wide = ch.size // ch.grain_px
+        fid_idx = {r * cells_wide + c
+                   for r in range(lo, hi) for c in range(lo, hi)}
+        checks.append(("no key bit comes from the published fiducial",
+                       not (set(helper.mask.tolist()) & fid_idx)))
 
         # The helper is public, so it must not carry the key.
         h2, k2 = puf.enroll(enrol, m=m, t=t, rng=np.random.default_rng(5))

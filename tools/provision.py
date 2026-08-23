@@ -461,7 +461,7 @@ def _chamber_reads(args):
             print(f"{args.frm} holds {len(paths)} bursts; enrolment needs at "
                   f"least two, and wants them taken in different conditions.")
             raise SystemExit(1)
-        return [optical_puf.speckle_features(np.load(p)) for p in paths]
+        return [optical_puf.prepare(np.load(p)) for p in paths]
 
     import hardware
     head = hardware.RealSensorHead()
@@ -472,7 +472,7 @@ def _chamber_reads(args):
               "between them rather than taking five in a row.\n")
         for i in range(args.reads):
             input(f"  [{i + 1}/{args.reads}] close the bay and press enter: ")
-            reads.append(optical_puf.speckle_features(head.read_chamber_burst()))
+            reads.append(optical_puf.prepare(head.read_chamber_burst()))
         return reads
     finally:
         head.close()
