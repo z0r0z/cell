@@ -256,6 +256,18 @@ def run() -> int:
           "fee_sats": 1, "memo": "surprise"}),
         ("missing required field", {"type": "btc_spend", "amount_sats": 1}),
         ("not an object", ["btc_spend", 1]),
+        # A field of the right name and the wrong type reaches the renderer and
+        # fails THERE, not in the constructor. These escaped as bare TypeError,
+        # past every caller guarding this with `except UnrenderableOperation`.
+        ("string where sats belong",
+         {"type": "btc_spend", "amount_sats": "100", "destination": "bc1q",
+          "fee_sats": 1}),
+        ("JSON list where a frozenset belongs",
+         {"type": "policy_change", "old_blood_above": None,
+          "new_blood_above": 1, "old_locked": [], "new_locked": []}),
+        ("string where a nonce belongs",
+         {"type": "eth_spend", "amount_wei": 1, "destination": "0xab",
+          "chain_id": 1, "chain_name": "eth", "nonce": "0", "max_fee_wei": 1}),
     ]:
         try:
             ops.parse(payload)
@@ -279,6 +291,11 @@ def run() -> int:
         ("zero needed", dict(quorum_needed=0, quorum_size=3)),
         ("more sigs than signers",
          dict(quorum_needed=2, quorum_size=3, signatures_present=3)),
+        # The bound is the QUORUM, not n. A 2-of-3 with both signatures already
+        # present rendered "YOU ARE signature 3 of 2" -- a line that cannot be
+        # true, on the screen the owner is being asked to approve.
+        ("quorum already met",
+         dict(quorum_needed=2, quorum_size=3, signatures_present=2)),
     ]:
         try:
             ops.BitcoinSpend(amount_sats=1, fee_sats=1, destination="bc1q",

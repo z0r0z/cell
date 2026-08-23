@@ -184,9 +184,14 @@ class BitcoinSpend:
             if not 1 <= self.quorum_needed <= self.quorum_size:
                 raise UnrenderableOperation(
                     f"nonsensical quorum {self.quorum_needed}/{self.quorum_size}")
-            if not 0 <= self.signatures_present < self.quorum_size:
+            # Bounded by the QUORUM, not by n. With quorum_needed already
+            # met, "signature 3 of 2" is a line that cannot be true, and the
+            # owner is being asked to approve a screen that does not describe
+            # what they are doing.
+            if not 0 <= self.signatures_present < self.quorum_needed:
                 raise UnrenderableOperation(
-                    f"impossible signature count {self.signatures_present}")
+                    f"impossible signature count {self.signatures_present} "
+                    f"for a {self.quorum_needed}-of-{self.quorum_size} quorum")
             lines.append(f"  MULTISIG {self.quorum_needed} of {self.quorum_size}")
             lines.append(f"  YOU ARE  signature "
                          f"{self.signatures_present + 1} of {self.quorum_needed}")
@@ -407,7 +412,20 @@ def parse(payload: dict) -> Operation:
         op = cls(**fields)
     except TypeError as e:
         raise UnrenderableOperation(f"refusing {kind}: {e}") from None
-    op.render()          # refuse now, not after the owner has bled
+    try:
+        op.render()      # refuse now, not after the owner has bled
+    except UnrenderableOperation:
+        raise
+    except Exception as e:                                  # noqa: BLE001
+        # A field of the right NAME but the wrong TYPE reaches the renderer and
+        # fails there -- `"100"` where sats belong compares str to int, a JSON
+        # list where a frozenset belongs cannot be differenced. Those escaped as
+        # TypeError, past every caller that guards this call with
+        # `except UnrenderableOperation`, so a malformed QR crashed the device
+        # loop instead of drawing a refusal. A payload the renderer cannot get
+        # through is unrenderable by definition, whatever it raised on the way.
+        raise UnrenderableOperation(
+            f"refusing {kind}: {type(e).__name__}: {e}") from None
     return op
 
 
