@@ -29,9 +29,32 @@ separate usefully even under conditions chosen to flatter it, and a pulse 12
 bpm off doubles the error. Real people months apart will be worse.
 
 That is the finding, and it is why nothing here is wired into the touch gate.
-The module stays because the question is worth re-asking against real captures
-and a better feature set -- second-derivative landmarks, rate normalisation --
-not because the mean-beat template works.
+
+THREE THINGS WOULD BE WORTH TRYING, in this order, and all of them against real
+captures rather than the synthetic model above -- which is now the thing being
+fitted, and fitting it further would only prove the simulator agrees with
+itself.
+
+  Rate is the obstacle, so remove it rather than model it. Enrol and verify
+  inside a narrow band and abstain outside it. The device already abstains
+  when it cannot answer -- gate T0 refuses a capture too slow to analyse
+  rather than guessing -- so this is a shape the design already has.
+
+  Second-derivative landmarks. The a-b-c-d-e waves of the APG and the
+  dimensionless ratios between them are the standard feature set for this, and
+  ratios survive changes in rate and contact pressure that raw morphology does
+  not. Cheap to compute from captures already recorded.
+
+  Both wavelengths. The device lights the finger at 630 nm and 940 nm, which
+  penetrate to different depths and therefore sample different vessels. The
+  RELATIONSHIP between the two morphologies is information nothing here uses,
+  it is already in every capture, and it costs no hardware. This is the one
+  that is specific to this device rather than borrowed from the literature.
+
+Captures now carry `subject` and `session` (calibrate.py touch-capture), which
+is what makes any of it answerable -- identity is a question about matching
+someone to themselves across sittings, and a panel collected without those has
+to be collected again.
 
 Three things this cost, all of which would bite anyone attempting it:
 reflectance PPG is inverted, so a foot detector finds peaks unless the signal

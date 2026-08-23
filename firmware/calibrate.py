@@ -525,15 +525,36 @@ TOUCH_PANEL = {
 }
 
 
-def save_touch(path: Path, red, dark_ir, bore, label: str, fs: float) -> None:
+def save_touch(path: Path, red, dark_ir, bore, label: str, fs: float,
+               subject: str = "", session: str = "") -> None:
+    """Record one touch session.
+
+    `subject` and `session` cost nothing to write and cannot be recovered
+    afterwards. Without them a capture set says only WHAT each recording was --
+    genuine, pump_fake -- and never who produced it or when. That is enough to
+    calibrate the touch gate, which is all these were originally for.
+
+    It is not enough to answer whether the pulse waveform identifies a person,
+    because that question is entirely about matching one subject to themselves
+    ACROSS sessions. Anyone who collects a panel without these has to collect
+    it again to ask it, and the second collection is the expensive one -- it
+    needs the same people back, weeks later.
+
+    Free-form on purpose. A pseudonym is fine and preferable; nothing here
+    wants a real name.
+    """
     np.savez_compressed(path, red=red, ir=dark_ir, bore=np.asarray(bore, float),
-                        label=np.array(label), fs=np.array(fs))
+                        label=np.array(label), fs=np.array(fs),
+                        subject=np.array(subject), session=np.array(session))
 
 
 def load_touch(path: Path) -> dict:
     z = np.load(path, allow_pickle=False)
+    # Older captures predate the subject and session fields; they still load.
     return {"red": z["red"], "ir": z["ir"], "bore": tuple(z["bore"]),
-            "label": str(z["label"]), "fs": float(z["fs"])}
+            "label": str(z["label"]), "fs": float(z["fs"]),
+            "subject": str(z["subject"]) if "subject" in z else "",
+            "session": str(z["session"]) if "session" in z else ""}
 
 
 def cmd_touch_capture(args):
@@ -558,7 +579,8 @@ def cmd_touch_capture(args):
         bore = sensor.read_bore_reference()
     n = len(list(TOUCH_DATA.glob(f"{args.label}_*.npz")))
     path = TOUCH_DATA / f"{args.label}_{n:04d}.npz"
-    save_touch(path, red, ir, bore, args.label, fs)
+    save_touch(path, red, ir, bore, args.label, fs,
+               subject=args.subject, session=args.session)
     res = tg.evaluate(red, ir, bore, th, fs=fs)
     print(f"saved {path}")
     for g in res.gates:
@@ -714,6 +736,14 @@ def main():
                         "the panel still reads 0 everywhere.")
     r.set_defaults(fn=cmd_roc)
     tc = sub.add_parser("touch-capture"); tc.add_argument("--label", required=True)
+    tc.add_argument("--subject", default="",
+                    help="who this recording is of. A pseudonym is fine and "
+                         "preferred. Needed only to ask whether the waveform "
+                         "identifies a person; the gate itself does not use it.")
+    tc.add_argument("--session", default="",
+                    help="a sitting label, e.g. a date. Identity questions are "
+                         "about matching someone to themselves across sessions, "
+                         "so captures from one sitting cannot answer them.")
     tc.add_argument("--synthetic", action="store_true")
     tc.add_argument("--seed", type=int, default=0)
     tc.set_defaults(fn=cmd_touch_capture)
