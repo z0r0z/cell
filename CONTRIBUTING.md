@@ -9,6 +9,8 @@ In order:
 
 ### 1. Spoof panel data from real hardware
 
+**A panel run is a partial claim on the build bounty — see `BOUNTY.md`.**
+
 The reader kit is $62 of hardware plus $31 of consumables, and it produces the number this whole design
 turns on: how cleanly the gate separates real blood from every fake. Every
 threshold in `firmware/blood_gate.py` is derived from published physics; panel
