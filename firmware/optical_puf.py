@@ -445,3 +445,39 @@ if __name__ == "__main__":
     print(f"  corrects up to {b['max_ber']:.1%} of bits")
     print(f"  helper leaks <= {b['leaked_bits']} bits")
     print(f"  residual min-entropy ~{b['residual_entropy']:.0f} bits")
+
+
+# --------------------------------------------------------------------------
+# Device wiring
+# --------------------------------------------------------------------------
+
+def save_helper(helper: Helper, path: str) -> None:
+    """The helper is public. It sits beside the encrypted seed in the clear.
+
+    It is not a secret and it is not optional: without it the chamber cannot
+    be decoded back to the enrolled reading, so back it up with the seed
+    words. Losing it is losing the device, not the coins.
+    """
+    np.savez(path, mask=helper.mask, offset=helper.offset,
+             m=helper.m, t=helper.t, salt=np.frombuffer(helper.salt, np.uint8))
+
+
+def load_helper(path: str) -> Helper:
+    z = np.load(path)
+    return Helper(mask=z["mask"], offset=z["offset"].astype(np.uint8),
+                  m=int(z["m"]), t=int(z["t"]),
+                  salt=z["salt"].tobytes())
+
+
+def chamber_reader(capture, helper: Helper, grain_px: int = 4):
+    """-> a callable the signer can hold, returning the chamber's key.
+
+    `capture` takes a burst from the speckle camera with the laser on and the
+    cartridge bay empty. Raises PufError if the chamber does not answer as
+    enrolled, which is the whole point: the caller cannot get a key that is
+    merely close.
+    """
+    def read() -> bytes:
+        bits, _margin = speckle_features(capture(), grain_px=grain_px)
+        return reproduce(bits, helper)
+    return read

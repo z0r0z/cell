@@ -8,7 +8,7 @@ On [poidh](https://poidh.xyz), topped up over time.
 
 ## Cost
 
-**~$94 in hardware, ~$31 in consumables.** `BOM.csv` lists every part with
+**~$95 in hardware, ~$31 in consumables.** `BOM.csv` lists every part with
 sourcing. (Obviously the bounty will be for more than this amount.)
 
 ## Build it

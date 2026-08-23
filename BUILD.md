@@ -46,7 +46,7 @@ The blood reader is the novel component. The wallet layer is a solved problem th
 |---|---|---|
 | `Reader` | The blood reader hardware — Pi, spectrometer, laser, camera, LEDs, filament | $62.25 |
 | `Reader consumable` | Lancets, alcohol pads, PET window film, tape, sharps container. Needed to run the reader at all. About 100 blood readings, limited by the lancet and pad counts | $31.00 |
-| `Wallet` | The signing half — secure element, display, buttons, QR camera, fasteners | $30.80 |
+| `Wallet` | The signing half — secure element, display, buttons, QR camera, ring window, fasteners | $32.80 |
 
 Order the reader kit and its consumables together; they are one purchase and the reader is useless without both. The wallet kit is a second purchase you only make if the reader works.
 
@@ -339,7 +339,7 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 
 ---
 
-## 6. Parts (~US$90 complete, ~US$60 for the reader alone)
+## 6. Parts (~US$95 complete, ~US$62 for the reader alone)
 
 | Item | Part | ~USD | Notes |
 |---|---|---|---|

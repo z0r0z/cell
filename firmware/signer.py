@@ -124,12 +124,29 @@ def liveness_digest(tier: Tier, gate_attestation: dict) -> bytes:
     return hashlib.sha256(b"|".join(parts)).digest()
 
 
-def unwrap_context(pin: str) -> bytes:
+def unwrap_context(pin: str, chamber: "bytes | None" = None) -> bytes:
     """Context for the seed-wrapping KDF. STABLE INPUTS ONLY.
 
     The PIN, and through `SecureElement.kdf` the on-chip secret that never
     leaves the ATECC608B. A seed blob copied off the SD card is inert without
     both: the right PIN and that specific chip.
+
+    `chamber` is the optical PUF key from optical_puf.py, on devices that
+    enrolled one. It qualifies as stable input for the same reason the PIN
+    does: a diffuser set in epoxy is meant to be boring, and the fuzzy
+    extractor is what makes "nearly the same reading" mean "the same key".
+    It adds a third thing the attacker must have, and it is the only one of
+    the three that cannot be carried away from the assembled instrument.
+
+    Passing None reproduces the pre-enrolment context byte for byte, so a
+    device provisioned before enrolment keeps opening its seed unchanged.
+
+    THE ABSENT HELPER IS NOT A DOWNGRADE. Nothing here records whether a
+    chamber was used, because nothing needs to: a seed wrapped with the term
+    does not open without it. Deleting the helper, swapping the diffuser or
+    opening the case all arrive at the same wrong key and AES-GCM refuses.
+    That is enforcement by construction rather than by a flag some firmware
+    could decline to read.
 
     Nothing else may go in here, and two things that look tempting are wrong:
 
@@ -148,8 +165,10 @@ def unwrap_context(pin: str) -> bytes:
     attestation already declares through the firmware hash and the tamper
     seal. BUILD.md section 16.
     """
-    return hashlib.sha256(b"CELL/unwrap/v1|"
-                          + hashlib.sha256(pin.encode()).digest()).digest()
+    ctx = b"CELL/unwrap/v1|" + hashlib.sha256(pin.encode()).digest()
+    if chamber is not None:
+        ctx += b"|chamber|" + hashlib.sha256(chamber).digest()
+    return hashlib.sha256(ctx).digest()
 
 
 def zeroise(buf: bytearray) -> None:
@@ -172,6 +191,7 @@ class Signer:
       run_gate    (Tier) -> (bool, dict)        touch_gate or blood_gate
       unwrap_seed (key) -> bytearray            AES-GCM open of the stored seed
       sign_digest (seed, sighash) -> bytes      derive and sign
+      read_chamber () -> bytes                  optical PUF key, or None
     """
 
     def __init__(self, se: SecureElement, pol: Policy, fw_hash: bytes,
@@ -179,7 +199,8 @@ class Signer:
                  confirm: Callable[[list[str]], bool],
                  run_gate: Callable[[Tier], tuple[bool, dict]],
                  unwrap_seed: Callable[[bytes], bytearray],
-                 sign_digest: Callable[[bytearray, bytes], bytes]):
+                 sign_digest: Callable[[bytearray, bytes], bytes],
+                 read_chamber: "Callable[[], bytes] | None" = None):
         if len(fw_hash) != 32:
             raise ValueError("fw_hash must be 32 bytes")
         if len(cal_hash) != 32:
@@ -191,6 +212,11 @@ class Signer:
         self.cal_hash = cal_hash
         self._confirm, self._run_gate = confirm, run_gate
         self._unwrap_seed, self._sign_digest = unwrap_seed, sign_digest
+        # None on a device that never enrolled a chamber. See unwrap_context:
+        # leaving it None reproduces the old context exactly, and a device
+        # that DID enrol cannot be downgraded by dropping it, because the
+        # seed it wrapped will not open.
+        self._read_chamber = read_chamber
         self.trace: list[str] = []       # step order, asserted in the tests
 
     def _step(self, name: str) -> None:
@@ -272,7 +298,20 @@ class Signer:
         #    and EXPECTED_ORDER is asserted in the tests.
         self._step("unwrap")
         live = liveness_digest(tier, gate_att)
-        key = self.se.kdf(unwrap_context(pin))
+        # The chamber is read here rather than at boot. Reading it at boot
+        # would leave the derived key sitting in memory for the whole session;
+        # reading it now keeps it alive for the same few milliseconds the seed
+        # is, and it is discarded on the same path.
+        chamber = None
+        if self._read_chamber is not None:
+            try:
+                chamber = self._read_chamber()
+            except Exception as e:
+                raise Refused(
+                    "Refused: the optical chamber did not answer as enrolled. "
+                    f"Restore from your recovery words on a new build. ({e})"
+                ) from None
+        key = self.se.kdf(unwrap_context(pin, chamber))
         seed = self._unwrap_seed(key)
 
         # 7. Sign, then zeroise on every path.

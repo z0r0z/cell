@@ -26,7 +26,8 @@ GATE_OK = (True, {"gate_scores": {"G1": 0.15, "G6": 0.02}})
 GATE_FAIL = (False, {"message": "Rejected at G6 motion arrested."})
 
 
-def make(pol=None, confirm=True, gate=GATE_OK, se=None, seed=b"\x11" * 32):
+def make(pol=None, confirm=True, gate=GATE_OK, se=None, seed=b"\x11" * 32,
+         read_chamber=None):
     """A signer wired to instrumented collaborators."""
     log = {"confirmed_with": None, "gate_tier": None, "unwrap_key": None,
            "seed_at_sign": None, "seed_after": None}
@@ -51,7 +52,7 @@ def make(pol=None, confirm=True, gate=GATE_OK, se=None, seed=b"\x11" * 32):
         return attest.schnorr_sign(sighash, bytes(seed_buf))
 
     s = Signer(se or SoftSE(pin=PIN), pol or Policy(), FW, CAL,
-               _confirm, _gate, _unwrap, _sign)
+               _confirm, _gate, _unwrap, _sign, read_chamber)
     return s, log
 
 
@@ -346,6 +347,54 @@ def run() -> int:
 
     check("unverified change is flagged to the owner",
           any("WARNING" in ln for ln in ch.render()))
+
+    # ---- the optical chamber in the KDF ----------------------------------
+    # A device that never enrolled must derive exactly what it derived before
+    # the chamber existed, or enrolment would strand every seed already
+    # wrapped.
+    check("no chamber reproduces the original context",
+          signer.unwrap_context(PIN)
+          == hashlib.sha256(b"CELL/unwrap/v1|"
+                            + hashlib.sha256(PIN.encode()).digest()).digest())
+
+    ctx_a = signer.unwrap_context(PIN, b"\xaa" * 32)
+    ctx_b = signer.unwrap_context(PIN, b"\xbb" * 32)
+    check("a different chamber is a different context", ctx_a != ctx_b)
+    check("the chamber changes the context at all",
+          ctx_a != signer.unwrap_context(PIN))
+    check("the same chamber is stable", ctx_a == signer.unwrap_context(PIN, b"\xaa" * 32))
+
+    # The whole point: dropping the helper must not open the seed. It cannot,
+    # because the key is simply different -- no flag decides this.
+    s_enrolled, log_enrolled = make(read_chamber=lambda: b"\xaa" * 32)
+    s_enrolled.authorize_and_sign(SignRequest(spend, b"\x33" * 32), PIN)
+    s_bare, log_bare = make()
+    s_bare.authorize_and_sign(SignRequest(spend, b"\x33" * 32), PIN)
+    check("dropping the chamber yields a different unwrap key",
+          log_enrolled["unwrap_key"] != log_bare["unwrap_key"])
+
+    s_swapped, log_swapped = make(read_chamber=lambda: b"\xcc" * 32)
+    s_swapped.authorize_and_sign(SignRequest(spend, b"\x33" * 32), PIN)
+    check("a swapped chamber yields a different unwrap key",
+          log_swapped["unwrap_key"] != log_enrolled["unwrap_key"])
+
+    # A chamber that cannot be decoded must refuse, not fall back.
+    def _broken():
+        raise RuntimeError("outside the enrolled radius")
+
+    s_broken, _ = make(read_chamber=_broken)
+    try:
+        s_broken.authorize_and_sign(SignRequest(spend, b"\x33" * 32), PIN)
+        check("an unreadable chamber refuses rather than falling back", False)
+    except Refused as e:
+        check("an unreadable chamber refuses rather than falling back",
+              "chamber" in str(e))
+
+    # And it must refuse at unwrap, after the gate -- never before the owner
+    # has been shown the transaction.
+    check("the chamber is read inside the unlock chain, not before it",
+          s_broken.trace == ["render", "policy", "confirm", "pin", "gate",
+                             "unwrap"])
 
     print(f"{'check':<52}{'result':>8}")
     print("-" * 60)
