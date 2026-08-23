@@ -11,7 +11,7 @@
 <circle cx="310" cy="216" r="2.6" fill="#4E7A5B"/>
 <rect x="400" y="190" width="600" height="45" rx="4" fill="#141312" stroke="#4E7A5B" stroke-width="1"/>
 <text x="414" y="208" font-size="12" fill="#D8D2C8">AS7341 spectrometer</text>
-<text x="414" y="224" font-size="9" fill="#6F7178">0x39 on I²C1, 400 kHz</text>
+<text x="414" y="224" font-size="9" fill="#6F7178">0x39 on I²C1, 100 kHz</text>
 <text x="700" y="208" font-size="9" fill="#6F7178">8 colour channels + Clear + NIR.</text>
 <text x="700" y="220" font-size="9" fill="#6F7178">Drives white LED #1 on its LDR pin.</text>
 <text x="76" y="278" font-size="10.5" fill="#9FA3A8">GPIO12</text>
@@ -19,7 +19,7 @@
 <circle cx="310" cy="274" r="2.6" fill="#8A7440"/>
 <rect x="400" y="248" width="600" height="45" rx="4" fill="#141312" stroke="#8A7440" stroke-width="1"/>
 <text x="414" y="266" font-size="12" fill="#D8D2C8">White LED #2</text>
-<text x="414" y="282" font-size="9" fill="#6F7178">2N7002 + 68 Ω</text>
+<text x="414" y="282" font-size="9" fill="#6F7178">2N7002 low-side, 68 Ω to +5 V</text>
 <text x="700" y="266" font-size="9" fill="#6F7178">45° opposed to LED #1, so droplet</text>
 <text x="700" y="280" font-size="9" fill="#6F7178">asymmetry cancels.</text>
 <text x="76" y="338" font-size="10.5" fill="#9FA3A8">GPIO6</text>
@@ -35,7 +35,7 @@
 <circle cx="310" cy="392" r="2.6" fill="#8A7440"/>
 <rect x="400" y="366" width="600" height="45" rx="4" fill="#141312" stroke="#8A7440" stroke-width="1"/>
 <text x="414" y="384" font-size="12" fill="#D8D2C8">940 nm IR LED</text>
-<text x="414" y="400" font-size="9" fill="#6F7178">2N7002 + 47 Ω</text>
+<text x="414" y="400" font-size="9" fill="#6F7178">2N7002 low-side, 47 Ω to +3V3</text>
 <text x="700" y="384" font-size="9" fill="#6F7178">Co-sited with LED #1. Gives touch</text>
 <text x="700" y="398" font-size="9" fill="#6F7178">mode its infrared channel.</text>
 <text x="76" y="456" font-size="10.5" fill="#9FA3A8">GPIO22</text>

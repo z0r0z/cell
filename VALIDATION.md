@@ -260,8 +260,8 @@ calibration.
 
 Two measurements gate the design, and the reader kit makes both:
 
-**Speckle sampling.** Lensless grain is ~λz/D ≈ 4 µm at 20 mm, about 4 px on an
-IMX219. `hardware.py` includes the check: autocorrelate one frame, confirm the
+**Speckle sampling.** Lensless grain is ~λz/D ≈ 4.3 µm at 20 mm over a 3 mm spot,
+about 3.1 px on the OV5647 `BUILD.md` §6 specifies (3.9 px on an IMX219). `hardware.py` includes the check: autocorrelate one frame, confirm the
 central peak spans 3–5 px. Frames are spatially high-passed before correlation
 so the static beam envelope cannot masquerade as a frozen speckle field.
 
@@ -269,6 +269,16 @@ so the static beam envelope cannot masquerade as a frozen speckle field.
 LED, both normalised against the cartridge's printed white patch so the ratio is
 a property of the sample rather than of the two drive currents. The separation
 between a cellular suspension and a dye solution is the number to confirm.
+
+**The IR channel is off-centre, and T6 leans on it.** The AS7341's NIR photodiode
+is centred near 910 nm while the BOM's IR LED emits at 940 nm, so touch mode reads
+its infrared on the shoulder of that band rather than the peak. The red/infrared
+ratio is one of the two gates carrying most of the anti-spoof weight (§4), and a
+weak IR arm widens its spread. Per-device calibration sets the threshold from your
+own samples and may absorb this entirely — but confirm the 940 nm level sits well
+clear of the dark floor before trusting `r_ratio`, and if it does not, a 5 mm 850 nm
+LED lands nearer the channel centre at the cost of a little haemoglobin contrast.
+This is a measurement to take, not a known defect.
 
 Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is the
 "it works" moment, and it is reachable in a weekend.

@@ -2,7 +2,7 @@
 
 A hardware wallet that requires a live pulse, or a drop of fresh blood, to authorise a transaction.
 
-Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, $94.40 of hardware. Public domain.
+Airgapped signer for Bitcoin and Ethereum. Raspberry Pi, 3D-printed enclosure, $95.05 of hardware. Public domain.
 
 <img src="diagrams/turntable.gif" alt="CELL enclosure, 116 x 73 x 28 mm" width="100%">
 

@@ -8,9 +8,10 @@ Wallet,I/O,Buttons,12mm tactile switch + cap,4,0.75,3.00,CONFIRM gets its own pi
 Reader,Optics,White LED,5mm white 5000K,2,0.40,0.80,Mounted at 45 deg opposed
 Reader,Optics,IR LED,940nm 5mm,1,0.50,0.50,Co-sited with LED #1
 Reader,Sensing,Laser,"650nm diode module, <=5mW",1,2.00,2.00,Liveness gate. Coherent source is MANDATORY - an LED has microns of coherence length and produces no speckle. Interlock to the cartridge switch.
-Reader,Optics,MOSFET,2N7002 SOT-23,2,0.15,0.30,LED gating
-Reader,Optics,Passives,68R / 47R / 10k / 2.2k / 100nF assortment,1,1.00,1.00,ONE 2.2k pull-up pair on the whole I2C bus - remove from the other breakouts
-Wallet,Power,USB-C power input,"USB-C breakout, power only",1,2.00,2.00,NO BATTERY. A LiPo left at partial charge for a year swells or worse. Desolder D+/D- or use a data blocker.
+Reader,Optics,MOSFET,2N7002 SOT-23,3,0.15,0.45,"Low-side gates for white LED #2 (GPIO12, 68R to +5V), 940nm IR (GPIO23, 47R to +3V3) and the laser (GPIO6). Three loads, three parts."
+Reader,Optics,Passives,68R / 47R / 10k / 5.1k / 2.2k / 100nF assortment,1,1.00,1.00,ONE 2.2k pull-up pair on the whole I2C bus - remove from the other breakouts. The two 5.1k are the USB-C CC pulldowns - see the USB-C row.
+Wallet,Power,USB-C power input,"USB-C breakout, power only",1,2.00,2.00,NO BATTERY. A LiPo left at partial charge for a year swells or worse. Desolder D+/D- or use a data blocker. CHECK THE BREAKOUT HAS 5.1k CC1/CC2 PULLDOWNS - without them a compliant charger supplies nothing. Feed the Pi 5V/GND pads; needs 5V at 2A.
+Reader,Sensing,Cartridge switch,SPDT snap-action microswitch with lever,1,0.50,0.50,"GPIO22 cartridge-present. Also the laser interlock: the laser gate runs through its contacts, so an open chamber cannot be illuminated even if the firmware asks."
 Reader,Compute,Prototyping,Small breadboard + jumper wires,1,5.00,5.00,No PCB needed to prove the sensing.
 Reader,Storage,microSD,16GB A2,1,6.00,6.00,Read-only rootfs via overlayfs
 Reader,Enclosure,Filament black,PETG black ~90g,1,2.00,2.00,Optical chamber. NOT PLA - creeps under screw preload.

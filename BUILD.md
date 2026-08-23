@@ -1,6 +1,6 @@
 # CELL — Build Specification
 
-Single device, $94.40 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
+Single device, $95.05 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
 
 The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm — and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
@@ -44,13 +44,13 @@ The blood reader is the novel component. The wallet layer is a solved problem th
 
 | Kit | What it is | Cost |
 |---|---|---|
-| `Reader` | The blood reader hardware — Pi, spectrometer, laser, camera, LEDs, filament | $61.60 |
+| `Reader` | The blood reader hardware — Pi, spectrometer, laser, camera, LEDs, filament | $62.25 |
 | `Reader consumable` | Lancets, alcohol pads, PET window film, tape, sharps container. Needed to run the reader at all. About 100 blood readings, limited by the lancet and pad counts | $31.00 |
 | `Wallet` | The signing half — secure element, display, buttons, QR camera, fasteners | $30.80 |
 
 Order the reader kit and its consumables together; they are one purchase and the reader is useless without both. The wallet kit is a second purchase you only make if the reader works.
 
-### Kit 1 — the blood reader ($61.60 hardware + $31.00 consumables, one weekend)
+### Kit 1 — the blood reader ($62.25 hardware + $31.00 consumables, one weekend)
 
 | Item | ~USD |
 |---|---|
@@ -59,7 +59,8 @@ Order the reader kit and its consumables together; they are one purchase and the
 | 2 × white LED, 1 × 940 nm IR LED | 1.30 |
 | 650 nm laser diode module | 2.00 |
 | Pi Camera + mini-CSI cable | 10.00 |
-| 2 × 2N7002 + resistors | 1.30 |
+| 3 × 2N7002 + resistors | 1.45 |
+| Cartridge-present microswitch | 0.50 |
 | 16 GB microSD | 6 |
 | Jumper wires, small breadboard | 5 |
 | PETG white + black, ~90 g black + 60 g white | 5.00 |
@@ -81,10 +82,11 @@ It answers the question that determines whether the rest is worth building: does
 | 4 × 12 mm tactile buttons | 3 |
 | USB-C breakout, power only | 2 |
 | M2.5 screws + heat-set inserts, M2 display screws | 2.80 |
+| Ø10 × 0.5 mm ring window, clear acrylic or glass | 1.00 |
 
 The signing firmware is in this repository — see §12. Build it, provision a seed, then do the airgap hardening: radios disabled, antenna trace cut, read-only rootfs.
 
-**Full device: $94.40 of hardware,** plus $31.00 of consumables. $125.40 all in.
+**Full device: $95.05 of hardware,** plus $31.00 of consumables. $126.05 all in.
 
 **What a signature costs.** A touch-tier signature costs nothing — no
 cartridge, no lancet, and touch is the everyday default. A blood-tier
@@ -350,11 +352,12 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 | Camera (QR) | Cheap USB webcam | 8 | Wallet kit. **Not a second CSI camera** — the Pi Zero has one CSI port and the speckle path has it. QR decoding tolerates auto-exposure |
 | USB OTG adapter | micro-USB male → USB-A female | 2 | Wallet kit. The Zero's ports are micro-USB. Without this the webcam does not physically connect |
 | Buttons | 12 mm tactile ×4 | 3 | Wallet kit. One is CONFIRM, on its own pin |
-| LEDs | 5 mm white ×2, 940 nm IR ×1, 2N7002 ×2, resistors | 3 | |
-| Power | USB-C breakout, power only | 2 | **No battery** — see §2. Desolder D+/D− or use a data blocker |
+| LEDs | 5 mm white ×2, 940 nm IR ×1, 2N7002 ×3, resistors | 3 | One MOSFET each for LED #2, the IR LED and the laser — see §11 for the rails |
+| Cartridge switch | SPDT snap-action microswitch, lever | 0.50 | Reader kit. GPIO22, and the laser interlock (§9) |
+| Power | USB-C breakout, power only | 2 | **No battery** — see §2. Desolder D+/D− or use a data blocker. **Confirm it carries 5.1 kΩ CC pulldowns** — see §11 |
 | Storage | 16 GB A2 microSD | 6 | |
 | Test cartridges | Printed once, sealed, kept with the device | 0 | Wallet kit. REFERENCE + NULL, see §4 |
-| Filament | PETG black ~90 g, white ~30 g | 4 | Not PLA |
+| Filament | PETG black ~90 g, white ~60 g | 5 | Not PLA |
 | Fasteners | M2.5×8 + heat-set inserts ×8 | 3 | |
 | Ring window | Ø10 × 0.5 mm clear acrylic or glass disc | 1 | Seals the chamber, contact surface for touch mode |
 
@@ -392,6 +395,11 @@ the one tool people do not already own — digital calipers, a small screwdriver
 set, and a craft knife with fresh blades for the antenna trace and the PET
 windows. A multimeter is not required but you will want one the first time a
 bus does not answer.
+
+Also assumed: a **5 V supply good for 2 A** and a USB-C cable. The Pi Zero 2 W
+peaks near 0.5 A on its own, and the QR webcam, the laser and the LEDs are all
+drawing at the same moment during a blood run. A 1 A phone charger will brown
+the Pi out mid-capture, which looks like a sensor fault rather than a power one.
 
 ### Cost reduction
 
@@ -520,7 +528,7 @@ That one command builds everything printable — the shells included, via `tools
 - **45°/0° is not decorative.** Wet blood is glossy. A normal-incidence lamp would swamp the sensor with surface reflection carrying zero chemical information. At 45° the specular lobe exits at 45° and misses the aperture entirely.
 - Two opposed LEDs cancel directional shading from droplet asymmetry.
 - The aperture tube defines a 3 mm spot inside the 4 mm well, so the sensor never sees the meniscus at the edge.
-- White LED #1 runs off the AS7341's own `LDR` driver pin — you get synchronised flash/measure timing free. LED #2 and the IR LED gate via 2N7002.
+- White LED #1 runs off the AS7341's own `LDR` driver pin — you get synchronised flash/measure timing free. LED #2, the IR LED and the laser each gate through their own 2N7002 — **three** of them, on two different rails. See §11.
 
 ### The speckle path
 
@@ -538,8 +546,8 @@ A second, independent optical path in the same chamber.
 | Item | Spec | Why |
 |---|---|---|
 | Source | 650 nm diode module, ≤5 mW | Coherent light is mandatory. An LED's coherence length is microns — it produces no speckle |
-| Interlock | Laser energised only when the cartridge switch is closed | The chamber is sealed, but wire the interlock anyway |
-| Camera | Pi Camera, **lens unscrewed and removed** | Lensless speckle grain ≈ λz/D ≈ 4 µm at 20 mm — about 4 pixels on an IMX219, well sampled. With the lens fitted the grain is ~1.6 px and undersampled |
+| Interlock | Laser energised only when the cartridge switch is closed | The chamber is sealed, but wire the interlock anyway. Put the switch contacts in **series with the laser module's supply**, not in the GPIO6 gate line — an interlock the firmware can talk its way past is not an interlock. GPIO6 then gates a laser that is already dead with the chamber open |
+| Camera | Pi Camera, **lens unscrewed and removed** | Lensless speckle grain ≈ λz/D ≈ 4.3 µm at 20 mm over a 3 mm spot — about 3.1 pixels on the OV5647's 1.4 µm pitch, inside the 3–5 px check below. (On an IMX219's 1.12 µm pitch the same grain is 3.9 px; §6 specifies the OV5647 because its lens unscrews.) With a lens fitted the grain falls to ~1.6 px and is undersampled |
 | Standoff | ~20 mm, off the specular axis | |
 | Settings | **Fixed** exposure ≤2 ms, fixed gain, AWB off, denoise off | Any auto-adjustment between frames destroys the correlation measurement. This is the single most common way to get garbage out of this sensor |
 | Capture | 128×128 ROI, 16 frames per burst, one burst every 20 s | |
@@ -618,7 +626,22 @@ PETG, not PLA — PLA creeps under screw preload and softens in a hot car. The o
 
 ## 11. Wiring
 
-Everything on I²C1 at 400 kHz plus SPI0 for the display. BCM numbering.
+Everything on I²C1 at **100 kHz** plus SPI0 for the display. BCM numbering.
+
+**Leave the bus at 100 kHz — this is the ATECC608B's constraint, not the AS7341's.**
+The chip sleeps between commands and is woken by holding SDA low for ≥60 µs,
+which `cryptoauthlib` does by writing `0x00` at the bus speed. That byte is low
+for ~90 µs at 100 kHz and only ~2.5 µs at 400 kHz, so at 400 kHz the part never
+wakes and every call returns a timeout that reads exactly like a chip you have
+mis-soldered. The Linux `i2c-dev` API cannot drop the speed for a single
+transfer, so the bus rate is the fix. `raspi-config` leaves `i2c_arm_baudrate`
+at 100 kHz — the correct value here is the default, so simply do not raise it.
+
+The AS7341 has room for this: touch mode's 20 ms budget per PPG sample spends
+~5.6 ms integrating (§4) and ~2 ms on the register reads at 100 kHz. If gate T0
+still reports a rate below `fs_min` on your build, give the ATECC its own
+`dtoverlay=i2c-gpio` bus and put the AS7341 back on hardware I²C1 at 400 kHz —
+do not raise the shared bus and hope.
 
 `diagrams/wiring.svg` draws the Phase 1 half of this table — the reader, which is what you build first. It is generated from the table below by `tools/gen_wiring.py`, so the sheet you solder from cannot drift from the spec. Change the table, re-run the generator, commit both.
 
@@ -629,16 +652,28 @@ Everything on I²C1 at 400 kHz plus SPI0 for the display. BCM numbering.
 | **GPIO26** | **CONFIRM** — dedicated, RC-debounced (10 kΩ + 100 nF), shares no bus |
 | GPIO8–11 | SPI0 → display |
 | GPIO25 / 27 / 24 | Display D/C, RESET, backlight |
-| GPIO12 | White LED #2 gate (2N7002, 68 Ω) |
+| GPIO12 | White LED #2 gate (2N7002 low-side, 68 Ω to **+5 V**) |
 | GPIO6 | Laser gate (2N7002) — interlocked to the cartridge switch |
-| GPIO23 | 940 nm IR LED gate (2N7002, 47 Ω) |
-| GPIO22 | Cartridge-present microswitch |
+| GPIO23 | 940 nm IR LED gate (2N7002 low-side, 47 Ω to **+3V3**) |
+| GPIO22 | Cartridge-present microswitch — internal pull-up, LOW when seated |
 | CSI | Camera |
 
 **Two common first-build failures:**
 
 1. **Both I²C breakouts ship with pull-ups fitted.** Remove one pair (2.2 kΩ) or the bus may not enumerate. This is the #1 first-build failure.
 2. **CONFIRM is on its own pin for a reason.** An attacker who owns the SPI bus still can't assert it.
+
+3. **The two LED rails are not the same rail.** 68 Ω suits a white LED (Vf ≈ 3.1 V)
+   on +5 V, giving ~28 mA; on +3V3 the same resistor yields ~3 mA and the LED barely
+   lights. 47 Ω suits the 940 nm LED (Vf ≈ 1.35 V) on +3V3, giving ~41 mA; on +5 V it
+   passes ~78 mA and cooks a 5 mm part. The MOSFETs switch the low side either way,
+   so 3V3 gate drive is fine for both.
+
+4. **A USB-C breakout with no CC pulldowns delivers nothing.** A compliant source
+   reads the absent 5.1 kΩ on CC1/CC2 as "nothing plugged in" and never turns on.
+   Most power-only breakouts fit them; some do not. Measure CC1–GND before you
+   conclude the Pi is dead. Budget 5 V at 2 A: the Zero 2 W peaks near 0.5 A, and a
+   blood run has the webcam, laser and LEDs live at once.
 
 ### Radio removal — non-negotiable
 

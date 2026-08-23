@@ -79,11 +79,11 @@ def main() -> int:
 
     # Peripherals, in the order the pins appear.
     dest = {
-        "GPIO2/3": ("AS7341 spectrometer", "0x39 on I²C1, 400 kHz",
+        "GPIO2/3": ("AS7341 spectrometer", "0x39 on I²C1, 100 kHz",
                     "8 colour channels + Clear + NIR.\nDrives white LED #1 on its LDR pin.", GREEN),
-        "GPIO12":  ("White LED #2", "2N7002 + 68 Ω",
+        "GPIO12":  ("White LED #2", "2N7002 low-side, 68 Ω to +5 V",
                     "45° opposed to LED #1, so droplet\nasymmetry cancels.", AMBER),
-        "GPIO23":  ("940 nm IR LED", "2N7002 + 47 Ω",
+        "GPIO23":  ("940 nm IR LED", "2N7002 low-side, 47 Ω to +3V3",
                     "Co-sited with LED #1. Gives touch\nmode its infrared channel.", AMBER),
         "GPIO6":   ("650 nm laser, ≤5 mW", "2N7002, interlocked",
                     "COHERENT SOURCE IS MANDATORY.\nAn LED produces no speckle.", RED),
