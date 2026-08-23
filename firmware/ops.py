@@ -378,6 +378,29 @@ class PolicyChange:
 ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, EthereumSpend, PolicyChange)
 
 
+# The closed set, as data rather than as a table inside parse(). policy.py
+# checks its own tier map against this, so an operation added here without a
+# tier is a failing test rather than an operation that quietly needs only a
+# pulse.
+OPERATIONS = {
+    "btc_spend": BitcoinSpend,
+    "note_spend": NoteSpend,
+    "transfer": DirectTransfer,
+    "eth_spend": EthereumSpend,
+    "policy_change": PolicyChange,
+}
+
+
+def op_classes() -> set:
+    """Every policy class this device can be asked to sign.
+
+    op_class() reports a constant per type, so it is read off an uninitialised
+    instance rather than by inventing plausible field values for each -- which
+    would be a second place to keep in step with the operations themselves.
+    """
+    return {cls.op_class(cls.__new__(cls)) for cls in OPERATIONS.values()}
+
+
 def parse(payload: dict) -> Operation:
     """Build an operation from a decoded QR payload, or refuse.
 
@@ -388,13 +411,7 @@ def parse(payload: dict) -> Operation:
     if not isinstance(payload, dict):
         raise UnrenderableOperation("payload is not an object")
     kind = payload.get("type")
-    table = {
-        "btc_spend": BitcoinSpend,
-        "note_spend": NoteSpend,
-        "transfer": DirectTransfer,
-        "eth_spend": EthereumSpend,
-        "policy_change": PolicyChange,
-    }
+    table = OPERATIONS
     if kind not in table:
         raise UnrenderableOperation(
             f"refusing unknown operation {kind!r}. This device signs "

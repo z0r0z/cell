@@ -52,6 +52,20 @@ class Op(str):
 # Blood-locked at provisioning, permanently. These are the operations that, if
 # an attacker could perform them at touch tier, would let them dismantle every
 # other protection.
+# Every operation class this policy knows how to price. Anything outside it is
+# a programming error, and required_tier answers BLOOD for it rather than the
+# default -- see the note there. The tests check this covers everything ops.py
+# can emit.
+KNOWN_OPS = frozenset({
+    "tx.send",
+    "note.spend",
+    "policy.change",
+    "key.export",
+    "device.wipe",
+    "device.reprovision",
+    "recipient.allowlist",
+})
+
 ALWAYS_BLOOD = frozenset({
     "policy.change",       # the rule that makes the whole scheme hold
     "key.export",
@@ -81,7 +95,21 @@ class Policy:
     blood_locked: frozenset[str] = field(default_factory=frozenset)
 
     def required_tier(self, op: str, amount: int = 0) -> Tier:
+        """The tier this operation needs. An unknown operation needs blood.
+
+        The default matters more than it looks. Operations arrive here as bare
+        strings, and the obvious fallback -- drop through to TOUCH -- means a
+        class nobody priced asks for a pulse instead of a drop, silently and
+        in the direction that looks safe. A renamed op_class, or one added to
+        ops.py without a line here, would quietly downgrade itself.
+
+        So the fallback is the strong tier, and KNOWN_OPS is checked against
+        ops.op_classes() by the tests. Getting this wrong now costs friction.
+        The other way round it cost a tier.
+        """
         if op in ALWAYS_BLOOD or op in self.blood_locked:
+            return Tier.BLOOD
+        if op not in KNOWN_OPS:
             return Tier.BLOOD
         if self.blood_above is not None and amount > self.blood_above:
             return Tier.BLOOD
@@ -140,8 +168,20 @@ def _selftest() -> int:
         ("key.export",     0,          Tier.TOUCH,  False, Tier.BLOOD),
         ("device.wipe",    0,          None,        True,  Tier.BLOOD),
     ]
+    # Every operation the device can be asked to sign has to be priced here.
+    # The two modules talk in bare strings, so nothing but this notices a
+    # rename -- and a rename fails toward BLOOD now, which is friction the
+    # owner would report rather than a tier quietly lost.
+    import ops
+    missing = ops.op_classes() - KNOWN_OPS
+    unknown_needs_blood = (Policy().required_tier("tx.send.typo") is Tier.BLOOD)
+
     print("Tier policy self-test\n")
-    ok = True
+    ok = not missing and unknown_needs_blood
+    if missing:
+        print(f"  ops.py emits {sorted(missing)}, which policy does not price")
+    if not unknown_needs_blood:
+        print("  an unknown operation did not require blood")
     for op, amt, req, want_p, want_t in cases:
         d = decide(p, op, amt, req)
         good = d.permitted == want_p and d.tier_to_run == want_t
