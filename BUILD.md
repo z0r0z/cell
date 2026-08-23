@@ -1164,7 +1164,7 @@ A sequence of checks, not a schedule — with the parts in front of you this is 
 | 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure — early D, late D, the drop and its direction — not on a curve fit |
 | 7 | **Spoof panel** — the reader is done | ROC generated, thresholds set, documented. **This is the result the whole design rests on** |
 | 8 | ATECC608B configured, zones locked, PIN counter live | `atecc_config.py verify --behaviour` passes every line BEFORE `lock-data`; `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
-| 9 | Firmware installed, `run_tests.py` green on the Pi | 37 suites pass on the device itself, not just your laptop |
+| 9 | Firmware installed, `run_tests.py` green on the Pi | 38 suites pass on the device itself, not just your laptop |
 | 10 | Provisioned, and the backup written down | `provision.py` re-reads its own seed; you have the words on paper |
 | 11 | Regtest round trip | `tools/regtest_e2e.py` — Core accepts and mines what the device signed |
 | 12 | Testnet round trip, gate in the loop | Coins move, and only after a real sample |

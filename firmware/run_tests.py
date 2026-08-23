@@ -89,6 +89,8 @@ SUITES = [
      [sys.executable, "test_boot_record.py"]),
     ("post-quantum attestation — LMS against RFC 8554 vectors",
      [sys.executable, "test_lms.py"]),
+    ("optical PUF — BCH, drift tolerance, and failing closed on tamper",
+     [sys.executable, "test_optical_puf.py"]),
     ("secure element — PIN counter, KDF binding, wipe",
      [sys.executable, "se.py"]),
     ("unlock chain — step order, refusals, key binding",
