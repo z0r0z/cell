@@ -127,6 +127,14 @@ The gate asks whether someone alive is here. The PIN asks who. It is eight digit
 
 Ten is a firmware rule — this chip has no retry counter in silicon, and firmware is what someone who opens the case replaces. What the chip does enforce is a counter that never decreases and stops permanently at 2,097,151, which is why the PIN is eight digits and not six: 10⁸ guesses is more than the part will ever answer. `firmware/se_atecc.py` states exactly which half of this is silicon and which is arithmetic.
 
+### If the case comes open
+
+Opening the case is how firmware gets replaced, so the chamber answers for itself. A ground-glass diffuser is epoxied into the optical chamber, and the laser and camera that watch blood clot read its speckle at every unlock — a pattern fixed by microstructure below a micron, which cannot be manufactured to a copy.
+
+That reading is an input to the key that unwraps the seed, not a check the firmware performs. A case that has been opened does not fail a comparison; it derives a different key, and the seed stays shut. Firmware can skip a boolean. It cannot skip a term in a derivation.
+
+Drift is told from tampering rather than both being read as attack: every read is registered against two published reference patches, so a mount that moves with temperature is measured and taken out, and the angle and offset are reported alongside the result. Enrolment is optional, and a device that skips it behaves exactly as it did before. `firmware/optical_puf.py`; `BUILD.md` §9 places the disc.
+
 ### Under coercion
 
 Sensing cannot help here — no measurement tells willing blood from coerced blood. A second PIN can. Set one and the device carries two wrapped seeds and two wallets; the duress PIN unlocks, signs and behaves identically, and opens the other one. Both seeds are written whether or not you configure a duress PIN, so the card never says which kind of device this is.

@@ -349,9 +349,11 @@ def estimate_shift(img: np.ndarray, fiducial: np.ndarray,
     would refuse its owner and call it tampering. Registration is the
     difference between a tamper detector and a thermometer.
 
-    Normalised cross-correlation of the fiducial corner against the same
-    corner of the fresh read, searched over +/-max_shift. Whole pixels only:
-    sub-pixel resampling would blur the grains it is trying to preserve.
+    Normalised cross-correlation of one reference patch against the region of
+    the fresh read it could have moved to, searched over +/-max_shift. Whole
+    pixels only: sub-pixel resampling would blur the grains it is trying to
+    preserve. estimate_rotation calls this once per patch; a single patch
+    cannot separate a twist from a slide.
     """
     f = np.asarray(fiducial, dtype=np.float64)
     n = f.shape[0]
@@ -425,9 +427,9 @@ def bits_from_image(img: np.ndarray, grain_px: int = 4,
     After it, a dark cell is as selectable as a bright one and the selection
     is unbiased by construction.
 
-    Cells inside the fiducial corner are given a margin of -inf so enrolment
-    never selects them. Their values are published for registration, and a
-    published bit is not key material.
+    Cells inside either reference patch are given a margin of -inf so
+    enrolment never selects them. Their values are published for
+    registration, and a published bit is not key material.
     """
     h, w = img.shape
     gh, gw = h // grain_px, w // grain_px
