@@ -332,6 +332,19 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
   opens it and replaces the firmware. What the chip does enforce is that
   Counter0 stops at 2,097,151. The PIN is eight digits so that ceiling sits
   below the keyspace rather than above it.
+- **A constant-time signing core.** There is not one, by decision rather than
+  by oversight. `secp256k1.py` is pure Python affine and Jacobian arithmetic
+  that branches on the scalar's bits, and the fixed-base table indexes on the
+  window digit; `attest.py` carries a second, slower copy for the same reason.
+  The tradeoff is stated in that module's docstring: an airgapped device, in a
+  sealed case, producing one signature per physical act, with no remote
+  observer to do the timing. Nothing in the repo routes signing through
+  libsecp256k1 — `coincurve` appears only in `test_consensus.py`, as an
+  independent second opinion on the answers, never as the device's signer.
+  That is sound for the threat model as written, and it stops being sound the
+  moment the device is somewhere an attacker can trigger and time repeatedly.
+  If that is your situation, link libsecp256k1 and route sign/verify through
+  it before you fund anything.
 - **Long dormancy.** The sealed REFERENCE and NULL cartridges exist to catch
   optics drift over a year in a drawer; they are checked at every pre-flight.
 - **Population-scale false-reject rate.** Clotting time moves with hydration,

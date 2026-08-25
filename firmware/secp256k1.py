@@ -161,8 +161,10 @@ def point_mul(p, k: int):
 #
 # NOT CONSTANT TIME -- the window digit indexes a table, and a zero digit skips
 # the addition entirely. Neither is new: the square-and-multiply above already
-# branched on the scalar's bits. This stays a reference implementation, and
-# BUILD.md section 12 specifies libsecp256k1 for the device.
+# branched on the scalar's bits. This stays a reference implementation, and the
+# module docstring above states the tradeoff it is accepted under: an airgapped
+# device in a sealed case, one signature per physical act, no remote observer.
+# VALIDATION.md records it as an accepted limitation rather than a closed one.
 # --------------------------------------------------------------------------
 
 _WINDOW = 4
