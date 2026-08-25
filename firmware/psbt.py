@@ -83,8 +83,13 @@ OUT_SCRIPT = 0x04
 OUT_TAP_INTERNAL_KEY = 0x05
 OUT_TAP_BIP32_DERIVATION = 0x07
 
-# A fee this large is almost certainly a lie about an input amount rather than
-# a generous tip, so it is surfaced as a refusal the owner has to look at.
+# A fee this large is more likely a lie about an input amount than a generous
+# tip. It is NOT a refusal, and the comment here used to say it was: the fee
+# gets its own line on the confirmation screen in full, and
+# ops.BitcoinSpend.amount_for_policy prices it into the tier floor, so a spend
+# carrying its value in the fee escalates to blood on the amount alone. This
+# constant only flags it in Summary.warnings, which is machine-readable
+# context for a caller and never reaches the panel.
 ABSURD_FEE_SATS = 10_000_000
 
 
@@ -610,6 +615,27 @@ class PSBT:
         elif kind == "p2pkh":
             info.script_code = spk
 
+        # A bare m-of-n can also arrive as a LEGACY p2sh redeem script, where
+        # there is no witness script at all. The multisig checks below hang off
+        # `witness_script`, so such an input used to walk straight past both of
+        # them: signed with no registered quorum, and rendered as a plain SEND
+        # with no "MULTISIG m of n" line — the owner contributing one signature
+        # to somebody else's quorum without the screen saying so, while the
+        # p2wsh spelling of the same script was refused outright.
+        #
+        # MultisigDescriptor can only rebuild p2wsh and p2sh-p2wsh, so there is
+        # no registration that would make this describable. Refuse, on the same
+        # rule the witness path states: this device signs multisig it can
+        # describe to you.
+        m_, n_ = _parse_multisig(info.script_code) if info.kind == "p2sh" else (0, 0)
+        if m_:
+            raise BadPSBT(
+                f"input {i} spends a {m_}-of-{n_} multisig wrapped in a legacy "
+                f"p2sh. This device registers quorums as p2wsh or p2sh-p2wsh "
+                f"only, so it cannot rebuild this script from your co-signers "
+                f"and cannot tell your quorum from someone else's. Move the "
+                f"wallet to a segwit descriptor.")
+
         info.witness_script = witness_script
         if witness_script:
             info.quorum_needed, info.quorum_size = _parse_multisig(witness_script)
@@ -796,13 +822,19 @@ class PSBT:
                           f"transaction cannot be valid")
 
         warnings: list[str] = []
-        recipients, change_sats, change_addr, change_ours = [], 0, "", True
-        # Addresses that were LABELLED change and could not be derived. Kept as
-        # a list rather than a single slot: BitcoinSpend has one change line, so
-        # a second unverified output used to overwrite the first one's address
-        # while still adding its value to the total -- the owner saw the right
-        # number and only one of the two addresses it went to.
-        unverified: list[str] = []
+        recipients, change_sats, change_addr = [], 0, ""
+        # Outputs LABELLED change that could not be derived, kept SEPARATE from
+        # the change that was. Two reasons, both learned the hard way:
+        #
+        #   summing them understates what leaves. Change we rederived comes
+        #   back; change we could not does not, and one figure covering both
+        #   put a foreign address on screen beside a number that included
+        #   money coming home.
+        #
+        #   a list, not a single slot, because a second unverified output used
+        #   to overwrite the first one's address while still adding its value
+        #   -- the owner saw the right total and one of the two addresses.
+        unverified: list[tuple[str, int]] = []
         for i, out in enumerate(self.tx.vout):
             try:
                 addr = addresses.script_to_address(out.script_pubkey, network)
@@ -816,15 +848,13 @@ class PSBT:
                 change_addr = change_addr or addr
             elif claimed_ours:
                 # The host labelled this output as ours and the device cannot
-                # derive it. It stays in the change slot rather than becoming a
-                # second recipient, because BitcoinSpend renders an unverified
-                # change output as a WARNING with the address in full — which is
-                # exactly the screen the owner needs to catch this. Folding it
-                # in with the real destinations would bury it.
-                change_sats += out.value
-                change_addr = addr
-                change_ours = False
-                unverified.append(addr)
+                # derive it. It gets its own slot rather than becoming a second
+                # recipient, because BitcoinSpend renders it as a WARNING with
+                # the address in full — which is exactly the screen the owner
+                # needs to catch this. Folding it in with the real destinations
+                # would bury it; folding it in with the change would hide that
+                # it leaves at all.
+                unverified.append((addr, out.value))
                 warnings.append(
                     f"output {i} is labelled as change but this wallet cannot "
                     f"derive it")
@@ -861,7 +891,8 @@ class PSBT:
             fee_sats=fee,
             change_sats=change_sats,
             change_address=change_addr,
-            change_is_ours=change_ours if change_sats else True,
+            unverified_sats=unverified[0][1] if unverified else 0,
+            unverified_address=unverified[0][0] if unverified else "",
             quorum_needed=quorum.quorum_needed if quorum else 0,
             quorum_size=quorum.quorum_size if quorum else 0,
             signatures_present=quorum.sigs_present if quorum else 0)
@@ -871,25 +902,46 @@ class PSBT:
 
     # ---- signing ----
 
+    def hashtype(self, i: int, info: InputInfo) -> int:
+        """The sighash flag input i will be signed under.
+
+        SIGHASH_ALL only, and taproot's SIGHASH_DEFAULT, which is the same
+        commitment written as the absence of a flag. Anything else is a
+        refusal rather than a downgrade.
+
+        Taproot spells ALL two ways and they are NOT interchangeable: the flag
+        byte goes into the digest, and BIP-341 says a signature under anything
+        other than DEFAULT carries that byte after its 64. So the value chosen
+        here has to reach BOTH the digest and the encoding, which is why it is
+        computed once and returned rather than defaulted at each use. Signing
+        the DEFAULT digest for an input that declared 0x01 produces a
+        signature that verifies against nothing a node will ever check.
+        """
+        declared = _get(self.inputs[i], IN_SIGHASH_TYPE)
+        if declared is None:
+            return txmod.SIGHASH_DEFAULT if info.kind == "p2tr" else txmod.SIGHASH_ALL
+        want = int.from_bytes(declared, "little")
+        allowed = (txmod.SIGHASH_DEFAULT, txmod.SIGHASH_ALL) \
+            if info.kind == "p2tr" else (txmod.SIGHASH_ALL,)
+        if want not in allowed:
+            raise BadPSBT(
+                f"input {i} asks for sighash flag {want:#x}. This device "
+                f"signs SIGHASH_ALL only — every other flag lets someone "
+                f"change part of the transaction after you approved it.")
+        return want
+
     def sighash(self, i: int, infos: list[InputInfo]) -> bytes:
         """The digest for input i, chosen by that input's own script type."""
         info = infos[i]
-        declared = _get(self.inputs[i], IN_SIGHASH_TYPE)
-        if declared is not None:
-            want = int.from_bytes(declared, "little")
-            allowed = (txmod.SIGHASH_DEFAULT, txmod.SIGHASH_ALL) \
-                if info.kind == "p2tr" else (txmod.SIGHASH_ALL,)
-            if want not in allowed:
-                raise BadPSBT(
-                    f"input {i} asks for sighash flag {want:#x}. This device "
-                    f"signs SIGHASH_ALL only — every other flag lets someone "
-                    f"change part of the transaction after you approved it.")
+        hashtype = self.hashtype(i, info)
         if info.kind == "p2tr":
             return self.tx.sighash_taproot(
-                i, [x.amount for x in infos], [x.script_pubkey for x in infos])
+                i, [x.amount for x in infos], [x.script_pubkey for x in infos],
+                hashtype=hashtype)
         if info.kind in ("p2wpkh", "p2wsh", "p2sh-p2wpkh", "p2sh-p2wsh"):
-            return self.tx.sighash_segwit_v0(i, info.script_code, info.amount)
-        return self.tx.sighash_legacy(i, info.script_code)
+            return self.tx.sighash_segwit_v0(i, info.script_code, info.amount,
+                                             hashtype)
+        return self.tx.sighash_legacy(i, info.script_code, hashtype)
 
     def signing_digest(self, infos: list[InputInfo]) -> bytes:
         """One 32-byte value binding every digest this signing will produce.
@@ -921,6 +973,7 @@ class PSBT:
             if not info.ours:
                 continue
             digest = self.sighash(i, infos)
+            ht = self.hashtype(i, info)
             for keybytes, path in info.ours:
                 node = root.derive(path)
                 assert node.seckey is not None
@@ -936,14 +989,20 @@ class PSBT:
                     if not ec.schnorr_verify(digest, out_key, sig):
                         raise BadPSBT(f"input {i}: produced a signature that "
                                       f"does not verify")
-                    self.inputs[i][bytes([IN_TAP_KEY_SIG])] = sig
+                    # BIP-341: a key-path signature is 64 bytes under
+                    # SIGHASH_DEFAULT and 65 -- the flag appended -- under any
+                    # other. BIP-371 stores exactly those bytes in
+                    # PSBT_IN_TAP_KEY_SIG, so the finaliser copies this
+                    # straight into the witness.
+                    self.inputs[i][bytes([IN_TAP_KEY_SIG])] = \
+                        sig if ht == txmod.SIGHASH_DEFAULT else sig + bytes([ht])
                 else:
                     r, s, _ = ec.ecdsa_sign(digest, node.seckey)
                     if not ec.ecdsa_verify(digest, node.pubkey, r, s):
                         raise BadPSBT(f"input {i}: produced a signature that "
                                       f"does not verify")
                     self.inputs[i][bytes([IN_PARTIAL_SIG]) + keybytes] = \
-                        ec.der_encode(r, s) + bytes([txmod.SIGHASH_ALL])
+                        ec.der_encode(r, s) + bytes([ht])
                 added += 1
         return added
 

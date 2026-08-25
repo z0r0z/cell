@@ -651,6 +651,105 @@ def main() -> int:
     ok_all = run_psbt(build_psbt(root, "p2wpkh", sighash_type=0x01), se, prov)
     check("an explicit SIGHASH_ALL is accepted", ok_all.signatures == 1)
 
+    # Taproot spells SIGHASH_ALL two ways and they are not the same signature.
+    # BIP-341 puts the flag byte INTO the digest and BIP-341/371 append it
+    # after the 64, so a device that accepts an explicit 0x01 and then signs
+    # the DEFAULT digest emits something no node will ever accept -- and it
+    # verifies perfectly against itself, which is why only an independently
+    # recomputed digest catches it.
+    for declared, want_len in ((None, 64), (0x00, 64), (0x01, 65)):
+        blob = build_psbt(root, "p2tr", sighash_type=declared)
+        signed = PSBT.parse(run_psbt(blob, se, prov).psbt)
+        sig = signed.inputs[0][bytes([psbtmod.IN_TAP_KEY_SIG])]
+        info = signed._input_info(0, root)
+        ht = txmod.SIGHASH_DEFAULT if declared in (None, 0x00) else txmod.SIGHASH_ALL
+        want = signed.tx.sighash_taproot(
+            0, [info.amount], [info.script_pubkey], hashtype=ht)
+        out_key, _ = ec.taproot_tweak_pubkey(
+            root.derive(wallet.account_path("p2tr")).derive([0, 0]).pubkey[1:])
+        name = "default" if declared is None else f"{declared:#04x}"
+        check(f"p2tr sighash {name}: {want_len}-byte signature",
+              len(sig) == want_len
+              and (want_len == 64 or sig[64] == txmod.SIGHASH_ALL))
+        check(f"p2tr sighash {name}: verifies against the consensus digest",
+              ec.schnorr_verify(want, out_key, sig[:64]))
+
+    # ---- FOOTGUN: a multisig the device cannot describe ----------------
+    #
+    # The witness spellings of a bare m-of-n are refused unless the quorum is
+    # registered. The LEGACY p2sh spelling reaches the same script through a
+    # redeem script and no witness script at all, so a check written against
+    # `witness_script` walks straight past it: signed with nothing registered,
+    # and rendered with no MULTISIG line to tell the owner they were one
+    # signature in somebody's quorum.
+    print("\n footgun: a multisig the device cannot describe")
+    _ms_path = wallet.multisig_account_path("multisig-p2wsh")
+    _mine = root.derive(_ms_path).derive([0, 0])
+    _theirs = [ec.pubkey_compressed(hashlib.sha256(x).digest()) for x in (b"x", b"y")]
+    _redeem = addresses.multisig_script(2, sorted([_mine.pubkey] + _theirs))
+    _spk = addresses.p2sh_script(_redeem)
+    _parent = Transaction(2, [TxIn(b"\x33" * 32, 0)], [TxOut(200_000, _spk)], 0)
+    _un = Transaction(2, [TxIn(_parent.txid(), 0)],
+                      [TxOut(150_000, addresses.address_to_script(
+                          "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"))], 0)
+    _p = PSBT(_un)
+    _p.globals[_kv(psbtmod.GLOBAL_UNSIGNED_TX)] = _un.serialize(witness=False)
+    _p.inputs[0][_kv(psbtmod.IN_NON_WITNESS_UTXO)] = _parent.serialize()
+    _p.inputs[0][_kv(psbtmod.IN_REDEEM_SCRIPT)] = _redeem
+    _p.inputs[0][_kv(psbtmod.IN_BIP32_DERIVATION, _mine.pubkey)] = (
+        root.fingerprint()
+        + b"".join(i.to_bytes(4, "little")
+                   for i in bip32.parse_path(_ms_path) + [0, 0]))
+    refuses("refuses a bare multisig wrapped in a legacy p2sh",
+            lambda: run_psbt(_p.serialize(), se, prov), psbtmod.BadPSBT)
+
+    # ---- FOOTGUN: change that leaves, counted as change that returns ---
+    #
+    # A PSBT can carry BOTH: an output we rederived (comes back) and one the
+    # host merely labelled as change and we cannot derive (does not). Summing
+    # them put a foreign address on screen beside a figure that included money
+    # coming home, and left TOTAL reporting only amount+fee -- 0.00005000 BTC
+    # over a transaction that moved a whole coin.
+    print("\n footgun: two kinds of change")
+    _acct = root.derive(wallet.account_path("p2wpkh"))
+    _in, _ch = _acct.derive([0, 0]), _acct.derive([1, 0])
+    _thief = ec.pubkey_compressed(hashlib.sha256(b"thief-change").digest())
+    _parent2 = Transaction(2, [TxIn(b"\x44" * 32, 0)],
+                           [TxOut(1_000_000, addresses.p2wpkh_script(_in.pubkey))], 0)
+    _un2 = Transaction(2, [TxIn(_parent2.txid(), 0)], [
+        TxOut(1_000, addresses.address_to_script(
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")),
+        TxOut(10_000, addresses.p2wpkh_script(_ch.pubkey)),
+        TxOut(985_000, addresses.p2wpkh_script(_thief))], 0)
+    _p2 = PSBT(_un2)
+    _p2.globals[_kv(psbtmod.GLOBAL_UNSIGNED_TX)] = _un2.serialize(witness=False)
+    _p2.inputs[0][_kv(psbtmod.IN_NON_WITNESS_UTXO)] = _parent2.serialize()
+    _base = bip32.parse_path(wallet.account_path("p2wpkh"))
+    _origin = lambda tail: root.fingerprint() + b"".join(
+        i.to_bytes(4, "little") for i in _base + tail)
+    _p2.inputs[0][_kv(psbtmod.IN_BIP32_DERIVATION, _in.pubkey)] = _origin([0, 0])
+    _p2.outputs[1][_kv(psbtmod.OUT_BIP32_DERIVATION, _ch.pubkey)] = _origin([1, 0])
+    _p2.outputs[2][_kv(psbtmod.OUT_BIP32_DERIVATION, _thief)] = _origin([0, 9])
+    _sum = PSBT.parse(_p2.serialize()).summarize(root)
+    _sp = _sum.spend
+    check("change we derived is kept apart from change we did not",
+          _sp.change_sats == 10_000 and _sp.unverified_sats == 985_000)
+    check("the underivable output is priced as leaving",
+          _sp.amount_for_policy() == 1_000 + _sum.fee + 985_000)
+    _screen = ops.render_for_display(_sp, reserve=ops.CONFIRM_FOOTER_ROWS)
+    check("TOTAL on screen is what actually leaves the wallet",
+          f"TOTAL    {ops.format_btc(_sp.amount_for_policy())}"
+          in "\n".join(_screen))
+    check("...and the returning change still says so",
+          any("-> your wallet" in ln for ln in _screen))
+    # Joined with the indent stripped: wrap_full breaks a long address across
+    # lines deliberately, and the property under test is that every character
+    # of it is on the panel — not that it fits on one row.
+    check("...and the address we cannot prove is shown in full, in amber",
+          any("WARNING" in ln for ln in _screen)
+          and addresses.script_to_address(addresses.p2wpkh_script(_thief))
+          in "".join(ln.strip() for ln in _screen))
+
     # ---- FOOTGUN: things the owner could not read ---------------------
     print("\n footgun: unrenderable transactions")
     refuses("refuses a batched payment it cannot show line by line",

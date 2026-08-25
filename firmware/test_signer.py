@@ -309,8 +309,7 @@ def run() -> int:
 
     # unverified change must be shown as a warning, never folded away
     ch = ops.BitcoinSpend(amount_sats=1000, fee_sats=10, destination="bc1qdest0",
-                          change_sats=500, change_address="bc1qunknown",
-                          change_is_ours=False)
+                          unverified_sats=500, unverified_address="bc1qunknown")
     # The confirmation screen is what the owner actually reads, and the signer
     # appends three lines to it AFTER the operation is rendered. An operation
     # that filled the screen exactly used to pass the fit check and then push
@@ -320,8 +319,9 @@ def run() -> int:
     for n in range(40, 400):
         long_dest = ops.BitcoinSpend(
             amount_sats=1, destination="bc1q" + "x" * n, fee_sats=1,
-            change_sats=5, change_address="bc1q" + "y" * 40,
-            change_is_ours=False, quorum_needed=2, quorum_size=3)
+            change_sats=5, change_address="bc1q" + "z" * 40,
+            unverified_sats=5, unverified_address="bc1q" + "y" * 40,
+            quorum_needed=2, quorum_size=3)
         try:
             lines = ops.render_for_display(long_dest,
                                            reserve=ops.CONFIRM_FOOTER_ROWS)

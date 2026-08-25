@@ -482,8 +482,7 @@ def main() -> int:
 
     _change_attack = ops.BitcoinSpend(
         amount_sats=1, destination="bc1qx", fee_sats=200,
-        change_sats=50_000_000, change_address="bc1qattacker",
-        change_is_ours=False)
+        unverified_sats=50_000_000, unverified_address="bc1qattacker")
     check("value routed through an underivable 'change' output escalates",
           _policy.decide(_pol, _change_attack.op_class(),
                          _change_attack.amount_for_policy()).tier_to_run
@@ -491,7 +490,7 @@ def main() -> int:
 
     _real_change = ops.BitcoinSpend(
         amount_sats=1_000, destination="bc1qx", fee_sats=200,
-        change_sats=50_000_000, change_address="bc1qours", change_is_ours=True)
+        change_sats=50_000_000, change_address="bc1qours")
     check("change the wallet DID derive does not escalate — it comes back",
           _policy.decide(_pol, _real_change.op_class(),
                          _real_change.amount_for_policy()).tier_to_run

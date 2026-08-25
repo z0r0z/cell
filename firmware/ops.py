@@ -131,10 +131,22 @@ class Operation(Protocol):
 class BitcoinSpend:
     """A Bitcoin spend the owner can check line by line.
 
-    `change_is_ours` is carried explicitly and displayed. A change output the
-    wallet cannot prove it owns is the classic way to lose a balance while the
-    displayed 'amount' looks correct, so an unverified change output is shown
-    as a warning line rather than quietly folded into the fee.
+    TWO KINDS OF CHANGE, AND THEY ARE NEVER ADDED TOGETHER. An output the
+    wallet rederived belongs to the owner and comes straight back; an output
+    the host merely LABELLED as change and this wallet cannot derive is, as
+    far as the owner is concerned, a second recipient. Carrying one figure for
+    both, with a flag to say which, is how the screen ends up showing a
+    foreign address next to a number that includes money coming home:
+
+        change_sats / change_address
+            proved ours. Comes back, and is excluded from TOTAL.
+        unverified_sats / unverified_address
+            labelled change, underivable. Leaves, counts toward TOTAL, and
+            says so in amber.
+
+    Losing a balance while the displayed `amount` looks correct is the classic
+    way a hardware wallet fails, so the underivable output gets its own lines,
+    its own amount, and its place in TOTAL.
     """
 
     amount_sats: int
@@ -142,7 +154,8 @@ class BitcoinSpend:
     fee_sats: int
     change_sats: int = 0
     change_address: str = ""
-    change_is_ours: bool = True
+    unverified_sats: int = 0
+    unverified_address: str = ""
     # Multisig context, when the input is an m-of-n script. `quorum_needed`
     # and `quorum_size` come from the witness script and are trustworthy.
     # `signatures_present` is counted from the partial signatures already in
@@ -163,32 +176,33 @@ class BitcoinSpend:
         Not just `amount_sats`. The tier floor asks "how much is at risk here",
         and three things leave the wallet:
 
-          the amount    to the destination
-          the fee       to a miner, and a fee is a payment like any other
-          the change    ONLY when the wallet could not derive it -- an output
-                        the host labelled as change and this device cannot
-                        prove it owns is, as far as the owner is concerned,
-                        a second recipient
+          the amount        to the destination
+          the fee           to a miner, and a fee is a payment like any other
+          unverified_sats   an output the host labelled as change and this
+                            device cannot prove it owns is, as far as the
+                            owner is concerned, a second recipient
 
         Pricing the destination alone is a tier downgrade a host can reach for
         deliberately: a PSBT paying 1 sat to a real address, with the balance
         carried in the fee or in an underivable "change" output, has an
         `amount_sats` under any blood floor and would have signed at touch
-        tier. Both of those already get their own line on the confirmation
-        screen -- and EthereumSpend already renders exactly this total as
-        MOST -- so this makes the policy price what the owner is shown.
+        tier.
 
         Change the wallet DID derive is excluded: it comes straight back.
+
+        render() prints exactly this number as TOTAL, by calling this method
+        rather than repeating the sum -- as EthereumSpend does for MOST. Two
+        expressions for "what leaves" is one expression too many: they drifted,
+        and the screen said 0.00005000 BTC over a transaction that moved a
+        whole coin.
         """
-        at_risk = self.amount_sats + self.fee_sats
-        if not self.change_is_ours:
-            at_risk += self.change_sats
-        return at_risk
+        return self.amount_sats + self.fee_sats + self.unverified_sats
 
     def render(self) -> list[str]:
         if not self.destination:
             raise UnrenderableOperation("spend has no destination address")
-        if self.amount_sats < 0 or self.fee_sats < 0 or self.change_sats < 0:
+        if (self.amount_sats < 0 or self.fee_sats < 0 or self.change_sats < 0
+                or self.unverified_sats < 0):
             raise UnrenderableOperation("negative amount, fee or change")
         lines = ["SEND BITCOIN",
                  f"  amount   {format_btc(self.amount_sats)}",
@@ -196,15 +210,17 @@ class BitcoinSpend:
         lines += wrap_full(self.destination, DISPLAY_COLS)
         lines.append(f"  fee      {format_btc(self.fee_sats)}")
         if self.change_sats:
-            if self.change_is_ours:
-                lines.append(f"  change   {format_btc(self.change_sats)} -> your wallet")
-            else:
-                # The failure the owner must catch, given its own lines.
-                lines.append(f"  change   {format_btc(self.change_sats)}")
-                lines.append("  WARNING  change to an address this")
-                lines.append("           wallet cannot prove it owns:")
-                lines += wrap_full(self.change_address or "(none given)", DISPLAY_COLS)
-        lines.append(f"  TOTAL    {format_btc(self.amount_sats + self.fee_sats)}")
+            lines.append(f"  change   {format_btc(self.change_sats)} -> your wallet")
+        if self.unverified_sats:
+            # The failure the owner must catch, given its own lines and its own
+            # amount. It is NOT added to the change figure above: that one is
+            # money coming back, and summing the two under this address would
+            # overstate what returns and understate what leaves.
+            lines.append(f"  WARNING  {format_btc(self.unverified_sats)} goes to")
+            lines.append("           an address this wallet cannot")
+            lines.append("           prove it owns:")
+            lines += wrap_full(self.unverified_address or "(none given)", DISPLAY_COLS)
+        lines.append(f"  TOTAL    {format_btc(self.amount_for_policy())}")
         if self.quorum_size:
             if not 1 <= self.quorum_needed <= self.quorum_size:
                 raise UnrenderableOperation(
@@ -351,8 +367,11 @@ class EthereumSpend:
         lines.append(f"  max fee  {format_eth(self.max_fee_wei, self.ticker)}")
         lines.append(f"  chain id {self.chain_id}")
         lines.append(f"  nonce    {self.nonce}")
+        # Through amount_for_policy(), not a second copy of the sum. What the
+        # screen calls MOST and what policy prices the operation at must be one
+        # expression -- BitcoinSpend kept two and they drifted.
         lines.append(f"  MOST     "
-                     f"{format_eth(self.amount_wei + self.max_fee_wei, self.ticker)}")
+                     f"{format_eth(self.amount_for_policy(), self.ticker)}")
         return lines
 
 

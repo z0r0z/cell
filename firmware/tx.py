@@ -412,6 +412,37 @@ def _selftest() -> int:
                   + hashlib.sha256(ser_compact(len(ann)) + ann).digest())
     checks.append(("BIP-341 annex sets spend_type 1, not 2",
                    t.sighash_taproot(0, amts, spks, annex=ann) == want))
+
+    # Taproot spells SIGHASH_ALL two ways: DEFAULT (0x00, the flag absent) and
+    # an explicit 0x01. The byte goes into the message right after the epoch,
+    # so they are DIFFERENT digests and a signature over one does not satisfy
+    # the other. psbt.py now routes a declared flag through here, so the byte's
+    # position is pinned for both spellings rather than only for the default.
+    def _rebuilt(ht):
+        return tagged("TapSighash",
+                      b"\x00" + bytes([ht])
+                      + t.version.to_bytes(4, "little")
+                      + t.locktime.to_bytes(4, "little")
+                      + hashlib.sha256(b"".join(i.outpoint() for i in t.vin)).digest()
+                      + hashlib.sha256(b"".join(a.to_bytes(8, "little")
+                                                for a in amts)).digest()
+                      + hashlib.sha256(b"".join(ser_compact(len(x)) + x
+                                                for x in spks)).digest()
+                      + hashlib.sha256(b"".join(i.sequence.to_bytes(4, "little")
+                                                for i in t.vin)).digest()
+                      + hashlib.sha256(b"".join(o.serialize()
+                                                for o in t.vout)).digest()
+                      + bytes([0x00])                   # key path, no annex
+                      + (0).to_bytes(4, "little"))
+    checks.append(("BIP-341 SIGHASH_DEFAULT digest",
+                   t.sighash_taproot(0, amts, spks, SIGHASH_DEFAULT)
+                   == _rebuilt(SIGHASH_DEFAULT)))
+    checks.append(("BIP-341 explicit SIGHASH_ALL digest",
+                   t.sighash_taproot(0, amts, spks, SIGHASH_ALL)
+                   == _rebuilt(SIGHASH_ALL)))
+    checks.append(("...and the two are not the same digest",
+                   t.sighash_taproot(0, amts, spks, SIGHASH_DEFAULT)
+                   != t.sighash_taproot(0, amts, spks, SIGHASH_ALL)))
     checks.append(("the annex changes the digest",
                    t.sighash_taproot(0, amts, spks, annex=ann)
                    != t.sighash_taproot(0, amts, spks)))
