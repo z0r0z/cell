@@ -27,6 +27,7 @@ signature existing, and not one moment earlier.
 
 from __future__ import annotations
 
+import hmac
 from dataclasses import dataclass, field
 
 import bip32
@@ -441,6 +442,48 @@ def _wallet_for(prov: Provisioning, quoted=None):
     return prov.accounts, prov.master_fingerprint
 
 
+def _account_in(accounts: list[Account], script_type: str,
+                network: str) -> "Account | None":
+    for a in accounts:
+        if a.script_type == script_type and a.network == network:
+            return a
+    return None
+
+
+def _wallet_of_seed(prov: Provisioning, root: ExtendedKey):
+    """Which of this device's two recorded wallets an unwrapped seed IS.
+
+    A CELL carries two. For Bitcoin the PSBT says which one a spend concerns,
+    because a coordinator quotes the origin fingerprint of the wallet whose
+    coins it is spending -- see _wallet_for. An Ethereum request carries no key
+    origin at all: there is one account path and nothing in the transaction
+    names a wallet, so the same question has no answer before the seed opens.
+
+    It does not need one. Unlike a PSBT, nothing about the sender reaches the
+    screen -- ops.EthereumSpend renders the chain, the destination, the amount,
+    the fee cap and the nonce, and never the account it spends from -- so
+    deciding here costs no ordering property. The seed that opened is the
+    answer, and asking it is what makes a duress unlock sign the decoy's
+    Ethereum instead of failing with "the unwrapped seed derives a different
+    sending address", which is a sentence no coerced owner wants on screen.
+
+    Returns (accounts, fingerprint), or (None, None) when the seed matches
+    neither record -- the blob and the record disagreeing, which means signing
+    would use a key nobody provisioned.
+    """
+    fp = root.fingerprint()
+    match = None
+    for accounts, recorded in ((prov.accounts, prov.master_fingerprint),
+                               (prov.decoy_accounts, prov.decoy_fingerprint)):
+        # BOTH are always compared and neither short-circuits, for the same
+        # reason se.verify_pin checks both PIN slots: a duress unlock must not
+        # be distinguishable from a normal one by how long it takes.
+        hit = bool(accounts) and hmac.compare_digest(fp, recorded)
+        if hit and match is None:
+            match = (accounts, recorded)
+    return match if match is not None else (None, None)
+
+
 def _watch_root(prov: Provisioning, network: str, quoted=None) -> ExtendedKey:
     """A synthetic root that answers owns() for our accounts.
 
@@ -500,10 +543,16 @@ def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
              requested_tier: Tier | None = None,
              read_chamber=None) -> SignedEth:
     """Run the unlock chain over an EIP-1559 transaction."""
-    account = prov.account_for("eth", "ethereum")
-    watch = account.key().derive([0, index])
     from addresses import eth_address
-    from_addr = eth_address(watch.pubkey)
+    # Fail before the owner spends a PIN attempt or a gate on it if this device
+    # cannot sign Ethereum at all. WHICH of the two wallets answers is decided
+    # after the unwrap, by the seed -- see _wallet_of_seed. This only asks
+    # whether either can, so it settles nothing an observer could read.
+    if not any(_account_in(a, "eth", "ethereum")
+               for a in (prov.accounts, prov.decoy_accounts)):
+        raise WalletError(
+            "this device has no eth account on ethereum. Provision one before "
+            "asking it to sign for that chain.")
 
     op = ops.EthereumSpend(amount_wei=tx.value, destination=tx.to,
                            chain_id=tx.chain_id, chain_name=tx.chain_name(),
@@ -516,16 +565,31 @@ def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
         if bound != digest:
             raise WalletError("the digest changed between display and signing")
         root = _root_from(seed)
+        # The seed that opened says which wallet this is. Both of the device's
+        # wallets are legitimate; a seed matching NEITHER means the blob and
+        # the record disagree, and signing then would sign with a key nobody
+        # provisioned -- the same rule sign_psbt enforces one layer up.
+        accounts, _fp = _wallet_of_seed(prov, root)
+        if accounts is None:
+            raise WalletError(
+                "the unwrapped seed matches neither wallet recorded on this "
+                "device; refusing to sign with an unexpected key")
+        account = _account_in(accounts, "eth", "ethereum")
+        if account is None:
+            raise WalletError(
+                "the wallet that opened has no eth account recorded on this "
+                "device; refusing to sign for an account it cannot check")
         node = root.derive(eth_path(0, index))
-        if node.pubkey != watch.pubkey:
+        if node.pubkey != account.key().derive([0, index]).pubkey:
             raise WalletError(
                 "the unwrapped seed derives a different sending address than "
-                "the one displayed; refusing to sign")
+                "the account recorded for it; refusing to sign")
         assert node.seckey is not None
         r, s_, y = eth.sign(tx, node.seckey)
         out["raw"] = tx.encode_signed(r, s_, y)
         out["txid"] = tx.txid(r, s_, y)
         out["sender"] = eth.sender(tx, r, s_, y)
+        out["expect"] = eth_address(node.pubkey)
         return r.to_bytes(32, "big") + s_.to_bytes(32, "big") + bytes([y])
 
     def unwrap_seed(key: bytes) -> bytearray:
@@ -539,7 +603,11 @@ def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
         signer.SignRequest(operation=op, sighash=digest,
                            requested_tier=requested_tier), pin)
 
-    if out["sender"] != from_addr:
+    # Recovered from the signature, against the address the wallet that opened
+    # actually derives. Ethereum verifies by recovery, so a wrong parity byte
+    # produces a valid-looking transaction credited to an address nobody
+    # controls; this is the check that catches it.
+    if out["sender"] != out["expect"]:
         raise WalletError("signed transaction recovers to an unexpected sender")
     return SignedEth(raw=out["raw"], txid=out["txid"], sender=out["sender"],
                      attestation=result.attestation.pack(), tier=result.tier,

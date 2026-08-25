@@ -291,10 +291,14 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
 
 ## Not yet built
 
-- **Duress, on the read-only screens.** Signing is closed: two PINs, two
-  wrapped seeds, two recorded wallets, and `test_wallet.py` drives both through
-  the whole device — the decoy signs with the decoy's key, its change is
-  recognised as its own, and crossing the wires refuses. What is NOT closed is
+- **Duress, on the read-only screens.** Signing is closed on both chains: two
+  PINs, two wrapped seeds, two recorded wallets, and `test_wallet.py` drives
+  both through the whole device — the decoy signs with the decoy's key, its
+  change is recognised as its own, and crossing the wires refuses. Ethereum
+  reaches the same place by a different route, because an EIP-1559 request
+  carries no key origin to select on: `EthereumSpend` never renders the sender,
+  so the wallet is chosen by the seed that opened rather than before the PIN.
+  What is NOT closed is
   what the device *displays*. IDLE, RECEIVE and THIS DEVICE are watch-only and
   need no PIN, so they show the primary wallet's fingerprint and addresses. A
   coercer who says "show me your receive address" is shown the real wallet, and

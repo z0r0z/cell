@@ -855,6 +855,38 @@ def main() -> int:
     check("...and the normal PIN cannot sign the decoy's",
           _fails(lambda: run_psbt(decoy_psbt, dse, dprov, pin=PIN)))
 
+    # Ethereum, under both PINs. An ETH request carries no key origin -- one
+    # account path, and nothing in the transaction names a wallet -- so the
+    # wallet cannot be chosen the way a PSBT's is. It does not have to be:
+    # EthereumSpend renders the chain, the destination, the amount, the fee cap
+    # and the nonce, and never the sender, so the seed that opens can decide
+    # after the gate without any of it reaching the screen first. Before this,
+    # sign_eth always used the primary account and a duress unlock died on
+    # "the unwrapped seed derives a different sending address" -- a sentence
+    # that tells a coercer exactly what they were given.
+    _etx = eth.EthTransaction(
+        chain_id=1, nonce=0, max_priority_fee_per_gas=1_000_000_000,
+        max_fee_per_gas=20_000_000_000, gas_limit=21_000,
+        to="0x3535353535353535353535353535353535353535", value=10**16)
+
+    def _run_eth(pin):
+        return wallet.sign_eth(_etx, dprov, dse, Policy(), FW, CAL,
+                               confirm=lambda ln: True,
+                               run_gate=lambda tier: (True, {"gate_scores": {}}),
+                               pin=pin)
+
+    _real_eth, _decoy_eth = _run_eth(PIN), _run_eth(DPIN)
+    _addr_of = lambda r: addresses.eth_address(
+        r.derive(wallet.eth_path(0, 0)).pubkey)
+    check("the duress PIN signs Ethereum too — no refusal",
+          _decoy_eth is not None and _decoy_eth.raw)
+    check("...from the decoy's account", _decoy_eth.sender == _addr_of(decoy_root))
+    check("...and the normal PIN from the real one",
+          _real_eth.sender == _addr_of(root))
+    check("the two Ethereum transactions differ", _real_eth.raw != _decoy_eth.raw)
+    check("and the screen is identical either way",
+          _real_eth.display == _decoy_eth.display)
+
     check("both PINs restore the attempt budget the same way",
           dse.attempts_remaining() == MAX_PIN_ATTEMPTS)
 

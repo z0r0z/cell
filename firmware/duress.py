@@ -55,6 +55,18 @@ which of two PINs they were given. That is the whole of the protection: not
 that the mechanism is secret, but that its use is unfalsifiable. Anyone who
 tells you a duress PIN hides more than that is selling something.
 
+BOTH CHAINS, BY DIFFERENT ROUTES. Bitcoin reads the wallet off the PSBT, as
+above. An Ethereum request has no key origin to read -- one account path, and
+nothing in the transaction naming a wallet -- so `wallet.sign_eth` cannot ask
+the same question. It does not need to: EthereumSpend renders the chain, the
+destination, the amount, the fee cap and the nonce, and never the sender, so
+nothing about the account reaches the screen before the PIN and the wallet can
+be chosen by the seed that opened. `wallet._wallet_of_seed` does it, after the
+gate, comparing both recorded fingerprints without short-circuiting. Signing
+Ethereum under duress used to die on "the unwrapped seed derives a different
+sending address" -- a refusal that tells a coercer precisely which PIN they
+were handed.
+
 AND ONE THING IT DOES NOT YET DO, stated here rather than left to be
 discovered. The read-only screens -- IDLE, RECEIVE and THIS DEVICE in app.py --
 show the PRIMARY wallet's fingerprint and addresses. They are watch-only and
@@ -67,7 +79,8 @@ Closing it means those screens asking for a PIN before they will show anything,
 which trades a real usability property for a threat that only applies under
 coercion. It is a decision for whoever builds this, not one to make silently in
 a module docstring -- so until it is made, treat the duress PIN as protecting
-what you SIGN and not what your device DISPLAYS. VALIDATION.md carries it.
+what you SIGN -- on either chain -- and not what your device DISPLAYS.
+VALIDATION.md carries it.
 
 THE DECOY HAS TO BE REAL. An empty wallet tells the coercer they were given
 the wrong PIN, which puts you back where you started and angrier. Fund it with
