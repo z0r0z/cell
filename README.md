@@ -135,6 +135,8 @@ That reading is an input to the key that unwraps the seed, not a check the firmw
 
 Drift is told from tampering rather than both being read as attack: every read is registered against two published reference patches, so a mount that moves with temperature is measured and taken out, and the angle and offset are reported alongside the result. Enrolment is optional, and a device that skips it behaves exactly as it did before. `firmware/optical_puf.py`; `BUILD.md` §9 places the disc.
 
+It costs one habit. The laser is interlocked to the cartridge switch in hardware, so a chamber-enrolled device needs the bay closed at every unlock — including a touch signature, which otherwise involves no cartridge at all. Leave a spent cartridge in the slot between spends. A device that never enrolled a chamber never reads it and never asks.
+
 ### Under coercion
 
 Sensing cannot help here — no measurement tells willing blood from coerced blood. A second PIN can. Set one and the device carries two wrapped seeds and two wallets; the duress PIN unlocks, signs and behaves identically, and opens the other one. Both seeds are written whether or not you configure a duress PIN, so the card never says which kind of device this is.

@@ -152,7 +152,16 @@ class RealSensorHead(SensorHead):
                    laser: bool = False, settle_s: float = SETTLE_CHEM_S):
         """Own the chamber for the duration. Nothing else may be lit."""
         if laser and self.cartridge_present() is False:
-            raise RuntimeError("laser interlock: no cartridge seated")
+            # Mirrors an interlock that is wired in HARDWARE -- BUILD.md 11
+            # puts the switch contacts in series with the laser module's
+            # supply, where firmware cannot talk past them. This check only
+            # turns a silent dark frame into a sentence. It fires for the
+            # chamber PUF read too, which is why a chamber-enrolled device
+            # needs something in the slot at every unlock: see BUILD.md 9.
+            raise RuntimeError(
+                "laser interlock: the cartridge bay is open, so the diode is "
+                "unpowered. Seat a cartridge (a spare or cartridge_null will "
+                "do) and try again")
         try:
             self.spec.led = white          # AS7341 drives white LED #1 on its LDR pin
             self.led2.value = white

@@ -607,6 +607,23 @@ larger crop; `hardware.read_chamber_burst` switches the mode and switches back.
 averaging would destroy it. Here the pattern is meant to be static, so the
 frames are repeated looks at one thing and averaging buys shot-noise margin.
 
+**Keep something in the slot.** This is the part that surprises people, so it
+is worth stating on its own. The chamber is read at EVERY unlock, because its
+answer is a term in the key that opens the seed — and the laser interlock is
+wired through the cartridge switch, in series with the diode's supply, where
+firmware cannot reach it. So on a chamber-enrolled device the bay has to be
+closed for a **touch** signature too, not only for a blood one, even though
+touch consumes nothing and involves no cartridge.
+
+Leave a cartridge seated between spends. A spent one does, and so does
+`cartridge_null`, which has no well and is already on the print list. Swap in a
+fresh cartridge when you are actually bleeding into it. The diffuser sits clear
+of the cartridge window either way, so which one is in there changes nothing
+about the reading.
+
+A device that has NOT enrolled a chamber never reads it, and none of this
+applies.
+
 ---
 
 ## 10. Enclosure

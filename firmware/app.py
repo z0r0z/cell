@@ -530,10 +530,27 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
 
         def read_chamber():                                 # noqa: F811
             import hardware
-            head = hardware.RealSensorHead()
+            try:
+                head = hardware.RealSensorHead()
+            except Exception as e:                          # noqa: BLE001
+                raise signer.ChamberUnavailable(
+                    f"the sensor head did not start ({e}).") from None
             try:
                 return optical_puf.chamber_reader(
                     head.read_chamber_burst, helper)()
+            except optical_puf.PufError:
+                # Answered, did not decode. The tamper signal -- passed
+                # through untouched so signer.py reports it as one.
+                raise
+            except Exception as e:                          # noqa: BLE001
+                # Could not read it at all. An open bay is the common case:
+                # the laser interlock is wired through the cartridge switch,
+                # so the diode is dead with the slot empty and EVERY unlock
+                # needs the bay closed, touch tier included. BUILD.md 9.
+                raise signer.ChamberUnavailable(
+                    f"the chamber could not be read ({e}). Close the "
+                    f"cartridge bay -- the laser interlock keeps the diode "
+                    f"dead while it is open.") from None
             finally:
                 head.close()
 

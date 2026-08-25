@@ -60,6 +60,25 @@ class Refused(Exception):
     """The device declined to sign. Carries the reason shown to the owner."""
 
 
+class ChamberUnavailable(Exception):
+    """The optical chamber could not be READ. This is NOT a tamper signal.
+
+    An interlock that has not closed, a camera that did not start, an I2C bus
+    that answered nothing: operational faults, all recoverable, none of them
+    evidence that anything was opened. They have to be told apart from a
+    chamber that answered and did not decode, because the remedies could not
+    be further apart -- close the bay and try again, versus restore from your
+    words onto a new build.
+
+    Raised by the caller's chamber reader, not here: signer.py stays free of
+    numpy so the signing stack runs without it, and optical_puf.PufError lives
+    on the other side of that line. app.load_device does the classifying,
+    because it is the layer that already knows what a chamber is. Anything
+    NOT wrapped in this is treated as the tamper case, so the default is the
+    safe one.
+    """
+
+
 @dataclass
 class SignRequest:
     operation: ops.Operation
@@ -306,7 +325,17 @@ class Signer:
         if self._read_chamber is not None:
             try:
                 chamber = self._read_chamber()
+            except ChamberUnavailable as e:
+                # Could not read it. Says so, and says the seed is fine --
+                # telling an owner to restore from their words because a bay
+                # was open is how a recoverable state gets treated as a lost
+                # wallet, and how somebody talks themselves into re-flashing
+                # the one device that still holds their coins.
+                raise Refused(
+                    f"Refused: could not read the optical chamber. {e} "
+                    f"Nothing is wrong with your seed; try again.") from None
             except Exception as e:
+                # It answered, and did not decode. That is the tamper signal.
                 raise Refused(
                     "Refused: the optical chamber did not answer as enrolled. "
                     f"Restore from your recovery words on a new build. ({e})"

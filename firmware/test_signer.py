@@ -402,6 +402,14 @@ def run() -> int:
             check(f"a chamber-wrapped seed stays shut without it ({wrong is None})",
                   True)
 
+    def _refusal(sgn, op):
+        """The Refused message a signing produces, or a failure if it signs."""
+        try:
+            sgn.authorize_and_sign(SignRequest(op, b"\x33" * 32), PIN)
+        except Refused as exc:
+            return exc
+        raise AssertionError("expected a refusal")
+
     # A chamber that cannot be decoded must refuse, not fall back.
     def _broken():
         raise RuntimeError("outside the enrolled radius")
@@ -419,6 +427,26 @@ def run() -> int:
     check("the chamber is read inside the unlock chain, not before it",
           s_broken.trace == ["render", "policy", "confirm", "pin", "gate",
                              "unwrap"])
+
+    # A chamber that ANSWERED and did not decode, and a chamber that could not
+    # be read at all, are different events with opposite remedies. Both refuse;
+    # only one of them may say "restore from your recovery words". Telling an
+    # owner their wallet is gone because a cartridge bay was open is how a
+    # recoverable state turns into a re-flashed device.
+    tamper_msg = str(_refusal(make(read_chamber=_broken)[0], spend))
+
+    def _unavailable():
+        raise signer.ChamberUnavailable("the cartridge bay is open.")
+
+    open_bay_msg = str(_refusal(make(read_chamber=_unavailable)[0], spend))
+    check("a chamber that will not decode says to restore from the words",
+          "recovery words" in tamper_msg)
+    check("a chamber that could not be READ does not",
+          "recovery words" not in open_bay_msg)
+    check("...and says the seed is fine", "seed" in open_bay_msg
+          and "bay is open" in open_bay_msg)
+    check("an unclassified failure still fails toward tamper",
+          "recovery words" in tamper_msg)
 
     print(f"{'check':<52}{'result':>8}")
     print("-" * 60)
