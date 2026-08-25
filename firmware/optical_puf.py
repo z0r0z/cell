@@ -793,9 +793,16 @@ def chamber_reader(capture, helper: Helper, grain_px: int = 4):
     """-> a callable the signer can hold, returning the chamber's key.
 
     `capture` takes a burst from the speckle camera with the laser on and the
-    cartridge bay empty. Raises PufError if the chamber does not answer as
-    enrolled, which is the whole point: the caller cannot get a key that is
-    merely close.
+    bay CLOSED. Closed, not empty: the laser interlock is wired through the
+    cartridge switch (BUILD.md section 11 puts the contacts in series with the
+    diode's supply, where firmware cannot talk past them), so the diode does
+    not light with the slot open. What must be true is that the diffuser sits
+    clear of the cartridge's optical window — BUILD.md section 9 — so which
+    cartridge happens to be seated changes nothing, and a cartridge change
+    does not read as tampering.
+
+    Raises PufError if the chamber does not answer as enrolled, which is the
+    whole point: the caller cannot get a key that is merely close.
     """
     def read() -> bytes:
         return reproduce(prepare(capture()), helper)
