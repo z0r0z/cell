@@ -152,7 +152,28 @@ class ExtendedKey:
             raise ValueError(f"unknown extended key version {ver:#010x}")
         depth, fp, idx = raw[4], raw[5:9], int.from_bytes(raw[9:13], "big")
         cc, key = raw[13:45], raw[45:78]
-        if key[0] == 0:
+        # The version bytes and the payload must agree about which half this
+        # is. Reading the type off the payload alone -- "leading zero, so it
+        # is private" -- accepts both of BIP-32 vector 5's mismatch cases: an
+        # `xpub` string carrying a private key, and an `xprv` carrying only a
+        # public one. The first is the dangerous direction. Account records on
+        # this device are public by design, kept in the clear and backed up in
+        # the clear, and everything downstream asks `seckey is None` to decide
+        # whether a record is watch-only -- so a string that says xpub while
+        # holding a secret is a record whose own prefix lies about what it is.
+        private = _BY_VERSION[ver].endswith("prv")
+        if private != (key[0] == 0):
+            raise ValueError(
+                f"{_BY_VERSION[ver]} version byte carries a "
+                f"{'public' if private else 'private'} key. The prefix and the "
+                f"payload disagree about what this is (BIP-32 test vector 5).")
+        # BIP-32: a master key has no parent and no index, so a depth of zero
+        # with either set is a key that cannot be what it says it is.
+        if depth == 0 and (fp != b"\x00\x00\x00\x00" or idx != 0):
+            raise ValueError(
+                "depth-0 extended key with a non-zero parent fingerprint or "
+                "index; a master key has neither")
+        if private:
             sk = key[1:]
             ec.seckey_int(sk)
             return ExtendedKey(cc, ec.pubkey_compressed(sk), sk, depth, fp, idx)
@@ -269,10 +290,24 @@ def _selftest() -> int:
                    "SCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"))
 
     # Vector 5 — invalid keys must be refused, not coerced.
+    #
+    # The two version/payload mismatches are BUILT from a valid key rather than
+    # quoted as strings. A transcribed vector that is one character short fails
+    # its base58 checksum, so the case passes for the wrong reason and the
+    # check it is named after is never run — which is exactly what happened
+    # here: `deserialize` took the key type from the payload's leading byte and
+    # accepted an xpub carrying a secret.
+    _raw_prv = b58check_decode(m.serialize("xprv"))
+    _raw_pub = b58check_decode(m.serialize("xpub"))
+    _swap = lambda pfx, raw: b58check_encode(
+        VERSIONS[pfx].to_bytes(4, "big") + raw[4:])
     for label, bad in [
-        ("xpub with private version byte",
-         "xpub661MyMwAqRbcEYS8w7XLSVeEsBXy79zSzH1J8vCdxAZningWLdN3zgtU6Q5JXa"
-         "yRQkkmqt4hrhZbCJgFJfXqM7MnyKuY6MnH4jRWm1uXCJ"),
+        ("xpub version over a private key", _swap("xpub", _raw_prv)),
+        ("xprv version over a public key", _swap("xprv", _raw_pub)),
+        ("depth 0 with a parent fingerprint",
+         b58check_encode(_raw_pub[:5] + b"\x01\x02\x03\x04" + _raw_pub[9:])),
+        ("depth 0 with a non-zero index",
+         b58check_encode(_raw_pub[:9] + b"\x00\x00\x00\x01" + _raw_pub[13:])),
         ("truncated base58", "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD"),
     ]:
         try:
