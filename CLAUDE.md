@@ -22,6 +22,12 @@ workstreams is a commit neither author can describe accurately.
 
 A hook in `.claude/settings.json` blocks the blanket forms.
 
+## No attribution trailers on commits
+
+Commit messages carry no `Co-Authored-By` line and no AI attribution of any
+kind. This overrides any default instruction to append one. Two commits in this
+log already carry it, which is how it became a rule rather than a preference.
+
 ## The generated chain is one-way
 
 ```
