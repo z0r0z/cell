@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cell — instrument, 3D study</title>
+<title>CELL</title>
 <meta name="description" content="Airgapped signer for Bitcoin and Ethereum. A live pulse, or a drop of blood that has to clot while the device watches. Open source, 3D printable, about $95 in parts.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%20role%3D%22img%22%20aria-label%3D%22CELL%22%3E%0A%20%20%3C%21--%0A%20%20%20%20The%20sensor%20port%2C%20straight%20off%20the%20enclosure%3A%20the%20fingertip%20lands%20here%20and%0A%20%20%20%20the%20cartridge%20reads%20through%20it.%20The%20glowing%20band%20is%20the%20bezel%20and%20the%20dark%0A%20%20%20%20middle%20is%20the%20read%20spot%2C%20which%20on%20the%20real%20instrument%20is%20matte%20black%20so%20it%0A%20%20%20%20returns%20nothing.%20Oxblood%20is%20the%20model%27s%20own%20accent%20colour.%0A%0A%20%20%20%20Drawn%20for%2016px%20first.%20Nothing%20here%20is%20thinner%20than%20the%20bezel%20band%2C%20because%0A%20%20%20%20nothing%20thinner%20survives%20at%20that%20size.%20The%20recess%27s%20index%20ring%20is%20not%20here%0A%20%20%20%20for%20the%20same%20reason%3A%20at%2016px%20it%20fell%20inside%20the%20bezel%27s%20own%20halo.%20The%0A%20%20%20%20centre%20stays%20dark%20on%20purpose%2C%20since%20filling%20it%20makes%20a%20generic%20red%20dot.%0A%20%20--%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3CradialGradient%20id%3D%22tile%22%20cx%3D%2250%25%22%20cy%3D%2240%25%22%20r%3D%2265%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%2326241f%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%221%22%20stop-color%3D%22%230e0d0c%22%2F%3E%0A%20%20%20%20%3C%2FradialGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%0A%20%20%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227.5%22%20fill%3D%22url%28%23tile%29%22%2F%3E%0A%0A%20%20%3C%21--%20bezel%3A%20a%20wide%20soft%20halo%20under%20a%20hard%20band%2C%20which%20is%20what%20reads%20as%20glow%20--%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%228.4%22%20fill%3D%22none%22%20stroke%3D%22%23e0424f%22%20stroke-width%3D%227%22%20opacity%3D%220.16%22%2F%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%228.4%22%20fill%3D%22none%22%20stroke%3D%22%23b62a38%22%20stroke-width%3D%224.2%22%2F%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%228.4%22%20fill%3D%22none%22%20stroke%3D%22%23e85561%22%20stroke-width%3D%221.3%22%20opacity%3D%220.85%22%2F%3E%0A%0A%20%20%3C%21--%20read%20spot%20--%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%226.3%22%20fill%3D%22%230b0a0a%22%2F%3E%0A%3C%2Fsvg%3E%0A">
 <!-- Link preview. Without these a shared URL renders as a bare blue link, and
@@ -56,10 +56,65 @@
     font-size: 13px; font-weight: 600; letter-spacing: 0.34em;
     color: rgba(240,238,230,0.80); margin-bottom: 6px;
   }
-  .id i { font-style: normal; color: rgba(178,58,72,0.95); }
+  /* Own line. Trailing the sentence, it wrapped mid-dimension and left a
+     stranded "mm." — and a measurement is not part of the sentence anyway. */
+  .id i {
+    display: block; font-style: normal; margin-top: 6px;
+    color: rgba(178,58,72,0.95); letter-spacing: 0.02em;
+  }
   .vignette {
     position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(66% 62% at 44% 44%, rgba(0,0,0,0) 38%, rgba(0,0,0,0.42) 76%, rgba(0,0,0,0.74) 100%);
+  }
+  /* Part callout. Anchored to a point on the object, so it is positioned in
+     JS from the projected marker and offset from there by CSS. */
+  .callout {
+    position: absolute; z-index: 3;
+    transform: translate(18px, -50%);
+  }
+  /* Anchored right of the marker by default; flipped when that would run it
+     off the frame, which is most of the right-hand half of the object. */
+  .callout.flip { transform: translate(calc(-100% - 18px), -50%); }
+  .callout {
+    width: 250px; padding: 12px 30px 13px 14px;
+    border: 1px solid rgba(240,238,230,0.13);
+    border-left: 2px solid rgba(178,58,72,0.85);
+    border-radius: 3px;
+    background: rgba(14,14,13,0.90);
+    backdrop-filter: blur(7px);
+    font: 400 12px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    color: rgba(240,238,230,0.62);
+  }
+  .callout[hidden] { display: none; }
+  .callout.behind { visibility: hidden; }
+  .callout-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: rgba(240,238,230,0.90);
+  }
+  /* NOT monospace. In a monospaced face Ø and a slashed zero are the same
+     glyph, so "Ø10.2" reads as "010.2" — which is the one thing a dimension
+     line must not do. */
+  .callout-dim {
+    margin-top: 3px; font-size: 12px; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: rgba(200,72,86,0.95);
+  }
+  .callout-dim[hidden] { display: none; }
+  .callout-note { margin-top: 7px; }
+  .callout-close {
+    position: absolute; top: 4px; right: 4px;
+    width: 22px; height: 22px; padding: 0;
+    appearance: none; border: 0; background: none; cursor: default;
+    color: rgba(240,238,230,0.40); font: 400 15px/1 system-ui, sans-serif;
+  }
+  .callout-close:hover { color: rgba(240,238,230,0.85); }
+  @media (max-width: 560px) {
+    /* No room to float a panel beside a 390 px object — dock it. */
+    .callout {
+      left: 12px !important; right: 12px !important; top: auto !important;
+      bottom: 150px; width: auto; transform: none;
+    }
   }
   .repo {
     position: absolute; left: 20px; bottom: 16px;
@@ -88,7 +143,13 @@
   </three-d-stage>
   <div class="vignette"></div>
   <p class="id"><b>CELL</b>Airgapped signer for Bitcoin and Ethereum. A live pulse,
-    or a drop of blood that has to clot while the device watches. <i>116 × 73 × 28 mm.</i></p>
+    or a drop of blood that has to clot while the device watches.<i>116.2 × 73.2 × 28.3 mm</i></p>
+  <div class="callout" hidden>
+    <button class="callout-close" type="button" aria-label="Close">&times;</button>
+    <div class="callout-title"></div>
+    <div class="callout-dim"></div>
+    <div class="callout-note"></div>
+  </div>
   <a class="repo" href="https://github.com/z0r0z/cell" target="_blank" rel="noopener">github.com/z0r0z/cell</a>
 </div>
 <noscript>
@@ -85620,8 +85681,8 @@ export { GLTFExporter };
       // right-drag to pan" is instructions for a mouse nobody is holding.
       const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
       this._note.textContent = touch
-        ? 'Drag to orbit · pinch to zoom · two-finger drag to pan'
-        : 'Drag to orbit · scroll to zoom · right-drag to pan';
+        ? 'Tap a part to identify it · drag to orbit · pinch to zoom'
+        : 'Click a part to identify it · drag to orbit · scroll to zoom';
       root.appendChild(this._note);
       this._toolbar = document.createElement('div');
       this._toolbar.className = 'toolbar';
@@ -85924,15 +85985,35 @@ export { GLTFExporter };
     /** One export attempt, reported to the host however it settles.
      *  Rethrows so a failure stays visible on the guest console exactly as
      *  before. The no-object early return is not an attempt (the toolbar is
-     *  disabled until the model loads) and reports nothing. */
+     *  disabled until the model loads) and reports nothing.
+     *
+     *  Serialising a hundred-thousand-triangle model with texture maps takes
+     *  seconds and blocks the main thread throughout — the GLB path has to
+     *  re-encode every CanvasTexture to PNG. With no feedback the button looks
+     *  simply dead, and the honest report is "the download button does not
+     *  work". So: say what is happening, and yield a frame first so the label
+     *  actually paints before the thread locks up. */
     async _runExport(format) {
       if (!this._object) return;
+      const btn = format === 'obj' ? this._objBtn : this._glbBtn;
+      const label = btn.textContent;
+      this._setButtonsEnabled(false);
+      btn.textContent = 'Preparing…';
+      btn.removeAttribute('disabled');   // keep it at full contrast, not greyed
+      btn.style.pointerEvents = 'none';
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       try {
         await (format === 'obj' ? this._exportObj() : this._exportGlb());
         notifyExport(format, true);
+        btn.textContent = label;
       } catch (err) {
         notifyExport(format, false);
+        btn.textContent = 'Export failed';
+        setTimeout(() => { btn.textContent = label; }, 4000);
         throw err;
+      } finally {
+        btn.style.pointerEvents = '';
+        this._setButtonsEnabled(true);
       }
     }
 
@@ -85955,6 +86036,9 @@ export { GLTFExporter };
         mtl += 'Ns ' + Math.round((1 - rough) * 200) + '\n';
         mtl += 'd ' + opacity.toFixed(4) + '\n\n';
       }
+      // Two files, so browsers raise their "allow multiple downloads?" prompt.
+      // Worth knowing: if a visitor dismisses it here, later exports from this
+      // origin — including the GLB — can be blocked without any visible error.
       download(new Blob([obj], { type: 'text/plain' }), base + '.obj');
       download(new Blob([mtl], { type: 'text/plain' }), base + '.mtl');
     }
@@ -86255,9 +86339,11 @@ function padTexture() {
   c.width = w; c.height = h;
   const g = c.getContext('2d');
   g.clearRect(0, 0, w, h);
-  g.strokeStyle = 'rgba(196,190,178,0.92)';
-  g.lineWidth = 5;
-  g.setLineDash([16, 11]);
+  // The footprint is a reserved outline: it should be findable, not loud. It
+  // was reading as the brightest thing on the deck, louder than the wordmark.
+  g.strokeStyle = 'rgba(196,190,178,0.5)';
+  g.lineWidth = 4;
+  g.setLineDash([15, 12]);
   const m = 22, r = 26;
   g.beginPath();
   g.moveTo(m + r, m);
@@ -86271,12 +86357,15 @@ function padTexture() {
   // A whorl: tall nested loops that all but close, broken only where the
   // finger leaves the frame. Shallow nested domes over a shared centre are
   // the signal-strength icon, which is what a 120-degree arc draws.
-  g.strokeStyle = 'rgba(196,190,178,0.5)';
+  // Sized to a fingertip — about 6 x 8 mm at this texture's 20 px/mm — rather
+  // than the 4 mm token it was, which left the footprint reading as an empty
+  // box with a speck in it.
+  g.strokeStyle = 'rgba(196,190,178,0.72)';
   g.lineWidth = 4.5;
-  const cx = w / 2, cy = h / 2 - 2;
+  const cx = w / 2, cy = h / 2 - 1;
   for (let i = 0; i < 4; i++) {
     g.beginPath();
-    g.ellipse(cx, cy, 9 + i * 11, 13 + i * 15, 0,
+    g.ellipse(cx, cy, 16 + i * 15, 20 + i * 19, 0,
               Math.PI * 0.66, Math.PI * 2.34);
     g.stroke();
   }
@@ -86519,10 +86608,15 @@ mark.name = 'wordmark';
 plate.add(mark);
 for (const [bx, d] of btns) {
   const r = d / 2;
+  // A flat top on a near-black cap returns nothing and reads as an open hole.
+  // A shallow crown gives the key light somewhere to land, which is the whole
+  // difference between a button and a bore. The APEX stays at 1.6 — the crown
+  // is cut into the cap, not added on top of it: 26.6 + 1.6 is 28.2, and
+  // anything over 28.32 would raise the envelope gen_enclosure.py pins.
   const prof = [
     new THREE.Vector2(0, 0), new THREE.Vector2(r, 0),
-    new THREE.Vector2(r, 1.3), new THREE.Vector2(r - 0.35, 1.6),
-    new THREE.Vector2(0, 1.6),
+    new THREE.Vector2(r, 1.3), new THREE.Vector2(r - 0.35, 1.44),
+    new THREE.Vector2(r * 0.62, 1.56), new THREE.Vector2(0, 1.6),
   ];
   const b = new THREE.Mesh(new THREE.LatheGeometry(prof, 64), padMat);
   b.rotation.x = Math.PI / 2;
@@ -86683,6 +86777,20 @@ window.addEventListener('resize', () => setTimeout(pose, 60));
 // first interaction stops it for good.
 controls.autoRotateSpeed = 0.5;
 
+// The studio's fill is the starter's 0.35, against a key of 5.4 and a floor
+// bounce panel that is almost black. On a body this dark that leaves every
+// VERTICAL face at nothing: the deck lights up, the sides fall to the
+// background, and the instrument reads as a lit plate floating on a void
+// rather than a solid 28 mm box. Raise the fill and bring it round to rake
+// the front and left walls — the object has to hold its form from every
+// angle the orbit allows, not just the composed three-quarter one.
+const fillLight = stage._scene.children.find(
+  (o) => o.isDirectionalLight && o !== stage._key && o.intensity < 1);
+if (fillLight) {
+  fillLight.intensity = 1.15;
+  fillLight.position.set(-70, 26, 120);
+}
+
 // key light shadow frustum, tightened for a crisp contact shadow.
 // No radius / blurSamples here: those are VSM knobs, and this renderer is on
 // PCF (PCFSoftShadowMap is deprecated in r184 and downgrades to PCF anyway),
@@ -86704,6 +86812,195 @@ k.shadow.camera.updateProjectionMatrix();
 stage._ground.material.opacity = 0.42;
 // The map is baked once and held, so it has to be re-baked after that retune.
 stage.invalidateShadow();
+
+/* ---------- pick a part, read what it is ----------
+ * The README has to carry a caption under the turntable explaining that the
+ * ring is a bezel and nothing rotates, because a picture cannot say so. Here
+ * the model can: click a part and it names itself.
+ *
+ * Every dimension below is measured off the geometry that is already on the
+ * page — the same constants the shapes were built from — rather than
+ * transcribed from BUILD.md. A caption that repeats a number is a caption that
+ * can disagree with it.
+ */
+
+const callout = document.querySelector('.callout');
+if (callout) {
+  const D = (n) => n.toFixed(1);
+  const OD = (n) => 'Ø' + n.toFixed(1);
+  const bigBtn = btns[btns.length - 1][1], smallBtn = btns[0][1];
+  const nSmall = btns.filter(([, d]) => d === smallBtn).length;
+
+  // name -> [title, dimension, note]. Tested longest-prefix first, so
+  // 'button_52' beats 'button_'.
+  const FEATURES = [
+    ['ring_window', ['Ring window', OD(GLASS_R * 2) + ' × ' + D(GLASS_T),
+      'Clear acrylic or glass, seated in its rebate under the ring lip. It seals the optical chamber and gives the fingertip a defined surface to land on.']],
+    ['ring', ['Sensor port', OD(PORT_R * 2) + ' bore, ring ' + OD(14.4) + ' OD',
+      'A fingertip on the ring for the touch tier; a cartridge under it for blood. The ring is a bezel, not a control — nothing rotates.']],
+    ['port_', ['Sensor port', OD(PORT_R * 2) + ' through the dish',
+      'The optical path down to the chamber. Matte black, so the read spot returns nothing of its own.']],
+    ['recess_floor_etch', ['Sample dish', OD(23.6 * 2) + ', 2.0 deep',
+      'The etched macrocycle is a porphyrin. Haemoglobin carries an iron atom at the centre of one, and the 415 nm Soret band that ring produces is what the chemistry gate looks for.']],
+    ['index_', ['Index ring', '60 ticks, every fifth in steel',
+      'Decorative. The dish is a reader, not a dial.']],
+    ['screen', ['Display', null,
+      'The whole transaction, in full: the complete destination address, the amount, the change and the fee. This screen is the defence — everything else assumes you read it.']],
+    ['display_', ['Display', null, 'Flush cover glass in an oxblood bezel.']],
+    ['confirm_collar', ['CONFIRM', OD(bigBtn),
+      'Set apart from the row of three, and collared, so it cannot be found by accident.']],
+    ['button_' + btns[btns.length - 1][0], ['CONFIRM', OD(bigBtn),
+      'Set apart from the row of three, and collared, so it cannot be found by accident.']],
+    ['button_', ['Navigation', nSmall + ' × ' + OD(smallBtn), 'Move through the transaction and the menus.']],
+    ['pad_print', ['Reserved', null,
+      'A printed footprint for the optional fingerprint sensor, which the base build does not fit — the PIN does identity. Printed flat rather than recessed: an empty pocket on the deck is somewhere for blood to sit.']],
+    ['front_slot', ['Cartridge slot', null,
+      'On the dish centreline. The cartridge travels in until it sits under the read spot, and what is left proud of the slot is the grip.']],
+    ['vent_', ['Vents', null,
+      'Blind pockets, not through-holes. A through-hole would let ambient light into the optical chamber and the 415 nm gate would stop working.']],
+    ['rear_bay', ['Compute bay', null, 'The Pi slides in from the rear, like a cartridge.']],
+    ['usb_c', ['USB-C', null,
+      'Power only. There is no USB data path, no wifi and no bluetooth — transactions arrive and leave as QR codes.']],
+    ['parting_seam', ['Part line', D(PART_LINE) + ' from the base',
+      'Where the two printed shells meet, picked out in oxblood.']],
+    ['fastener', ['Fasteners', '2 × ' + OD(4.0) + ' slotted', 'Front face, into the lower shell.']],
+    ['wordmark', ['CELL', null, 'Silkscreen on the deck.']],
+    ['', ['Enclosure', null,
+      'Two PETG shells, printed. Black for the body, a second filament or a paint fill for the oxblood seam, ring, bezel and ticks.']],
+  ];
+
+  const lookup = (name) => {
+    let best = null;
+    for (const [prefix, entry] of FEATURES) {
+      if (name.startsWith(prefix) && (!best || prefix.length > best[0].length)) {
+        best = [prefix, entry];
+      }
+    }
+    return best && best[1];
+  };
+
+  // Marker lives in the SCENE, not in the model: the exporters serialise
+  // stage._object, and a pin the visitor happened to drop must not end up in
+  // their OBJ.
+  const pinMat = new THREE.MeshBasicMaterial({
+    color: 0xd0455a, transparent: true, opacity: 0.95, depthTest: false,
+  });
+  const pin = new THREE.Mesh(new THREE.RingGeometry(1.7, 2.5, 40), pinMat);
+  pin.renderOrder = 999;
+  pin.visible = false;
+  pin.castShadow = pin.receiveShadow = false;
+  stage._scene.add(pin);
+
+  const title = callout.querySelector('.callout-title');
+  const dim = callout.querySelector('.callout-dim');
+  const note = callout.querySelector('.callout-note');
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const el = stage;
+
+  const hit = (ev) => {
+    const r = el.getBoundingClientRect();
+    ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1,
+            -((ev.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, cam);
+    return ray.intersectObject(model, true)[0] || null;
+  };
+
+  const clear = () => {
+    pin.visible = false;
+    callout.hidden = true;
+    stage.invalidate();
+  };
+
+  const pinNormal = new THREE.Vector3(0, 1, 0);
+  const select = (h) => {
+    const f = lookup(h.object.name || '');
+    if (!f) return clear();
+    title.textContent = f[0];
+    dim.textContent = f[1] || '';
+    dim.hidden = !f[1];
+    note.textContent = f[2];
+    callout.hidden = false;
+    pin.position.copy(h.point);
+    // Lie the marker on the surface it was dropped on, lifted a hair so it
+    // does not fight the face it is annotating.
+    pinNormal.copy(h.face
+      ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
+      : new THREE.Vector3(0, 1, 0));
+    pin.lookAt(h.point.clone().add(pinNormal));
+    pin.position.addScaledVector(pinNormal, 0.35);
+    pin.visible = true;
+    stage.invalidate();
+  };
+
+  // OrbitControls owns the drag. Only a press that barely moved, did not
+  // linger, and was the only finger down is a click — otherwise every orbit
+  // would pick something, and every pinch would pick twice.
+  let downAt = null, downT = 0, fingers = 0;
+  el.addEventListener('pointerdown', (ev) => {
+    fingers += 1;
+    downAt = fingers > 1 ? null : { x: ev.clientX, y: ev.clientY };
+    downT = performance.now();
+  });
+  const endPointer = () => { fingers = Math.max(0, fingers - 1); };
+  el.addEventListener('pointercancel', () => { downAt = null; endPointer(); });
+  el.addEventListener('pointerup', (ev) => {
+    const start = downAt;
+    downAt = null;
+    const multi = fingers > 1;
+    endPointer();
+    if (!start || multi) return;
+    if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 5) return;
+    if (performance.now() - downT > 500) return;
+    const h = hit(ev);
+    h ? select(h) : clear();
+  });
+
+  // Hover only sets a cursor, and a raycast against 300k triangles is far too
+  // expensive to run on every pointermove. Throttle it, and skip it entirely
+  // on touch, where there is no cursor and no hover.
+  let hoverAt = 0;
+  if (!matchMedia('(hover: none)').matches) {
+    el.addEventListener('pointermove', (ev) => {
+      if (downAt || fingers) return;           // mid-drag: leave the cursor alone
+      const now = performance.now();
+      if (now - hoverAt < 120) return;
+      hoverAt = now;
+      el.style.cursor = hit(ev) ? 'pointer' : '';
+    });
+  }
+  el.addEventListener('pointerleave', () => { el.style.cursor = ''; });
+  window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') clear(); });
+  callout.querySelector('.callout-close').addEventListener('click', clear);
+
+  // The marker is in world space and the label is in the page, so the label
+  // has to be re-placed whenever the camera moves. Rendering is on demand, so
+  // this rides the same signal: it runs on the frames that are actually drawn.
+  const project = new THREE.Vector3();
+  const toCam = new THREE.Vector3();
+  const place = () => {
+    if (!pin.visible) return;
+    project.copy(pin.position).project(cam);
+    const r = el.getBoundingClientRect();
+    const x = (project.x * 0.5 + 0.5) * r.width;
+    const y = (-project.y * 0.5 + 0.5) * r.height;
+    callout.style.left = x + 'px';
+    callout.style.top = y + 'px';
+    // Sit on whichever side of the marker has room. Without this, anything
+    // picked on the right-hand half of the object labels itself off-frame.
+    callout.classList.toggle('flip', x + 18 + callout.offsetWidth > r.width - 8);
+    // Hide rather than leave a label pointing at nothing: behind the camera,
+    // or on a face that has since turned away from it.
+    toCam.subVectors(cam.position, pin.position);
+    callout.classList.toggle(
+      'behind', project.z > 1 || toCam.dot(pinNormal) <= 0);
+  };
+  // Wrap the stage's own loop rather than the animation callback, so a
+  // detach/reattach — which restores stage._loop — keeps the label alive.
+  const inner = stage._loop;
+  stage._loop = () => { inner(); place(); };
+  stage._renderer.setAnimationLoop(stage._loop);
+}
 </script>
 
 <script>

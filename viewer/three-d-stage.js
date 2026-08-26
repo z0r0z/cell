@@ -211,8 +211,8 @@
       // right-drag to pan" is instructions for a mouse nobody is holding.
       const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
       this._note.textContent = touch
-        ? 'Drag to orbit · pinch to zoom · two-finger drag to pan'
-        : 'Drag to orbit · scroll to zoom · right-drag to pan';
+        ? 'Tap a part to identify it · drag to orbit · pinch to zoom'
+        : 'Click a part to identify it · drag to orbit · scroll to zoom';
       root.appendChild(this._note);
       this._toolbar = document.createElement('div');
       this._toolbar.className = 'toolbar';
@@ -515,15 +515,35 @@
     /** One export attempt, reported to the host however it settles.
      *  Rethrows so a failure stays visible on the guest console exactly as
      *  before. The no-object early return is not an attempt (the toolbar is
-     *  disabled until the model loads) and reports nothing. */
+     *  disabled until the model loads) and reports nothing.
+     *
+     *  Serialising a hundred-thousand-triangle model with texture maps takes
+     *  seconds and blocks the main thread throughout — the GLB path has to
+     *  re-encode every CanvasTexture to PNG. With no feedback the button looks
+     *  simply dead, and the honest report is "the download button does not
+     *  work". So: say what is happening, and yield a frame first so the label
+     *  actually paints before the thread locks up. */
     async _runExport(format) {
       if (!this._object) return;
+      const btn = format === 'obj' ? this._objBtn : this._glbBtn;
+      const label = btn.textContent;
+      this._setButtonsEnabled(false);
+      btn.textContent = 'Preparing…';
+      btn.removeAttribute('disabled');   // keep it at full contrast, not greyed
+      btn.style.pointerEvents = 'none';
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       try {
         await (format === 'obj' ? this._exportObj() : this._exportGlb());
         notifyExport(format, true);
+        btn.textContent = label;
       } catch (err) {
         notifyExport(format, false);
+        btn.textContent = 'Export failed';
+        setTimeout(() => { btn.textContent = label; }, 4000);
         throw err;
+      } finally {
+        btn.style.pointerEvents = '';
+        this._setButtonsEnabled(true);
       }
     }
 
@@ -546,6 +566,9 @@
         mtl += 'Ns ' + Math.round((1 - rough) * 200) + '\n';
         mtl += 'd ' + opacity.toFixed(4) + '\n\n';
       }
+      // Two files, so browsers raise their "allow multiple downloads?" prompt.
+      // Worth knowing: if a visitor dismisses it here, later exports from this
+      // origin — including the GLB — can be blocked without any visible error.
       download(new Blob([obj], { type: 'text/plain' }), base + '.obj');
       download(new Blob([mtl], { type: 'text/plain' }), base + '.mtl');
     }

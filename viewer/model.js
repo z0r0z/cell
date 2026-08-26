@@ -276,9 +276,11 @@ function padTexture() {
   c.width = w; c.height = h;
   const g = c.getContext('2d');
   g.clearRect(0, 0, w, h);
-  g.strokeStyle = 'rgba(196,190,178,0.92)';
-  g.lineWidth = 5;
-  g.setLineDash([16, 11]);
+  // The footprint is a reserved outline: it should be findable, not loud. It
+  // was reading as the brightest thing on the deck, louder than the wordmark.
+  g.strokeStyle = 'rgba(196,190,178,0.5)';
+  g.lineWidth = 4;
+  g.setLineDash([15, 12]);
   const m = 22, r = 26;
   g.beginPath();
   g.moveTo(m + r, m);
@@ -292,12 +294,15 @@ function padTexture() {
   // A whorl: tall nested loops that all but close, broken only where the
   // finger leaves the frame. Shallow nested domes over a shared centre are
   // the signal-strength icon, which is what a 120-degree arc draws.
-  g.strokeStyle = 'rgba(196,190,178,0.5)';
+  // Sized to a fingertip — about 6 x 8 mm at this texture's 20 px/mm — rather
+  // than the 4 mm token it was, which left the footprint reading as an empty
+  // box with a speck in it.
+  g.strokeStyle = 'rgba(196,190,178,0.72)';
   g.lineWidth = 4.5;
-  const cx = w / 2, cy = h / 2 - 2;
+  const cx = w / 2, cy = h / 2 - 1;
   for (let i = 0; i < 4; i++) {
     g.beginPath();
-    g.ellipse(cx, cy, 9 + i * 11, 13 + i * 15, 0,
+    g.ellipse(cx, cy, 16 + i * 15, 20 + i * 19, 0,
               Math.PI * 0.66, Math.PI * 2.34);
     g.stroke();
   }
@@ -540,10 +545,15 @@ mark.name = 'wordmark';
 plate.add(mark);
 for (const [bx, d] of btns) {
   const r = d / 2;
+  // A flat top on a near-black cap returns nothing and reads as an open hole.
+  // A shallow crown gives the key light somewhere to land, which is the whole
+  // difference between a button and a bore. The APEX stays at 1.6 — the crown
+  // is cut into the cap, not added on top of it: 26.6 + 1.6 is 28.2, and
+  // anything over 28.32 would raise the envelope gen_enclosure.py pins.
   const prof = [
     new THREE.Vector2(0, 0), new THREE.Vector2(r, 0),
-    new THREE.Vector2(r, 1.3), new THREE.Vector2(r - 0.35, 1.6),
-    new THREE.Vector2(0, 1.6),
+    new THREE.Vector2(r, 1.3), new THREE.Vector2(r - 0.35, 1.44),
+    new THREE.Vector2(r * 0.62, 1.56), new THREE.Vector2(0, 1.6),
   ];
   const b = new THREE.Mesh(new THREE.LatheGeometry(prof, 64), padMat);
   b.rotation.x = Math.PI / 2;
@@ -704,6 +714,20 @@ window.addEventListener('resize', () => setTimeout(pose, 60));
 // first interaction stops it for good.
 controls.autoRotateSpeed = 0.5;
 
+// The studio's fill is the starter's 0.35, against a key of 5.4 and a floor
+// bounce panel that is almost black. On a body this dark that leaves every
+// VERTICAL face at nothing: the deck lights up, the sides fall to the
+// background, and the instrument reads as a lit plate floating on a void
+// rather than a solid 28 mm box. Raise the fill and bring it round to rake
+// the front and left walls — the object has to hold its form from every
+// angle the orbit allows, not just the composed three-quarter one.
+const fillLight = stage._scene.children.find(
+  (o) => o.isDirectionalLight && o !== stage._key && o.intensity < 1);
+if (fillLight) {
+  fillLight.intensity = 1.15;
+  fillLight.position.set(-70, 26, 120);
+}
+
 // key light shadow frustum, tightened for a crisp contact shadow.
 // No radius / blurSamples here: those are VSM knobs, and this renderer is on
 // PCF (PCFSoftShadowMap is deprecated in r184 and downgrades to PCF anyway),
@@ -725,3 +749,192 @@ k.shadow.camera.updateProjectionMatrix();
 stage._ground.material.opacity = 0.42;
 // The map is baked once and held, so it has to be re-baked after that retune.
 stage.invalidateShadow();
+
+/* ---------- pick a part, read what it is ----------
+ * The README has to carry a caption under the turntable explaining that the
+ * ring is a bezel and nothing rotates, because a picture cannot say so. Here
+ * the model can: click a part and it names itself.
+ *
+ * Every dimension below is measured off the geometry that is already on the
+ * page — the same constants the shapes were built from — rather than
+ * transcribed from BUILD.md. A caption that repeats a number is a caption that
+ * can disagree with it.
+ */
+
+const callout = document.querySelector('.callout');
+if (callout) {
+  const D = (n) => n.toFixed(1);
+  const OD = (n) => 'Ø' + n.toFixed(1);
+  const bigBtn = btns[btns.length - 1][1], smallBtn = btns[0][1];
+  const nSmall = btns.filter(([, d]) => d === smallBtn).length;
+
+  // name -> [title, dimension, note]. Tested longest-prefix first, so
+  // 'button_52' beats 'button_'.
+  const FEATURES = [
+    ['ring_window', ['Ring window', OD(GLASS_R * 2) + ' × ' + D(GLASS_T),
+      'Clear acrylic or glass, seated in its rebate under the ring lip. It seals the optical chamber and gives the fingertip a defined surface to land on.']],
+    ['ring', ['Sensor port', OD(PORT_R * 2) + ' bore, ring ' + OD(14.4) + ' OD',
+      'A fingertip on the ring for the touch tier; a cartridge under it for blood. The ring is a bezel, not a control — nothing rotates.']],
+    ['port_', ['Sensor port', OD(PORT_R * 2) + ' through the dish',
+      'The optical path down to the chamber. Matte black, so the read spot returns nothing of its own.']],
+    ['recess_floor_etch', ['Sample dish', OD(23.6 * 2) + ', 2.0 deep',
+      'The etched macrocycle is a porphyrin. Haemoglobin carries an iron atom at the centre of one, and the 415 nm Soret band that ring produces is what the chemistry gate looks for.']],
+    ['index_', ['Index ring', '60 ticks, every fifth in steel',
+      'Decorative. The dish is a reader, not a dial.']],
+    ['screen', ['Display', null,
+      'The whole transaction, in full: the complete destination address, the amount, the change and the fee. This screen is the defence — everything else assumes you read it.']],
+    ['display_', ['Display', null, 'Flush cover glass in an oxblood bezel.']],
+    ['confirm_collar', ['CONFIRM', OD(bigBtn),
+      'Set apart from the row of three, and collared, so it cannot be found by accident.']],
+    ['button_' + btns[btns.length - 1][0], ['CONFIRM', OD(bigBtn),
+      'Set apart from the row of three, and collared, so it cannot be found by accident.']],
+    ['button_', ['Navigation', nSmall + ' × ' + OD(smallBtn), 'Move through the transaction and the menus.']],
+    ['pad_print', ['Reserved', null,
+      'A printed footprint for the optional fingerprint sensor, which the base build does not fit — the PIN does identity. Printed flat rather than recessed: an empty pocket on the deck is somewhere for blood to sit.']],
+    ['front_slot', ['Cartridge slot', null,
+      'On the dish centreline. The cartridge travels in until it sits under the read spot, and what is left proud of the slot is the grip.']],
+    ['vent_', ['Vents', null,
+      'Blind pockets, not through-holes. A through-hole would let ambient light into the optical chamber and the 415 nm gate would stop working.']],
+    ['rear_bay', ['Compute bay', null, 'The Pi slides in from the rear, like a cartridge.']],
+    ['usb_c', ['USB-C', null,
+      'Power only. There is no USB data path, no wifi and no bluetooth — transactions arrive and leave as QR codes.']],
+    ['parting_seam', ['Part line', D(PART_LINE) + ' from the base',
+      'Where the two printed shells meet, picked out in oxblood.']],
+    ['fastener', ['Fasteners', '2 × ' + OD(4.0) + ' slotted', 'Front face, into the lower shell.']],
+    ['wordmark', ['CELL', null, 'Silkscreen on the deck.']],
+    ['', ['Enclosure', null,
+      'Two PETG shells, printed. Black for the body, a second filament or a paint fill for the oxblood seam, ring, bezel and ticks.']],
+  ];
+
+  const lookup = (name) => {
+    let best = null;
+    for (const [prefix, entry] of FEATURES) {
+      if (name.startsWith(prefix) && (!best || prefix.length > best[0].length)) {
+        best = [prefix, entry];
+      }
+    }
+    return best && best[1];
+  };
+
+  // Marker lives in the SCENE, not in the model: the exporters serialise
+  // stage._object, and a pin the visitor happened to drop must not end up in
+  // their OBJ.
+  const pinMat = new THREE.MeshBasicMaterial({
+    color: 0xd0455a, transparent: true, opacity: 0.95, depthTest: false,
+  });
+  const pin = new THREE.Mesh(new THREE.RingGeometry(1.7, 2.5, 40), pinMat);
+  pin.renderOrder = 999;
+  pin.visible = false;
+  pin.castShadow = pin.receiveShadow = false;
+  stage._scene.add(pin);
+
+  const title = callout.querySelector('.callout-title');
+  const dim = callout.querySelector('.callout-dim');
+  const note = callout.querySelector('.callout-note');
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const el = stage;
+
+  const hit = (ev) => {
+    const r = el.getBoundingClientRect();
+    ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1,
+            -((ev.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, cam);
+    return ray.intersectObject(model, true)[0] || null;
+  };
+
+  const clear = () => {
+    pin.visible = false;
+    callout.hidden = true;
+    stage.invalidate();
+  };
+
+  const pinNormal = new THREE.Vector3(0, 1, 0);
+  const select = (h) => {
+    const f = lookup(h.object.name || '');
+    if (!f) return clear();
+    title.textContent = f[0];
+    dim.textContent = f[1] || '';
+    dim.hidden = !f[1];
+    note.textContent = f[2];
+    callout.hidden = false;
+    pin.position.copy(h.point);
+    // Lie the marker on the surface it was dropped on, lifted a hair so it
+    // does not fight the face it is annotating.
+    pinNormal.copy(h.face
+      ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
+      : new THREE.Vector3(0, 1, 0));
+    pin.lookAt(h.point.clone().add(pinNormal));
+    pin.position.addScaledVector(pinNormal, 0.35);
+    pin.visible = true;
+    stage.invalidate();
+  };
+
+  // OrbitControls owns the drag. Only a press that barely moved, did not
+  // linger, and was the only finger down is a click — otherwise every orbit
+  // would pick something, and every pinch would pick twice.
+  let downAt = null, downT = 0, fingers = 0;
+  el.addEventListener('pointerdown', (ev) => {
+    fingers += 1;
+    downAt = fingers > 1 ? null : { x: ev.clientX, y: ev.clientY };
+    downT = performance.now();
+  });
+  const endPointer = () => { fingers = Math.max(0, fingers - 1); };
+  el.addEventListener('pointercancel', () => { downAt = null; endPointer(); });
+  el.addEventListener('pointerup', (ev) => {
+    const start = downAt;
+    downAt = null;
+    const multi = fingers > 1;
+    endPointer();
+    if (!start || multi) return;
+    if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 5) return;
+    if (performance.now() - downT > 500) return;
+    const h = hit(ev);
+    h ? select(h) : clear();
+  });
+
+  // Hover only sets a cursor, and a raycast against 300k triangles is far too
+  // expensive to run on every pointermove. Throttle it, and skip it entirely
+  // on touch, where there is no cursor and no hover.
+  let hoverAt = 0;
+  if (!matchMedia('(hover: none)').matches) {
+    el.addEventListener('pointermove', (ev) => {
+      if (downAt || fingers) return;           // mid-drag: leave the cursor alone
+      const now = performance.now();
+      if (now - hoverAt < 120) return;
+      hoverAt = now;
+      el.style.cursor = hit(ev) ? 'pointer' : '';
+    });
+  }
+  el.addEventListener('pointerleave', () => { el.style.cursor = ''; });
+  window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') clear(); });
+  callout.querySelector('.callout-close').addEventListener('click', clear);
+
+  // The marker is in world space and the label is in the page, so the label
+  // has to be re-placed whenever the camera moves. Rendering is on demand, so
+  // this rides the same signal: it runs on the frames that are actually drawn.
+  const project = new THREE.Vector3();
+  const toCam = new THREE.Vector3();
+  const place = () => {
+    if (!pin.visible) return;
+    project.copy(pin.position).project(cam);
+    const r = el.getBoundingClientRect();
+    const x = (project.x * 0.5 + 0.5) * r.width;
+    const y = (-project.y * 0.5 + 0.5) * r.height;
+    callout.style.left = x + 'px';
+    callout.style.top = y + 'px';
+    // Sit on whichever side of the marker has room. Without this, anything
+    // picked on the right-hand half of the object labels itself off-frame.
+    callout.classList.toggle('flip', x + 18 + callout.offsetWidth > r.width - 8);
+    // Hide rather than leave a label pointing at nothing: behind the camera,
+    // or on a face that has since turned away from it.
+    toCam.subVectors(cam.position, pin.position);
+    callout.classList.toggle(
+      'behind', project.z > 1 || toCam.dot(pinNormal) <= 0);
+  };
+  // Wrap the stage's own loop rather than the animation callback, so a
+  // detach/reattach — which restores stage._loop — keeps the label alive.
+  const inner = stage._loop;
+  stage._loop = () => { inner(); place(); };
+  stage._renderer.setAnimationLoop(stage._loop);
+}

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Instrument — 3D study</title>
+<title>CELL</title>
 <link rel="icon" href="./favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
 <link rel="apple-touch-icon" href="./favicon-512.png">
@@ -51,10 +51,65 @@
     font-size: 13px; font-weight: 600; letter-spacing: 0.34em;
     color: rgba(240,238,230,0.80); margin-bottom: 6px;
   }
-  .id i { font-style: normal; color: rgba(178,58,72,0.95); }
+  /* Own line. Trailing the sentence, it wrapped mid-dimension and left a
+     stranded "mm." — and a measurement is not part of the sentence anyway. */
+  .id i {
+    display: block; font-style: normal; margin-top: 6px;
+    color: rgba(178,58,72,0.95); letter-spacing: 0.02em;
+  }
   .vignette {
     position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(66% 62% at 44% 44%, rgba(0,0,0,0) 38%, rgba(0,0,0,0.42) 76%, rgba(0,0,0,0.74) 100%);
+  }
+  /* Part callout. Anchored to a point on the object, so it is positioned in
+     JS from the projected marker and offset from there by CSS. */
+  .callout {
+    position: absolute; z-index: 3;
+    transform: translate(18px, -50%);
+  }
+  /* Anchored right of the marker by default; flipped when that would run it
+     off the frame, which is most of the right-hand half of the object. */
+  .callout.flip { transform: translate(calc(-100% - 18px), -50%); }
+  .callout {
+    width: 250px; padding: 12px 30px 13px 14px;
+    border: 1px solid rgba(240,238,230,0.13);
+    border-left: 2px solid rgba(178,58,72,0.85);
+    border-radius: 3px;
+    background: rgba(14,14,13,0.90);
+    backdrop-filter: blur(7px);
+    font: 400 12px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    color: rgba(240,238,230,0.62);
+  }
+  .callout[hidden] { display: none; }
+  .callout.behind { visibility: hidden; }
+  .callout-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: rgba(240,238,230,0.90);
+  }
+  /* NOT monospace. In a monospaced face Ø and a slashed zero are the same
+     glyph, so "Ø10.2" reads as "010.2" — which is the one thing a dimension
+     line must not do. */
+  .callout-dim {
+    margin-top: 3px; font-size: 12px; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: rgba(200,72,86,0.95);
+  }
+  .callout-dim[hidden] { display: none; }
+  .callout-note { margin-top: 7px; }
+  .callout-close {
+    position: absolute; top: 4px; right: 4px;
+    width: 22px; height: 22px; padding: 0;
+    appearance: none; border: 0; background: none; cursor: default;
+    color: rgba(240,238,230,0.40); font: 400 15px/1 system-ui, sans-serif;
+  }
+  .callout-close:hover { color: rgba(240,238,230,0.85); }
+  @media (max-width: 560px) {
+    /* No room to float a panel beside a 390 px object — dock it. */
+    .callout {
+      left: 12px !important; right: 12px !important; top: auto !important;
+      bottom: 150px; width: auto; transform: none;
+    }
   }
   .repo {
     position: absolute; left: 20px; bottom: 16px;
@@ -83,7 +138,13 @@
   </three-d-stage>
   <div class="vignette"></div>
   <p class="id"><b>CELL</b>Airgapped signer for Bitcoin and Ethereum. A live pulse,
-    or a drop of blood that has to clot while the device watches. <i>116 × 73 × 28 mm.</i></p>
+    or a drop of blood that has to clot while the device watches.<i>116.2 × 73.2 × 28.3 mm</i></p>
+  <div class="callout" hidden>
+    <button class="callout-close" type="button" aria-label="Close">&times;</button>
+    <div class="callout-title"></div>
+    <div class="callout-dim"></div>
+    <div class="callout-note"></div>
+  </div>
   <a class="repo" href="https://github.com/z0r0z/cell" target="_blank" rel="noopener">github.com/z0r0z/cell</a>
 </div>
 <script src="./three-d-stage.js"></script>

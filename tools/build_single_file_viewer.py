@@ -172,7 +172,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-o", "--out", default=str(VIEWER / "instrument-standalone.html"))
     ap.add_argument("--version", default="0.184.0", help="three.js version to inline")
-    ap.add_argument("--title", default="Cell — instrument, 3D study")
+    # The tab title is a name, not a description of the artefact. It sits in a
+    # strip of tabs next to everything else the reader has open.
+    ap.add_argument("--title", default="CELL")
     # The tab title and the link-preview title do different jobs. The tab says
     # what the page is; the card is competing in a timeline and has to say what
     # the product is.
