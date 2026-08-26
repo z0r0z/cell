@@ -71,9 +71,9 @@
  * inherit the scene's units and orientation. The stage fills its own box;
  * size it with ordinary CSS (default 100vw/100vh page hero).
  *
- * Default setup: neutral studio lighting (hemisphere + key + fill), a
- * ground shadow (PCF — shadow.radius and shadow.blurSamples are VSM-only
- * knobs and do nothing here; soften with the ShadowMaterial's opacity), and
+ * Default setup: neutral studio lighting (hemisphere + key + fill), a soft
+ * ground shadow (VSM, so shadow.radius and shadow.blurSamples are live — on
+ * PCF they are silently ignored and the shadow has no penumbra), and
  * NO environment map — so high metalness has
  * nothing to reflect and renders near-black. Cap metalness around
  * 0.3–0.4 and carry a metal look with a brighter base color. The copied
@@ -291,11 +291,13 @@
       });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.shadowMap.enabled = true;
-      // PCFSoftShadowMap is deprecated in r184: three warns and falls back to
-      // PCF anyway, so asking for PCF is honest about what you get. It also
-      // means shadow.radius / blurSamples do NOTHING — those are VSM knobs.
-      // Soften the contact shadow with the ShadowMaterial's opacity instead.
-      renderer.shadowMap.type = THREE.PCFShadowMap;
+      // PCFSoftShadowMap is deprecated in r184 and falls back to plain PCF,
+      // whose filter is a fixed one texel wide — on a 4096 map over a small
+      // frustum that is a fraction of a millimetre, so the contact shadow came
+      // out with no penumbra at all: a hard-edged wedge on a page that shows
+      // no floor for it to fall on. VSM is the one type where shadow.radius
+      // and shadow.blurSamples actually do something.
+      renderer.shadowMap.type = THREE.VSMShadowMap;
       // The scene is static: baking the shadow map once and holding it is the
       // single biggest saving here. A 4096 map over 100k triangles re-rendered
       // at 60fps is most of the GPU cost of a page where nothing moves.
@@ -525,6 +527,10 @@
      *  actually paints before the thread locks up. */
     async _runExport(format) {
       if (!this._object) return;
+      // Anything animating a mesh has to put it back before the scene is
+      // serialised. The exporters walk `this._object` as it stands, so a
+      // button caught mid-press would ship depressed in somebody's OBJ.
+      this.dispatchEvent(new CustomEvent('beforeexport', { detail: { format } }));
       const btn = format === 'obj' ? this._objBtn : this._glbBtn;
       const label = btn.textContent;
       this._setButtonsEnabled(false);

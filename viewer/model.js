@@ -728,11 +728,11 @@ if (fillLight) {
   fillLight.position.set(-70, 26, 120);
 }
 
-// key light shadow frustum, tightened for a crisp contact shadow.
-// No radius / blurSamples here: those are VSM knobs, and this renderer is on
-// PCF (PCFSoftShadowMap is deprecated in r184 and downgrades to PCF anyway),
-// so they were being set and ignored. The ground's ShadowMaterial opacity is
-// the control that actually reaches this shadow.
+// Key light shadow frustum. The stage is on VSM, which is the only type where
+// radius and blurSamples reach the filter — and the object needs them: it is a
+// slab lit from high and to one side, so the cast shadow is a long hard wedge
+// running off across a floor the page never draws. A wide penumbra is what
+// keeps it reading as a shadow rather than as a second object.
 const k = stage._key;
 k.position.set(-150, 300, 135);
 k.shadow.camera.left = -140;
@@ -741,12 +741,25 @@ k.shadow.camera.top = 140;
 k.shadow.camera.bottom = -140;
 k.shadow.camera.near = 10;
 k.shadow.camera.far = 700;
-k.shadow.bias = -0.0008;
-k.shadow.normalBias = 0.6;
-k.shadow.mapSize.set(4096, 4096);
+// VSM wants a depth-space bias, not the polygon offset PCF needs; the large
+// negative value PCF used detaches the shadow from the object under VSM.
+k.shadow.bias = -0.0006;
+k.shadow.normalBias = 0.0;
+// VSM's blur is measured in TEXELS, so the world-space penumbra depends on the
+// map's resolution as much as on the radius: at 4096 over this frustum a texel
+// is 0.07 mm, and even a radius of 7 is a penumbra you need to zoom in to
+// find. 1024 puts a texel at 0.27 mm, and radius 18 gives about 5 mm of
+// falloff — enough that the cast edge reads as a shadow instead of as a
+// second object lying on a floor the page never draws.
+//
+// The blur is expensive and completely free here: the map is baked once and
+// held, because nothing in the scene moves.
+k.shadow.radius = 18;
+k.shadow.blurSamples = 24;
+k.shadow.mapSize.set(1024, 1024);
 if (k.shadow.map) { k.shadow.map.dispose(); k.shadow.map = null; }
 k.shadow.camera.updateProjectionMatrix();
-stage._ground.material.opacity = 0.42;
+stage._ground.material.opacity = 0.36;
 // The map is baked once and held, so it has to be re-baked after that retune.
 stage.invalidateShadow();
 
@@ -868,6 +881,77 @@ if (callout) {
     pin.position.addScaledVector(pinNormal, 0.35);
     pin.visible = true;
     stage.invalidate();
+    pressCap(h.object.name || '');
+  };
+
+  /* ---------- the buttons travel ----------
+   * Naming a part is information. Pressing one is the other half: these are
+   * switches, and a switch that does not move under the pointer reads as a
+   * picture of a switch. The travel is the real thing — 0.7 mm, which is what
+   * a 12 mm tactile switch gives you — so the animation is not decoration, it
+   * is the same number the enclosure was built around.
+   *
+   * CONFIRM is deliberately slower. The device asks the owner to HOLD it, and
+   * a cap that snaps back in 200 ms would say the opposite.
+   */
+  const TRAVEL = 0.7;
+  const CONFIRM_NAME = 'button_' + btns[btns.length - 1][0];
+  const caps = new Map();          // mesh -> its resting z
+  for (const [bx] of btns) {
+    const m = model.getObjectByName('button_' + bx);
+    if (m) caps.set(m, m.position.z);
+  }
+
+  let animating = null;            // { mesh, t0, hold } or null
+
+  // Put every cap back where the geometry says it sits. Called before an
+  // export, and before any new press, so two clicks in quick succession
+  // cannot leave one stuck down.
+  const settleCaps = () => {
+    animating = null;
+    let moved = false;
+    for (const [m, z] of caps) {
+      if (m.position.z !== z) { m.position.z = z; moved = true; }
+    }
+    if (moved) stage.invalidate();
+  };
+  stage.addEventListener('beforeexport', settleCaps);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) settleCaps();
+  });
+
+  const easeOut = (u) => 1 - (1 - u) * (1 - u);
+
+  const step = () => {
+    if (!animating) return;
+    const { mesh, t0, hold } = animating;
+    const rest = caps.get(mesh);
+    const DOWN = 70, UP = 170;
+    const t = performance.now() - t0;
+    let d;                                  // 0 at rest, 1 fully depressed
+    if (t < DOWN) d = easeOut(t / DOWN);
+    else if (t < DOWN + hold) d = 1;
+    else d = 1 - easeOut(Math.min(1, (t - DOWN - hold) / UP));
+    mesh.position.z = rest - TRAVEL * d;
+    stage.invalidate();
+    if (t < DOWN + hold + UP) requestAnimationFrame(step);
+    else { mesh.position.z = rest; animating = null; stage.invalidate(); }
+  };
+
+  // The cap under a hit, or null. Clicking the CONFIRM collar presses the cap
+  // it surrounds: the collar is shell, and nobody aiming at it means the trim.
+  const capFor = (name) => {
+    if (name === 'confirm_collar') return model.getObjectByName(CONFIRM_NAME);
+    return name.startsWith('button_') ? model.getObjectByName(name) : null;
+  };
+
+  const pressCap = (name) => {
+    const mesh = capFor(name || '');
+    if (!mesh || !caps.has(mesh)) return;
+    settleCaps();
+    animating = { mesh, t0: performance.now(),
+                  hold: mesh.name === CONFIRM_NAME ? 420 : 45 };
+    requestAnimationFrame(step);
   };
 
   // OrbitControls owns the drag. Only a press that barely moved, did not
