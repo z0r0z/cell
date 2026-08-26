@@ -297,6 +297,81 @@ def main() -> int:
               not PublicKeyXOnly(ours).verify(
                   ec.schnorr_sign(t_digest, tk.seckey), t_digest))
 
+    # ---- the same questions, over many keys instead of one ----
+    #
+    # Everything above pins one key against libsecp256k1, and the published
+    # vectors pin a handful more. Neither says much about the paths that only
+    # SOME keys take: a recovery id with its high bit set, a grind that has to
+    # retry, a DER integer that needs a padding byte. Those are per-key
+    # properties, so they want a sweep rather than a vector.
+    #
+    # Every comparison here is byte equality against the implementation
+    # Bitcoin Core signs with, not agreement with ourselves.
+    print("\n differential — the signing core against libsecp256k1, many keys")
+    try:
+        from coincurve import PrivateKey, PublicKey
+    except ImportError:
+        SKIPPED.append("differential sweep — pip install coincurve")
+        print("  libsecp256k1 via coincurve                                SKIP")
+    else:
+        import hashlib as _hl
+        from collections import Counter
+        n_keys, mismatch = 300, Counter()
+        for i in range(n_keys):
+            sk = _hl.sha256(f"differential-{i}".encode()).digest()
+            if not 1 <= int.from_bytes(sk, "big") <= ec.N - 1:
+                continue                        # astronomically unlikely
+            msg = _hl.sha256(f"message-{i}".encode()).digest()
+            ref = PrivateKey(sk)
+
+            if ec.pubkey_compressed(sk) != ref.public_key.format(compressed=True):
+                mismatch["compressed pubkey"] += 1
+            if ec.ser_uncompressed(ec.pubkey_point(sk)) != \
+                    ref.public_key.format(compressed=False):
+                mismatch["uncompressed pubkey"] += 1
+
+            # RFC 6979 is deterministic, so an ungrounded signature is not
+            # merely valid -- it is the SAME 64 bytes libsecp256k1 produces.
+            r, sg, rec = ec.ecdsa_sign(msg, sk, grind_low_r=False)
+            ours64 = r.to_bytes(32, "big") + sg.to_bytes(32, "big")
+            theirs = ref.sign_recoverable(msg, hasher=None)
+            if ours64 != theirs[:64]:
+                mismatch["RFC 6979 signature"] += 1
+            if theirs[64] != rec:
+                mismatch["recovery id"] += 1
+            if PublicKey.from_signature_and_message(
+                    ours64 + bytes([rec]), msg,
+                    hasher=None).format() != ec.pubkey_compressed(sk):
+                mismatch["they recover our signature"] += 1
+            if ec.ecdsa_recover(msg, r, sg, rec) != ec.pubkey_compressed(sk):
+                mismatch["we recover our own"] += 1
+
+            # The ground signature is ours alone, so it is checked by being
+            # ACCEPTED rather than by being equal -- through our DER encoder
+            # and their parser.
+            rg, sgg, _ = ec.ecdsa_sign(msg, sk)
+            if rg >> 255:
+                mismatch["low-R grinding"] += 1
+            if not ref.public_key.verify(ec.der_encode(rg, sgg), msg, hasher=None):
+                mismatch["our DER, their verify"] += 1
+
+            xo = ec.schnorr_pubkey(sk)
+            out_key, parity = ec.taproot_tweak_pubkey(xo)
+            their_out = PublicKey.from_point(*ec.lift_x(xo)).add(
+                tagged("TapTweak", xo)).format(compressed=True)
+            if their_out[1:] != out_key:
+                mismatch["BIP-341 output key"] += 1
+            if (their_out[0] == 3) != bool(parity):
+                mismatch["BIP-341 output parity"] += 1
+            if ec.schnorr_pubkey(ec.taproot_tweak_seckey(sk)) != out_key:
+                mismatch["secret and public tweak"] += 1
+
+        if mismatch:
+            print("      " + ", ".join(f"{k} x{v}"
+                                       for k, v in mismatch.most_common()))
+        check(f"{n_keys} keys agree with libsecp256k1 byte for byte",
+              not mismatch)
+
     print("\n" + "-" * 66)
     if SKIPPED:
         print("skipped, because a second opinion is optional here:")
