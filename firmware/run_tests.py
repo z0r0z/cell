@@ -547,6 +547,26 @@ def schnorr_implementations_agree() -> bool:
     return True
 
 
+def prose_stays_flat() -> bool:
+    """The reference documents are held to a cadence budget.
+
+    docs_match_the_code() checks the numbers. This checks the prose, for the
+    one failure that keeps recurring: a build document written in the voice of
+    a pitch. tools/prose_lint.py owns the budgets and the reasoning.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "prose_lint", HERE.parent / "tools" / "prose_lint.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    ok, lines = mod.check()
+    for line in lines:
+        print(f"  {line}")
+    if ok:
+        print("  every document inside its budget, no banned phrases")
+    return ok
+
+
 # The checks that need to run in-process rather than as a subprocess.
 # Counted rather than hardcoded, so adding one cannot leave the summary line
 # quietly claiming a number it no longer runs. At module scope because
@@ -556,6 +576,7 @@ IN_PROCESS = [
     ("BIP-340 — attest.py and secp256k1.py agree", schnorr_implementations_agree),
     ("calibration round trip — capture, sweep, load", calibration_round_trip),
     ("docs match the code — counts, record size, BOM totals", docs_match_the_code),
+    ("prose stays flat — tic budgets and banned phrases", prose_stays_flat),
     ("touch calibration round trip — capture, sweep, load",
      touch_calibration_round_trip),
 ]
