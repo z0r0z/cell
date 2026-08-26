@@ -4,8 +4,9 @@ Everything you need to build one is in this repo.
 
 **Build the device. Sign with a pulse. Sign with fresh blood. Post pictures.**
 
-On [poidh](https://poidh.xyz), topped up over time. The listing carries the
-current amount.
+**[Bounty 24 on poidh](https://poidh.xyz/mainnet/bounty/24)**, on mainnet. It
+is topped up over time, so the listing carries the amount and this file
+deliberately does not.
 
 ## Cost
 
@@ -37,7 +38,8 @@ Two things to know:
 
 ## Claim it
 
-Post pictures or video of:
+Submit the claim on [the bounty page](https://poidh.xyz/mainnet/bounty/24),
+with pictures or video of:
 
 1. The assembled device, running
 2. A signature authorised by a pulse
@@ -50,7 +52,9 @@ And say what you had to change to make it work, if anything.
 
 **Reader only.** Milestone 7, a spoof panel run, `thresholds.json` and
 `captures/` posted. That is the half carrying the novel physics, and the
-cheaper one to reach at $62.
+cheaper one to reach at $62. Open an issue here with the numbers as well as
+claiming on poidh: `CONTRIBUTING.md` says what makes a panel run useful to
+everybody else, and the captures are `.npz` so they can be replayed safely.
 
 **A failure is a claim too.** If dye passes a gate, or real blood fails on your
 optics, post it. That answer is worth paying for.

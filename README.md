@@ -20,7 +20,7 @@ Orbit it, and export OBJ or glTF straight from the viewer. `diagrams/turntable.m
 
 The design is complete and the firmware self-tests on every commit: 45 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
 
-Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written but unverified against hardware, `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half. **There's a bounty for building one and signing with it, see `BOUNTY.md`.**
+Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written but unverified against hardware, `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half. **There's a [bounty](https://poidh.xyz/mainnet/bounty/24) for building one and signing with it. `BOUNTY.md` says what a claim looks like, and a reader-only run counts.**
 
 Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware on first build. `calibrate.py` runs the spoof panel for both tiers, sets every threshold from your own samples, and writes a file the device loads. Touch sessions are 15 seconds each, so that half of the calibration is minutes of work. `BUILD.md` §13 is the procedure. `VALIDATION.md` tracks exactly what has been measured.
 
