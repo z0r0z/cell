@@ -291,13 +291,17 @@ misbehave and watching it refuse tests the property itself.
 | **The period cannot be spent early or late** | A beacon for the next period submitted in this one, then two periods later | `EpochNotCurrent` both times. Accepted only during its own period |
 | **The screen** | Rendered at 40x20 with the tier footer reserved | 11 rows. The period is above the addresses, and both addresses are shown in full |
 | **The switch** | `CellDormancy` driven through claim, cancel, finalise and release | A claim releases nothing. One beacon inside the challenge window cancels it, and a beacon in the same block as the claim counts for the owner. Silence through the window releases, and release is final |
+| **The whole path, against a node** | `tools/evm_e2e.py`: anvil, both contracts deployed, a beacon signed for the period the chain's clock reports, then claim, cancel and release | Accepted. The Python epoch and the Solidity epoch agree on one clock, which is the disagreement no unit test on either side could see. A beacon for the next period is refused as `EpochNotCurrent`, and an allowlist record is refused as `WrongDigest` |
 | **The contracts** | `forge test` | 42 tests pass, 23 of them new |
 
 ### Open on this path
 
-- **Nothing is deployed.** The contracts compile and their tests pass against
-  records the firmware produced. No deployment exists, and no beacon has been
-  submitted to a live chain.
+- **Nothing is deployed to a public chain.** `tools/evm_e2e.py` deploys both
+  contracts to a private anvil chain and puts a real beacon through them, so
+  the path is closed end to end in the same sense `regtest_e2e.py` closes the
+  Bitcoin one. What that does not cover is a public deployment: gas at real
+  prices, a chain whose clock nobody controls, and an address other people
+  would have to trust.
 - **Harvesting future periods.** A companion that gets N future periods signed
   can keep a dead owner alive for N periods. Each costs a separate gate and
   shows the owner a date that is not today, so the cost is linear in the lie,

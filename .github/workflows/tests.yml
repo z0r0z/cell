@@ -183,6 +183,14 @@ jobs:
       - run: python3 contracts/test/gen_registry_vectors.py
       - run: forge test -vv
         working-directory: contracts
+      # And the whole path at once, against a node: deploy, sign a beacon for
+      # the period the CHAIN says it is, and drive the switch through claim,
+      # cancel and release. This is the only thing that runs the Python epoch
+      # and the Solidity epoch against one clock, and a disagreement of one
+      # period there makes every beacon the device produces unredeemable.
+      - run: forge build
+        working-directory: contracts
+      - run: python3 tools/evm_e2e.py
 
   regtest:
     # End-to-end against a real Bitcoin Core on a private regtest chain: Core

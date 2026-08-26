@@ -232,6 +232,8 @@ All three are XORed. A chamber that is dark, blocked, overexposed or simply
 absent contributes zeros and says so, and zeros XOR into nothing, so the seed
 is never weaker for having asked.
 
+`tools/evm_e2e.py` is the same question on the other chain. It runs anvil on a private chain with no peers, deploys `CellRegistry` and `CellDormancy`, signs a proof of life for the period the *chain's own clock* says it is, and drives the switch through claim, cancel and release. That last part is what no unit test on either side can reach: the device computes the period in Python and the contract computes it in Solidity, and a disagreement of one period would make every beacon the device ever produces unredeemable.
+
 ## Keys and backup
 
 The device holds a standard BIP39 seed, encrypted at rest and unwrapped only after the gate passes. The unwrapping key comes from your PIN and the secure element's own secret, so the encrypted seed is inert on any other machine and recoverable on this one. Back it up on paper or steel as with any hardware wallet. If the device fails, restore to a Ledger, a Trezor or a replacement build.
@@ -317,6 +319,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `tools/cell.service` | The systemd unit that starts the loop at boot |
 | `tools/bench.py` | The checks only the built device can answer |
 | `tools/regtest_e2e.py` | Sign with the firmware, make Bitcoin Core accept it |
+| `tools/evm_e2e.py` | Deploy the contracts, make a node accept a beacon the firmware signed |
 | `tools/export_model.py` | Re-exports `instrument.obj` from `viewer/model.js` |
 | `tools/render_turntable.py` | Renders the turntable GIF/MP4 from the same model |
 | `tools/gen_wiring.py` | Draws the Phase 1 wiring sheet from BUILD.md §11 |
