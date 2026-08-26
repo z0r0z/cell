@@ -341,6 +341,29 @@ misbehave and watching it refuse tests the property itself.
   but it is the PUF's frame count rather than one chosen for this. A chamber
   that turns out noisier or quieter than the simulation may want its own.
 
+## Somebody else's bug, checked against this design
+
+In August 2026 Ledger patched a flaw in their Ethereum app: a command arriving
+from the host while the owner was reading the confirmation could leave the
+screen showing one transaction and the device preparing another. A race on a
+mutable request, and the consequence was that clear signing stopped meaning
+anything. Reported by TestMachine, fixed in Ethereum app 1.22.2.
+
+CELL cannot be raced that way. There is no host channel: a transaction arrives
+as a QR code, and nothing can arrive while the owner reads the screen. That is
+a property of the airgap, so `signer.py` was not relying on it and now does not
+have to.
+
+| Claim | Method | Result |
+|---|---|---|
+| The request cannot change under the chain | `SignRequest` is frozen | Assignment raises. It was an ordinary mutable dataclass before this |
+| A swap during the confirmation changes nothing | A `confirm` callback that rewrites the digest and the operation while the owner reads, against a mutable stand-in | The signature and the attestation both bind the digest that was displayed, and the screen carried the original amount |
+| An operation that signs nothing is covered too | The same swap from inside the gate callback, on a `needs_seed=False` request | The attestation binds what was shown. This is the case with no signing callback to catch a mismatch, so the snapshot is the only defence there is |
+
+`authorize_and_sign` takes its own copy of the digest and the operation before
+it renders, and signs and attests to the copy. The frozen dataclass and the
+snapshot are independent: one stops a mutation, the other stops it mattering.
+
 ## Written but unverified
 
 | Component | Why | How to verify |

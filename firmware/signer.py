@@ -79,8 +79,26 @@ class ChamberUnavailable(Exception):
     """
 
 
-@dataclass
+@dataclass(frozen=True)
 class SignRequest:
+    """What the owner is being asked to authorise. Frozen, and read once.
+
+    In August 2026 Ledger patched a bug of exactly this shape in their
+    Ethereum app: a competing command from the host, arriving while the owner
+    was reading the confirmation, could leave the screen showing one
+    transaction and the device preparing another. The mechanism was a race on
+    a mutable request; the consequence was that "clear signing" stopped
+    meaning anything.
+
+    CELL cannot be raced the same way, because there is no host channel. A
+    transaction arrives as a QR code and nothing can arrive while the owner
+    reads the screen. That is a property of the airgap rather than of this
+    file, so this file does not lean on it: the request is frozen, and
+    authorize_and_sign takes its own copy of the digest before it shows
+    anything to anybody. What is displayed and what is signed are read from
+    the same value at the same instant.
+    """
+
     operation: ops.Operation
     sighash: bytes                      # 32, what the wallet layer will sign
     requested_tier: Optional[Tier] = None
@@ -271,16 +289,25 @@ class Signer:
             # disclosure off the bottom.
             display = ops.render_for_display(
                 req.operation, reserve=ops.CONFIRM_FOOTER_ROWS)
+            # Rendered from the same object the policy and the attestation
+            # read below, and the render happens first, so a display that got
+            # through is a display of what will be signed.
         except ops.UnrenderableOperation as e:
             raise Refused(f"Refused: {e}") from None
         if len(req.sighash) != 32:
             raise Refused("Refused: sighash must be 32 bytes")
+        # Snapshot. Everything after this point signs and attests to THIS
+        # value, not to whatever the request says later. The dataclass is
+        # frozen as well, so the two defences are independent: one stops a
+        # mutation, the other stops it mattering.
+        sighash = bytes(req.sighash)
+        operation = req.operation
 
         # 2. The DEVICE picks the tier. The operation never gets a say; the
         #    owner may only escalate.
         self._step("policy")
-        decision = policy.decide(self.policy, req.operation.op_class(),
-                                 req.operation.amount_for_policy(),
+        decision = policy.decide(self.policy, operation.op_class(),
+                                 operation.amount_for_policy(),
                                  req.requested_tier)
         if not decision.permitted:
             raise Refused(f"Refused: {decision.reason}")
@@ -356,7 +383,7 @@ class Signer:
             # 7. Sign, then zeroise on every path.
             self._step("sign")
             try:
-                signature = self._sign_digest(seed, req.sighash)
+                signature = self._sign_digest(seed, sighash)
             finally:
                 zeroise(seed)
                 self._step("zeroise")
@@ -368,7 +395,7 @@ class Signer:
         counter = self.se.increment_counter()
         # The measurements travel in the record, so the claim is bound to one
         # capture rather than to a boolean somebody could have flipped.
-        att = attest.attest(tier, counter, req.sighash, self.fw_hash,
+        att = attest.attest(tier, counter, sighash, self.fw_hash,
                             self.cal_hash, live, self.se.attest_sign,
                             self.se.attest_pubkey())
 

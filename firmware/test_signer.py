@@ -56,6 +56,22 @@ def make(pol=None, confirm=True, gate=GATE_OK, se=None, seed=b"\x11" * 32,
     return s, log
 
 
+class _Swappable:
+    """A request that lies. Same attributes, none of them frozen.
+
+    A caller cannot actually pass this today, since wallet.py builds the real
+    frozen dataclass. It exists to test the SECOND defence: that the chain
+    takes its own copy, so a request that changes underneath it changes
+    nothing about what gets signed or attested.
+    """
+
+    def __init__(self, operation, sighash, requested_tier=None, needs_seed=True):
+        self.operation = operation
+        self.sighash = sighash
+        self.requested_tier = requested_tier
+        self.needs_seed = needs_seed
+
+
 def run() -> int:
     ok = True
     results = []
@@ -447,6 +463,69 @@ def run() -> int:
           and "bay is open" in open_bay_msg)
     check("an unclassified failure still fails toward tamper",
           "recovery words" in tamper_msg)
+
+    # ---- what is displayed is what is signed ----------------------------
+    # The Ledger shape: swap the request while the owner is reading it.
+    import dataclasses
+
+    frozen = SignRequest(spend, SIGHASH)
+    try:
+        frozen.sighash = b"\x00" * 32
+        froze = False
+    except dataclasses.FrozenInstanceError:
+        froze = True
+    check("a SignRequest cannot be mutated at all", froze)
+
+    other_hash = hashlib.sha256(b"the-attacker-would-rather-you-signed-this").digest()
+    evil_spend = ops.BitcoinSpend(amount_sats=99_000_000,
+                                  destination="bc1qattacker00000000", fee_sats=1)
+
+    # A confirm callback that swaps the digest while the owner reads the screen.
+    swapped = _Swappable(spend, SIGHASH)
+    seen = {}
+
+    def swapping_confirm(lines):
+        seen["lines"] = lines
+        swapped.sighash = other_hash          # the race, from inside the review
+        swapped.operation = evil_spend
+        return True
+
+    def record_sign(seed_buf, sighash):
+        seen["signed"] = sighash
+        return attest.schnorr_sign(sighash, bytes(seed_buf))
+
+    s_swap = Signer(SoftSE(pin=PIN), Policy(), FW, CAL, swapping_confirm,
+                    lambda t: GATE_OK,
+                    lambda k: bytearray(hashlib.sha256(k).digest()), record_sign)
+    res_swap = s_swap.authorize_and_sign(swapped, PIN)
+    check("a swap during the confirmation does not change what is signed",
+          seen.get("signed") == SIGHASH)
+    check("...nor what the attestation binds",
+          res_swap.attestation.sighash == SIGHASH)
+    check("...and the screen showed the original amount",
+          any("0.00250000" in ln for ln in seen.get("lines", [])))
+
+    # The same swap against a beacon, which has NO signing callback to catch
+    # it. Here the snapshot is the only thing standing between the owner and
+    # an attestation bound to something they never saw.
+    beaconish = _Swappable(spend, SIGHASH, needs_seed=False)
+
+    def swap_at_gate(_tier):
+        beaconish.sighash = other_hash
+        return GATE_OK
+
+    s_nb = Signer(SoftSE(pin=PIN), Policy(), FW, CAL, lambda lines: True,
+                  swap_at_gate, lambda k: bytearray(32),
+                  lambda a, b: b"")
+    res_nb = s_nb.authorize_and_sign(beaconish, PIN)
+    check("an operation that signs nothing still attests to what was shown",
+          res_nb.attestation.sighash == SIGHASH)
+
+    # And the ordinary case, unchanged: the attestation binds the digest.
+    s_ok, log_ok = make()
+    res_ok = s_ok.authorize_and_sign(SignRequest(spend, SIGHASH), PIN)
+    check("the attestation binds the digest on the happy path",
+          res_ok.attestation.sighash == SIGHASH)
 
     print(f"{'check':<52}{'result':>8}")
     print("-" * 60)
