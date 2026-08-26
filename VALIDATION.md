@@ -13,7 +13,7 @@ samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — 38 suites, no hardware required.
+`python firmware/run_tests.py` — 39 suites, no hardware required.
 
 ### The signing stack
 
@@ -60,7 +60,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Speckle physics | Ornstein-Uhlenbeck field, exposure-integrated | Reproduces frozen and liquid limits; exposure, frame interval and grain each swept against the G5/G6 thresholds |
 | Drift margins | 7 disturbance axes, bisected | Tightest budget reported and ranked; a finite tolerance on an invariance axis fails the suite |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
-| A fresh clone | `git clone`, install, `run_tests.py` | 38 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
+| A fresh clone | `git clone`, install, `run_tests.py` | 39 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
 
 ### Multisig, and the registry it depends on
 
@@ -165,7 +165,8 @@ silently.
 | Script execution, legacy | `python-bitcointx`'s interpreter under P2SH/DERSIG/LOW_S/STRICTENC/NULLDUMMY/CLEANSTACK/NULLFAIL | p2pkh and bare 2-of-3 multisig **execute and succeed**; high-S, mangled, lifted, wrong-key, wrong-sighash-byte, out-of-order, short-quorum and non-empty-dummy variants all fail |
 | Script execution, **segwit v0** | The same interpreter with WITNESS and WITNESS_PUBKEYTYPE | p2wpkh, p2sh-p2wpkh and p2wsh 2-of-3 **execute and succeed**. A signature made over the wrong input amount is rejected — the fee-inflation attack seen from the consensus side. An uncompressed witness key, a swapped co-signer and an uncommitted witness script are all rejected |
 | **Taproot** | libsecp256k1 via `coincurve` — the implementation Bitcoin Core itself signs with | Our BIP-341 output key equals its `tweak_add`; it verifies our BIP-340 signature and we verify its own over the same digest; tampered, cross-transaction and untweaked-key signatures are all rejected. Script execution is still uncovered — no interpreter available implements it |
-| `app.load_device` | Built from a real provisioned directory and driven to its idle screen | Assembles; exercises `provision.load`, the account records and the display path |
+| **The runbook itself** | `tools/test_first_build.py` runs `provision.py` as a subprocess exactly as BUILD.md §12 writes it — import, show, chain, multisig, enroll-chamber — then boots `app.load_device` against the directory those commands wrote, shows a receive address and signs a PSBT with it | Passes on the `--soft` path. **Found three defects**, none of which a unit test could reach because none ran two commands in a row against one directory: the boot path ignored the network in the record, so a testnet device came up as mainnet and found none of its own accounts; registering a quorum defaulted to mainnet and refused with a message blaming the xpub; and the software secure element drew a fresh secret per invocation, so the one irreversible step could not be rehearsed at all |
+| **The pin map** | BUILD.md's GPIO table parsed and compared against the firmware constants and against `tools/gen_wiring.py`'s sheet | Three copies, now one check. A pin that moves in one and not the others fails CI instead of failing on a bench as a laser that never lights |
 
 ### Accepted by Bitcoin Core
 
@@ -316,8 +317,11 @@ Milestone 5 in `BUILD.md` §15 — spectrum of dye against your own blood — is
   The transcription risk is now largely retired, and by a second source rather
   than by re-reading: the field map is checked against Microchip's own
   `Atecc608Config`, and the CheckMac digest against Microchip's own
-  `atcah_check_mac()`. Both agree exactly. Install `cryptoauthlib` and those
-  checks run as part of `run_tests.py`; without it they skip and say so.
+  `atcah_check_mac()`. Both agree exactly. These used to run only if you
+  happened to have `cryptoauthlib` installed, and CI did not — so the strongest
+  independent check in the repo ran on nobody's machine. The `cross-checks` job
+  installs it, along with `coincurve` and `python-bitcointx`, and fails if any
+  of them SKIP.
 
   What that still does not settle is whether the CHIP enforces what the bytes
   describe — whether ReqAuth really refuses the derive, whether a secret slot

@@ -103,11 +103,15 @@ class ConsoleDisplay:
     def show(self, lines: list[str], highlight: int | None = None) -> None:
         check_fits(lines)
         self.last = list(lines)
-        edge = "+" + "-" * DISPLAY_COLS + "+"
+        # The gutter is a column of its own, so the border has to allow for
+        # it. Drawing DISPLAY_COLS dashes over a gutter plus DISPLAY_COLS
+        # characters puts every full-width line one past the frame, which
+        # reads on a console as a screen that does not fit when it does.
+        edge = "+" + "-" * (DISPLAY_COLS + 1) + "+"
         print(edge, file=self.out)
         for i, ln in enumerate(lines):
             mark = ">" if i == highlight else " "
-            print(f"|{mark}{ln:<{DISPLAY_COLS - 1}}|", file=self.out)
+            print(f"|{mark}{ln:<{DISPLAY_COLS}}|", file=self.out)
         print(edge, file=self.out)
 
     def show_qr(self, payload: str, caption: str = "") -> None:

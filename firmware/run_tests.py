@@ -97,6 +97,12 @@ SUITES = [
      [sys.executable, "test_signer.py"]),
     ("gate robustness — enrolment invariant, hostile captures",
      [sys.executable, "test_gate_robustness.py"]),
+    # The runbook itself: provision.py driven as a subprocess, then the device
+    # booted from what it wrote. Every other suite tests a module; this one
+    # tests two commands in a row against one directory, which is where three
+    # defects were living because nothing ever did it.
+    ("first build — the documented sequence, end to end",
+     [sys.executable, "../tools/test_first_build.py"]),
     ("drift margins — what the normalisation actually cancels",
      [sys.executable, "robustness.py", "--quick"]),
     ("speckle physics — exposure, frame rate and grain",
@@ -216,6 +222,31 @@ def touch_calibration_round_trip() -> bool:
     return True
 
 
+def _pin_table(build_md: str) -> dict[int, str]:
+    """{GPIO number: what BUILD.md says is on it}, from its own pin table.
+
+    Handles every way that table writes a pin: `GPIO12`, `GPIO2/3`,
+    `GPIO5, 13, 19`, `GPIO8-11` and `**GPIO26**`.
+    """
+    import re
+    out: dict[int, str] = {}
+    for ln in build_md.splitlines():
+        if not ln.startswith("|"):
+            continue
+        cells = [c.strip().strip("*").strip() for c in ln.strip("|").split("|")]
+        if len(cells) < 2 or not cells[0].upper().startswith("GPIO"):
+            continue
+        for part in re.split(r"[,/]", cells[0][4:]):
+            part = part.strip()
+            span = re.fullmatch(r"(\d+)\s*[\u2013-]\s*(\d+)", part)
+            if span:
+                for n in range(int(span.group(1)), int(span.group(2)) + 1):
+                    out[n] = cells[1]
+            elif part.isdigit():
+                out[int(part)] = cells[1]
+    return out
+
+
 def docs_match_the_code() -> bool:
     """Counts quoted in the docs must equal counts the code actually has.
 
@@ -308,6 +339,44 @@ def docs_match_the_code() -> bool:
     # BUILD said 32, CONTRIBUTING said five, and the runner ran 35. Nothing
     # checked it because the count lives in this file, which is the file a
     # reader is least likely to open and most likely to believe.
+    # The pin map exists in THREE places: BUILD.md's table, which is what
+    # somebody wires from; the firmware constants, which are what actually
+    # drive the pin; and tools/gen_wiring.py, which draws the sheet. Nothing
+    # tied them together, so a pin could move in one and stay put in the other
+    # two -- and the failure is a laser that never lights, with no error
+    # anywhere, on a bench, at the end of a build.
+    import buttons, hardware                                # noqa: E402
+    pins = _pin_table(build)
+    wiring = (root / "tools" / "gen_wiring.py").read_text()
+    for label, value, needle, in_sheet in (
+        ("buttons.PIN_UP", buttons.PIN_UP, "UP", False),
+        ("buttons.PIN_DOWN", buttons.PIN_DOWN, "DOWN", False),
+        ("buttons.PIN_BACK", buttons.PIN_BACK, "BACK", False),
+        ("buttons.PIN_CONFIRM", buttons.PIN_CONFIRM, "CONFIRM", False),
+        ("hardware.PIN_LED2", hardware.PIN_LED2, "White LED", True),
+        ("hardware.PIN_LASER", hardware.PIN_LASER, "Laser", True),
+        ("hardware.PIN_IR", hardware.PIN_IR, "IR LED", True),
+        ("hardware.PIN_CARTRIDGE", hardware.PIN_CARTRIDGE, "microswitch", True),
+    ):
+        row = pins.get(value)
+        if row is None:
+            print(f"    {label} is GPIO{value}, which BUILD.md's pin table "
+                  f"does not list")
+            ok = False
+        elif needle.lower() not in row.lower():
+            print(f"    {label} is GPIO{value}, but BUILD.md puts "
+                  f"{row!r} there, not {needle!r}")
+            ok = False
+        if in_sheet and f'"GPIO{value}"' not in wiring:
+            print(f"    {label} is GPIO{value}, which the wiring sheet "
+                  f"(tools/gen_wiring.py) does not draw")
+            ok = False
+
+    # The I2C addresses a builder checks with i2cdetect.
+    import se_atecc                                          # noqa: E402
+    want("BUILD i2c address of the secure element", build,
+         f"{se_atecc.I2C_ADDRESS:#04x}".replace("0x", "0x"))
+
     n_suites = len(SUITES) + len(IN_PROCESS)
     want("README suite count", readme, f"{n_suites} suites")
     want("VALIDATION suite count", validation, f"{n_suites} suites")

@@ -23,3 +23,6 @@ viewer/__export.html
 contracts/out/
 contracts/cache/
 contracts/lib/
+
+# --soft rehearsal only: the software secure element's secret, in the clear.
+SOFT-SE-INSECURE.json
