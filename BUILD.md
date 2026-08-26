@@ -279,12 +279,17 @@ No tiers, no spending thresholds. Every key on the device requires blood, becaus
 
 ### The closed operation set
 
-It signs exactly four things:
+It signs exactly five things:
 
 - A Bitcoin spend, amount, destination, fee, change ownership
 - An Ethereum transfer, amount, destination, chain, nonce, worst-case fee
 - A confidential note spend, note, amount, recipient owner
 - A direct transfer to a pubkey
+- A transfer out of a registered smart account, as EIP-712 typed data, with
+  the amount, the destination, the account, the chain and the account's nonce
+
+And one thing that moves no value and is blood-locked anyway: an EIP-7702
+delegation. See "The smart-account path" below.
 
 **It refuses everything else**, including generic EVM calldata and bare hashes. If the device can't render an operation as a sentence a human can read, it doesn't sign it. A device that displays `0x9a3f…` and asks for blood is worse than one that refuses.
 
@@ -295,6 +300,73 @@ Two consequences of that rule are worth stating outright, because both look like
 **Every Ethereum field is displayed.** The chain id, the nonce and `gas_limit × max_fee_per_gas` are on the confirmation screen next to the amount. They are what the signature commits to, so they are what the owner is asked to approve. An unrecognised chain id is refused, because nobody can evaluate a bare number. A signature that does not pin the chain replays on every other EVM network the owner holds funds on. The device ships knowing two chains and is taught the rest by its owner; see §12.
 
 Make this scope decision deliberately.
+
+### The smart-account path
+
+The first four operations are the EOA path. The device builds a whole EIP-1559
+transaction, holds the account's nonce and prices `gas_limit × max_fee_per_gas`,
+because an EOA has no other way to move value. That contradicts the rule two
+paragraphs up: the device is supposed to sign an authorisation and let the
+companion submit it.
+
+A smart account is the shape that rule describes. The authorisation is an
+EIP-712 `Execute` message, the account's own contract holds the nonce, and
+whoever relays it pays the gas. So the device signs three fields and a domain,
+holds no gas, and never reasons about a fee it cannot bound.
+
+`chainId` and `verifyingContract` sit inside the EIP-712 domain separator, so
+the signature is pinned to one chain and one deployment. That is strictly more
+than the EOA path pins, and it is why the account is registered in advance:
+
+```bash
+python3 tools/provision.py chain --dir /boot/cell \
+    --id 11155111 --name "Sepolia (test)" --ticker ETH
+python3 tools/provision.py smart-account --dir /boot/cell \
+    --label treasury --chain-id 11155111 \
+    --address 0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC \
+    --implementation 0xD54cb65224410F3Ff97a8E72f363f224419f4FB0 \
+    --threshold 2 --owners 0xCD2a...,0xbBbB...
+```
+
+An attacker who can choose `verifyingContract` chooses which account the owner
+is spending from, so the device takes it from its own record and refuses every
+account it was not told about. Same rule as a registered quorum, for the same
+reason.
+
+`data` must be empty. That keeps the operation renderable, and it means the
+account's own governance calls are refused: changing owners, changing the
+threshold, cancelling a queued transaction all travel as `execute(target=self,
+data=...)`. Those are renderable in principle, from a fixed table of selectors
+decoded on the device, and they are deliberately not implemented yet. A
+self-call is refused.
+
+**EIP-7702 delegation is blood-locked, unconditionally.** The authorisation is
+`keccak(0x05 || rlp([chain_id, address, nonce]))`. Three fields, all
+displayable, and it moves nothing. It also decides what every later signature
+from that address means, which makes it reprovisioning under another name, so
+`policy.ALWAYS_BLOOD` holds `account.delegate` and no policy can unlock it.
+
+Two rules the device enforces on a delegation. Chain id 0 is refused: it is
+legal, and it means the authorisation is valid on every chain that exists and
+every chain that ever will. And the implementation must be registered first,
+because the signature commits to an address and to nothing whatever about what
+that address contains.
+
+**What delegation costs you, and it is not small.** A 7702 delegation leaves
+the EOA key a superuser. That key can still send ordinary transactions and can
+revoke the delegation, so a timelock or a guard on a delegated account bounds a
+relayer and does not bound the key holder. For a device whose whole argument is
+that one path in is chosen once, that matters: use the factory-deployed account
+when the timelock has to be a security property, and the delegated EOA when the
+point is to add guards and recovery to an address that already holds funds.
+`provision.py smart-account --delegated-eoa` records which one this is.
+
+**One gap that signing cannot close.** A 7702 authorisation does not commit to
+the initialisation call that has to run in the same transaction, so a relayer
+can delegate to the implementation the owner approved and initialise it with
+their own owners. That is security consideration 2 of the EIP itself. Check the
+account's state against an explorer after a delegation lands and before you
+fund it. `VALIDATION.md` carries it open.
 
 ### Dual chain is nearly free
 
@@ -1240,7 +1312,7 @@ A sequence of checks, not a schedule, with the parts in front of you this is a w
 | 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure, early D, late D, the drop and its direction, not on a curve fit |
 | 7 | **Spoof panel**, the reader is done | ROC generated, thresholds set, documented. **This is the result the whole design rests on** |
 | 8 | ATECC608B configured, zones locked, PIN counter live | `atecc_config.py verify --behaviour` passes every line BEFORE `lock-data`; `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
-| 9 | Firmware installed, `run_tests.py` green on the Pi | 42 suites pass on the device itself, not just your laptop |
+| 9 | Firmware installed, `run_tests.py` green on the Pi | 43 suites pass on the device itself, not just your laptop |
 | 10 | Provisioned, and the backup written down | `provision.py` re-reads its own seed; you have the words on paper |
 | 10a | Chamber enrolled (optional) | `provision.py enroll-chamber`. The seed re-wraps and still reopens. Back up `chamber.npz` beside the words |
 | 11 | Regtest round trip | `tools/regtest_e2e.py`. Core accepts and mines what the device signed |

@@ -64,6 +64,7 @@ KNOWN_OPS = frozenset({
     "device.wipe",
     "device.reprovision",
     "recipient.allowlist",
+    "account.delegate",
 })
 
 ALWAYS_BLOOD = frozenset({
@@ -72,6 +73,10 @@ ALWAYS_BLOOD = frozenset({
     "device.wipe",
     "device.reprovision",
     "recipient.allowlist",
+    # An EIP-7702 delegation moves nothing, so an amount-based floor never
+    # reaches it. It decides what every later signature from that address
+    # means, which makes it reprovisioning under another name.
+    "account.delegate",
 })
 
 

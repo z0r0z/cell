@@ -47,6 +47,10 @@ SUITES = [
      [sys.executable, "tx.py"]),
     ("ethereum — RLP, EIP-1559 encoding, recovery",
      [sys.executable, "eth.py"]),
+    # The smart-account path: typed data the device builds from what it shows,
+    # and the delegation that decides what every later signature means.
+    ("EIP-712 and EIP-7702 — typed data, delegation, and what they bind",
+     [sys.executable, "test_eip712.py"]),
     ("seed store — AES-256-GCM wrap and tamper detection",
      [sys.executable, "seedstore.py"]),
     ("QR transport — framing and hostile frames",

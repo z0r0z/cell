@@ -13,7 +13,7 @@ samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py`, 42 suites, no hardware required.
+`python firmware/run_tests.py`, 43 suites, no hardware required.
 
 ### The signing stack
 
@@ -60,7 +60,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Speckle physics | Ornstein-Uhlenbeck field, exposure-integrated | Reproduces frozen and liquid limits; exposure, frame interval and grain each swept against the G5/G6 thresholds |
 | Drift margins | 7 disturbance axes, bisected | Tightest budget reported and ranked; a finite tolerance on an invariance axis fails the suite |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
-| A fresh clone | `git clone`, install, `run_tests.py` | 42 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
+| A fresh clone | `git clone`, install, `run_tests.py` | 43 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
 
 ### Multisig, and the registry it depends on
 
@@ -234,6 +234,47 @@ The guarantee that matters is "no derive without a spent attempt", which is
 slot 0's ReqAuth binding; decoding those bits means hard-coding a layout,
 being wrong is silent, and the zone locks permanently. Asking the chip to
 misbehave and watching it refuse tests the property itself.
+
+## The smart-account path
+
+| Claim | Method | Result |
+|---|---|---|
+| **EIP-712, against the EIP's own numbers** | The Ether Mail domain separator and signing digest published in the EIP's own example asset (assets/eip-712/Example.js in the EIPs repository), run through the same functions the device uses | Both reproduce byte for byte. The domain typehash matches the published constant |
+| **The Execute struct** | The ABI encoding written out by hand in the test, beside the module's | Identical. `data` is required empty, so the dynamic member is always `keccak(b"")` |
+| **What the signature binds** | Seven fields perturbed one at a time: chain id, account address, domain name, domain version, destination, amount, account nonce | All seven move the digest, and all eight digests are distinct. A field that did not move it would be a field the signature does not commit to |
+| **EIP-7702 digest** | `keccak(0x05 \|\| rlp([chain_id, address, nonce]))` against RLP built independently in the test | Identical. Chain id, address and nonce each move it |
+| **Refusals** | Calldata, a self-call, a nonce past the account's uint32, a value past uint256, a failed EIP-55 checksum, a short address, a non-string address, chain id 0 on a delegation | Each raises. None is masked or truncated |
+| **Registration** | Twelve hostile registrations: a second account under one label, one address under two labels, an unregistered chain, chain 0, the zero address, a self-implementation, a threshold past the owner count, a repeated owner, a label carrying a control character | All refused |
+| **The screens** | Both operations rendered at 40x20 with the tier footer reserved | Both fit in 11 rows. Destination, account and implementation are shown in full, never abbreviated |
+| **The whole chain, on a soft chip** | `sign_account_execute` and `sign_delegation` driven end to end: confirm, PIN, gate, unwrap, sign, attest | Signs, and the signature recovers to the address the mnemonic derives through an independent BIP-39 to BIP-32 to EIP-55 walk. `v` is 27 or 28, which is the branch the account contract reads as ECDSA. Declining, a failed gate, a wrong PIN and an unregistered account each sign nothing |
+| **Tier policy** | `account.delegate` against `ALWAYS_BLOOD` | Blood at any amount, with no policy able to unlock it |
+
+### Open on this path
+
+- **No on-chain test.** Nothing here has been put to a deployed account. The
+  digests match the specifications and the published vectors; whether a
+  particular deployment accepts the signature is a question only that
+  deployment answers. The equivalent of `regtest_e2e.py` for this path does not
+  exist yet.
+- **`eth_account` as a second opinion is written and skipped.** The suite
+  cross-checks the Execute digest against `eth_account.messages.encode_typed_data`
+  where it is installed. It is not installed here, so that check has not run.
+- **The 7702 initialisation gap.** An authorisation commits to
+  `[chain_id, address, nonce]` and not to the `init` call that runs beside it,
+  so a relayer can delegate to the approved implementation and initialise it
+  with their own owners. This is security consideration 2 of EIP-7702. It
+  cannot be closed by signing the authorisation alone. The device records the
+  expected owners and threshold at registration; nothing checks them against
+  the chain.
+- **The delegated-EOA superuser.** A 7702 delegation leaves the EOA key able to
+  send ordinary transactions and to revoke the delegation. Guards and timelocks
+  on such an account bound a relayer, not the key holder. Recorded by
+  `--delegated-eoa` and stated on the registration screen; there is nothing to
+  verify, only something not to forget.
+- **Governance calls are refused rather than rendered.** Owner changes,
+  threshold changes and cancelling a queued transaction are all calldata. A
+  fixed selector table would make them renderable. Until then the device cannot
+  administer an account it can spend from.
 
 ## Written but unverified
 

@@ -10,12 +10,20 @@ refuses, because it converts a deliberate physical act into a rubber stamp on
 something the owner cannot evaluate. The blood gate proves a human chose to
 sign. That proof is worth nothing if the human could not tell what they chose.
 
-So the operation set is CLOSED. Four spending shapes, all renderable:
+So the operation set is CLOSED. Five spending shapes, all renderable:
 
-    BitcoinSpend   amount, destination, fee, and where the change goes
-    NoteSpend      a confidential note, its amount, the recipient owner
-    DirectTransfer a transfer to a named pubkey on either chain
-    EthereumSpend  an EIP-1559 transfer, with the chain, nonce and fee cap
+    BitcoinSpend        amount, destination, fee, and where the change goes
+    NoteSpend           a confidential note, its amount, the recipient owner
+    DirectTransfer      a transfer to a named pubkey on either chain
+    EthereumSpend       an EIP-1559 transfer, with the chain, nonce and fee cap
+    SmartAccountExecute a transfer out of a registered smart account, as
+                        EIP-712 typed data. No gas, because it does not build
+                        the transaction that carries it
+
+and one that spends nothing and is blood-locked anyway:
+
+    Delegation     an EIP-7702 authorisation. It moves no value and decides
+                   what every later signature from that address means
 
 Everything else is refused, including generic EVM calldata and bare hashes.
 This is a scope decision — see BUILD.md section 5.
@@ -388,6 +396,142 @@ class EthereumSpend:
 
 
 @dataclass(frozen=True)
+class SmartAccountExecute:
+    """A value transfer out of a registered smart account, as EIP-712 typed data.
+
+    EthereumSpend above is the EOA path: the device builds a whole transaction
+    and prices the gas, because an EOA has no other way to move value. This is
+    the shape BUILD.md section 5 actually describes. The account holds the
+    nonce, the relayer pays the gas, and the signature commits to the chain and
+    the deployment through the EIP-712 domain instead of through an RLP field.
+
+    So there is no fee here, and its absence is the point rather than an
+    omission: nothing the owner signs can be spent on gas from this account.
+    `eip712.py` builds the digest from these same fields.
+
+    Calldata is absent by construction. A transfer with calldata is a contract
+    call, and a contract call is not a sentence.
+    """
+
+    amount_wei: int
+    destination: str                # EIP-55 checksummed
+    account_label: str              # as registered, shown so the owner knows
+    account_address: str            # the account being spent from, EIP-55
+    chain_id: int
+    chain_name: str
+    nonce: int                      # the ACCOUNT's nonce, not an EOA's
+    ticker: str = "ETH"
+
+    def op_class(self) -> str:
+        return "tx.send"
+
+    def amount_for_policy(self) -> int:
+        """The amount alone. The account pays no gas out of its own balance.
+
+        EthereumSpend has to add the fee cap because an EOA spends it whatever
+        happens. Here the relayer pays, so adding a fee the account never
+        spends would price this operation into blood tier on a number that is
+        not the account's money.
+        """
+        return self.amount_wei
+
+    def render(self) -> list[str]:
+        if not self.destination:
+            raise UnrenderableOperation("transfer has no destination")
+        if not self.account_address:
+            raise UnrenderableOperation("no account to spend from")
+        if self.amount_wei < 0 or self.nonce < 0:
+            raise UnrenderableOperation("negative amount or nonce")
+        if not self.account_label:
+            raise UnrenderableOperation(
+                "the account has no label, so the owner could not tell which "
+                "of their accounts this spends from")
+        if not self.chain_name:
+            raise UnrenderableOperation(
+                f"chain {self.chain_id} has no name; the owner cannot tell "
+                f"which network this lands on")
+        if not self.ticker:
+            raise UnrenderableOperation(
+                f"chain {self.chain_id} has no native-token ticker")
+        if self.destination.lower() == self.account_address.lower():
+            # execute(target=self) is the account's own governance path, and
+            # every one of those calls travels as calldata. See eip712.py.
+            raise UnrenderableOperation(
+                "refusing a call from the account to itself")
+        lines = [f"SEND FROM {self.account_label.upper()}",
+                 f"  amount   {format_eth(self.amount_wei, self.ticker)}",
+                 "  to"]
+        lines += wrap_full(self.destination, DISPLAY_COLS)
+        lines.append("  account")
+        lines += wrap_full(self.account_address, DISPLAY_COLS)
+        lines.append(f"  chain    {self.chain_name} ({self.chain_id})")
+        lines.append(f"  nonce    {self.nonce}")
+        lines.append("  fee      paid by whoever relays it")
+        return lines
+
+
+@dataclass(frozen=True)
+class Delegation:
+    """An EIP-7702 authorisation: this address runs that code from now on.
+
+    Blood-locked unconditionally, through `account.delegate` in policy.py. A
+    delegation is not a spend and moves nothing, which is exactly why it is
+    dangerous: it decides what every later signature from this address means.
+    It is reprovisioning under another name.
+
+    The screen has to say two things a spend screen never has to. Which code
+    the account will run, in full, because the signature commits to that
+    address and to nothing about what it contains. And that the change persists
+    until it is replaced, because there is no expiry.
+    """
+
+    account_address: str            # the EOA delegating, EIP-55
+    implementation: str             # the code it will run, EIP-55
+    implementation_label: str       # as registered on this device
+    chain_id: int
+    chain_name: str
+    nonce: int                      # the EOA's transaction nonce
+
+    def op_class(self) -> str:
+        return "account.delegate"
+
+    def amount_for_policy(self) -> int:
+        return 0
+
+    def render(self) -> list[str]:
+        if not self.account_address or not self.implementation:
+            raise UnrenderableOperation("delegation is missing an address")
+        if self.nonce < 0:
+            raise UnrenderableOperation("negative nonce")
+        if self.chain_id <= 0:
+            # Zero is legal in EIP-7702 and means every chain at once. The
+            # renderer refuses it as well as eip712.py, because a screen that
+            # says "chain 0" reads like a testnet to almost everybody.
+            raise UnrenderableOperation(
+                "refusing chain id 0: that delegation is valid on every chain")
+        if not self.chain_name:
+            raise UnrenderableOperation(
+                f"chain {self.chain_id} has no name; the owner cannot tell "
+                f"which network this lands on")
+        if not self.implementation_label:
+            raise UnrenderableOperation(
+                "the implementation is not registered on this device, so the "
+                "owner has nothing to check the address against")
+        if self.account_address.lower() == self.implementation.lower():
+            raise UnrenderableOperation("an account cannot delegate to itself")
+        lines = ["DELEGATE THIS ACCOUNT'S CODE",
+                 "  account"]
+        lines += wrap_full(self.account_address, DISPLAY_COLS)
+        lines.append(f"  to       {self.implementation_label}")
+        lines += wrap_full(self.implementation, DISPLAY_COLS)
+        lines.append(f"  chain    {self.chain_name} ({self.chain_id})")
+        lines.append(f"  nonce    {self.nonce}")
+        lines.append("  EFFECT   this address runs that")
+        lines.append("           code until delegated again")
+        return lines
+
+
+@dataclass(frozen=True)
 class PolicyChange:
     """A change to the tier floor. Blood-locked in both directions.
 
@@ -438,7 +582,8 @@ class PolicyChange:
 # Every operation the device will sign. Anything not on this list is refused
 # before it reaches the renderer, so an unknown type cannot reach the key by
 # arriving with a render() method that returns something plausible.
-ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, EthereumSpend, PolicyChange)
+ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, EthereumSpend,
+           SmartAccountExecute, Delegation, PolicyChange)
 
 
 # The closed set, as data rather than as a table inside parse(). policy.py
@@ -450,6 +595,8 @@ OPERATIONS = {
     "note_spend": NoteSpend,
     "transfer": DirectTransfer,
     "eth_spend": EthereumSpend,
+    "account_execute": SmartAccountExecute,
+    "account_delegate": Delegation,
     "policy_change": PolicyChange,
 }
 

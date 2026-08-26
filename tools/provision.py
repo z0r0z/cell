@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "firmware"))
 
 import bip39                                                    # noqa: E402
 import duress                                                   # noqa: E402
+import eip712                                                   # noqa: E402
 import eth                                                      # noqa: E402
 import seedstore                                                # noqa: E402
 import signer                                                   # noqa: E402
@@ -307,6 +308,16 @@ def _save(out: Path, prov: wallet.Provisioning, network: str) -> None:
                      for m in prov.multisig],
         "chains": [{"chain_id": cid, "name": nm, "ticker": tk}
                    for cid, (nm, tk) in sorted(prov.chains.items())],
+        "smart_accounts": [{"label": a.label, "address": a.address,
+                            "chain_id": a.chain_id,
+                            "implementation": a.implementation,
+                            "threshold": a.threshold,
+                            "owners": list(a.owners),
+                            "domain_name": a.domain_name,
+                            "domain_version": a.domain_version,
+                            "delegated_eoa": a.delegated_eoa}
+                           for a in sorted(prov.smart_accounts,
+                                           key=lambda x: x.label)],
     }, indent=2) + "\n")
 
 
@@ -356,6 +367,18 @@ def _load(d: Path) -> wallet.Provisioning:
                                         or "00000000"),
         decoy_accounts=[wallet.Account(**a)
                         for a in data.get("decoy_accounts", [])])
+    for a in data.get("smart_accounts", []):
+        acct = eip712.SmartAccount(
+            label=a["label"], address=a["address"], chain_id=a["chain_id"],
+            implementation=a["implementation"],
+            threshold=a.get("threshold", 1),
+            owners=tuple(a.get("owners", ())),
+            domain_name=a.get("domain_name", "Multisig"),
+            domain_version=a.get("domain_version", "1"),
+            delegated_eoa=a.get("delegated_eoa", False))
+        prov.smart_accounts.append(acct)
+        eip712.register_account(acct)
+
     for m in data.get("multisig", []):
         prov.multisig.append(wallet.Multisig(
             label=m["label"], threshold=m["threshold"],
@@ -458,6 +481,62 @@ def cmd_chain(args) -> int:
     print(f"  chain id {args.id}")
     print("\nRead that back. If the name or the ticker is wrong, it is wrong on")
     print("every transaction you will ever approve on this chain.")
+    return 0
+
+
+def cmd_smart_account(args) -> int:
+    """Register a smart account the device may authorise spends from.
+
+    Same argument as `chain` and `multisig`. An EIP-712 signature is bound to
+    a `verifyingContract`, and a device that takes that address from the
+    payload is a device whose owner cannot tell which account they are
+    spending from. So the address is recorded here, out of band, once.
+
+    The implementation address is recorded for a second reason. An EIP-7702
+    delegation commits to an address and to nothing about what that address
+    contains, so the only check available is one made in advance, against a
+    deployment you looked up yourself.
+
+    WHAT THIS DOES NOT PROVE. Nothing here reads the chain. The device cannot
+    tell you that the account at this address is initialised with the owners
+    below, or that the implementation contains the code you think it does.
+    Check both against a block explorer before you fund anything, and check
+    them again after a delegation lands: a 7702 authorisation does not commit
+    to the initialisation call that runs beside it.
+    """
+    d = Path(args.dir)
+    prov = load(d)
+    owners = tuple(o.strip() for o in (args.owners or "").split(",") if o.strip())
+    acct = eip712.SmartAccount(
+        label=args.label, address=args.address, chain_id=args.chain_id,
+        implementation=args.implementation, threshold=args.threshold,
+        owners=owners, domain_name=args.domain_name,
+        domain_version=args.domain_version, delegated_eoa=args.delegated_eoa)
+    try:
+        eip712.register_account(acct)
+    except eip712.BadTypedData as e:
+        print(f"Refused: {e}")
+        return 1
+    prov.smart_accounts = [a for a in prov.smart_accounts
+                           if a.label != acct.label] + [acct]
+
+    network = json.loads((d / ACCOUNTS).read_text())["network"]
+    _save(d, prov, network)
+    name = eth.CHAINS[acct.chain_id][0]
+    print(f"Registered {acct.label!r} at {acct.address} on {name}.")
+    print(f"  implementation  {acct.implementation}")
+    print(f"  quorum          {acct.threshold} of {len(owners) or 'unrecorded'}")
+    if acct.delegated_eoa:
+        print("\n  This is recorded as an EIP-7702 delegated EOA. The key behind")
+        print("  that address stays a superuser: it can send ordinary")
+        print("  transactions and revoke the delegation. A timelock on this")
+        print("  account bounds a relayer. It does not bound the key holder.")
+    print("\nConfirmation screens for this account will read:")
+    print(f"  SEND FROM {acct.label.upper()}")
+    print(f"  account  {acct.address}")
+    print(f"  chain    {name} ({acct.chain_id})")
+    print("\nRead the account address back against a block explorer. Nothing")
+    print("downstream of this command can catch an address that is wrong here.")
     return 0
 
 
@@ -682,6 +761,30 @@ def main() -> int:
     p.add_argument("--ticker", required=True,
                    help="native token symbol, e.g. ETH or POL")
     p.set_defaults(fn=cmd_chain)
+
+    p = sub.add_parser("smart-account",
+                       help="register a smart account to authorise spends from")
+    p.add_argument("--dir", default="/boot/cell")
+    p.add_argument("--label", required=True,
+                   help='shown as "SEND FROM <LABEL>", 1 to 16 characters')
+    p.add_argument("--address", required=True,
+                   help="the account itself, EIP-55 checksummed")
+    p.add_argument("--chain-id", type=int, required=True,
+                   help="must already be registered with `chain`")
+    p.add_argument("--implementation", required=True,
+                   help="the contract the account runs, EIP-55 checksummed")
+    p.add_argument("--threshold", type=int, default=1,
+                   help="signatures the account requires")
+    p.add_argument("--owners", default="",
+                   help="comma-separated owner addresses, for the record")
+    p.add_argument("--domain-name", default="Multisig",
+                   help="EIP-712 domain name the account declares")
+    p.add_argument("--domain-version", default="1",
+                   help="EIP-712 domain version the account declares")
+    p.add_argument("--delegated-eoa", action="store_true",
+                   help="this address is an EOA delegated under EIP-7702, so "
+                        "its key remains a superuser")
+    p.set_defaults(fn=cmd_smart_account)
 
     args = ap.parse_args()
     if getattr(args, "pin", None) is not None and not args.pin.isdigit():

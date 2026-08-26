@@ -33,9 +33,11 @@ from dataclasses import dataclass, field
 import bip32
 import bip39
 import duress
+import eip712
 import eth
 import ops
 import psbt as psbtmod
+import secp256k1 as ec
 import seedstore
 import signer
 from bip32 import ExtendedKey
@@ -188,6 +190,12 @@ class Provisioning:
     # EVM chains the owner registered, {chain_id: (name, ticker)}. Applied to
     # eth.CHAINS when the record is loaded; see tools/provision.py chain.
     chains: dict[int, tuple[str, str]] = field(default_factory=dict)
+    # Smart accounts the owner registered, and the implementations they run.
+    # Applied to eip712.ACCOUNTS when the record is loaded; see
+    # tools/provision.py smart-account. Recorded rather than accepted from a
+    # payload because an EIP-712 signature is bound to a verifyingContract,
+    # and an attacker who picks that address picks which account is spent from.
+    smart_accounts: list["eip712.SmartAccount"] = field(default_factory=list)
 
     def descriptors(self, network: str = "mainnet") -> list:
         return [m.descriptor() for m in self.multisig if m.network == network]
@@ -552,6 +560,150 @@ class SignedEth:
     attestation: bytes
     tier: Tier
     display: list[str]
+
+
+@dataclass
+class SignedTypedData:
+    """One EIP-712 or EIP-7702 signature, and what it was made over.
+
+    There is no raw transaction here, because the device did not build one.
+    What the coordinator gets is a 65-byte signature and the digest it covers,
+    and whoever relays it pays for the gas.
+    """
+
+    signature: bytes                # r || s || v, v = 27 + y_parity
+    signer_address: str
+    digest: str                     # 0x-hex, so a coordinator can check it
+    attestation: bytes
+    tier: Tier
+    display: list[str]
+
+
+def _sign_typed(op, digest: bytes, prov: Provisioning, se: SecureElement,
+                pol: Policy, fw_hash: bytes, cal_hash: bytes,
+                confirm, run_gate, pin: str, index: int = 0,
+                requested_tier: Tier | None = None,
+                read_chamber=None) -> SignedTypedData:
+    """The unlock chain over a 32-byte digest this device built itself.
+
+    Shared by the smart-account spend and the delegation, because from here
+    down they are the same operation: one digest, one key, one recovery check.
+    What differs is upstream, in what was rendered and what policy priced it
+    at, and that has already happened by the time this runs.
+    """
+    from addresses import eth_address
+    if len(digest) != 32:
+        raise WalletError("a typed-data digest is 32 bytes")
+    if not any(_account_in(a, "eth", "ethereum")
+               for a in (prov.accounts, prov.decoy_accounts)):
+        raise WalletError(
+            "this device has no eth account on ethereum. Provision one before "
+            "asking it to sign for that chain.")
+    out: dict = {}
+
+    def sign_digest(seed: bytearray, bound: bytes) -> bytes:
+        if bound != digest:
+            raise WalletError("the digest changed between display and signing")
+        root = _root_from(seed)
+        accounts, _fp = _wallet_of_seed(prov, root)
+        if accounts is None:
+            raise WalletError(
+                "the unwrapped seed matches neither wallet recorded on this "
+                "device; refusing to sign with an unexpected key")
+        account = _account_in(accounts, "eth", "ethereum")
+        if account is None:
+            raise WalletError(
+                "the wallet that opened has no eth account recorded on this "
+                "device; refusing to sign for an account it cannot check")
+        node = root.derive(eth_path(0, index))
+        if node.pubkey != account.key().derive([0, index]).pubkey:
+            raise WalletError(
+                "the unwrapped seed derives a different signing address than "
+                "the account recorded for it; refusing to sign")
+        assert node.seckey is not None
+        r, s_, rec = ec.ecdsa_sign(digest, node.seckey, grind_low_r=False)
+        y = rec & 1
+        # Same check sign_eth makes, for the same reason: the EVM verifies by
+        # recovery, so a wrong parity byte yields a signature that recovers to
+        # an address nobody controls. Here it would be an owner the account
+        # does not have, and the account would simply refuse -- after the
+        # owner had already bled.
+        if ec.ecdsa_recover(digest, r, s_, y) != node.pubkey:
+            raise WalletError("signature does not recover to the signing key")
+        out["expect"] = eth_address(node.pubkey)
+        # v is 27 + y_parity. The account contract reads v < 27 as one of its
+        # other approval types, so an offset of zero here does not fail as a
+        # bad signature; it is read as a different kind of approval entirely.
+        out["sig"] = (r.to_bytes(32, "big") + s_.to_bytes(32, "big")
+                      + bytes([27 + y]))
+        out["recovered"] = eth_address(ec.ecdsa_recover(digest, r, s_, y))
+        return r.to_bytes(32, "big") + s_.to_bytes(32, "big") + bytes([y])
+
+    def unwrap_seed(key: bytes) -> bytearray:
+        return duress.unwrap_any(prov.seed_pair, key)
+
+    sg = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
+                       confirm=confirm, run_gate=run_gate,
+                       unwrap_seed=unwrap_seed, sign_digest=sign_digest,
+                       read_chamber=read_chamber)
+    result = sg.authorize_and_sign(
+        signer.SignRequest(operation=op, sighash=digest,
+                           requested_tier=requested_tier), pin)
+    if out["recovered"] != out["expect"]:
+        raise WalletError("signature recovers to an unexpected address")
+    return SignedTypedData(signature=out["sig"], signer_address=out["expect"],
+                           digest="0x" + digest.hex(),
+                           attestation=result.attestation.pack(),
+                           tier=result.tier, display=result.display)
+
+
+def sign_account_execute(label: str, destination: str, amount_wei: int,
+                         nonce: int, prov: Provisioning, se: SecureElement,
+                         pol: Policy, fw_hash: bytes, cal_hash: bytes,
+                         confirm, run_gate, pin: str, index: int = 0,
+                         requested_tier: Tier | None = None,
+                         read_chamber=None) -> SignedTypedData:
+    """Authorise a value transfer out of a registered smart account.
+
+    The account is looked up by label, so the address the domain separator
+    commits to is one this device was told about out of band. A payload that
+    carries its own `verifyingContract` is a payload that chooses which account
+    the owner is spending from.
+    """
+    acct = eip712.account(label)
+    op = ops.SmartAccountExecute(
+        amount_wei=amount_wei, destination=destination,
+        account_label=acct.label, account_address=acct.address,
+        chain_id=acct.chain_id, chain_name=eth.CHAINS[acct.chain_id][0],
+        ticker=eth.CHAINS[acct.chain_id][1], nonce=nonce)
+    digest = acct.spend_digest(destination, amount_wei, nonce)
+    return _sign_typed(op, digest, prov, se, pol, fw_hash, cal_hash,
+                       confirm, run_gate, pin, index, requested_tier,
+                       read_chamber)
+
+
+def sign_delegation(label: str, account_address: str, nonce: int,
+                    prov: Provisioning, se: SecureElement, pol: Policy,
+                    fw_hash: bytes, cal_hash: bytes, confirm, run_gate,
+                    pin: str, index: int = 0,
+                    requested_tier: Tier | None = None,
+                    read_chamber=None) -> SignedTypedData:
+    """Authorise an EIP-7702 delegation to a registered implementation.
+
+    Blood-locked through `account.delegate`, unconditionally. The
+    implementation is looked up by label for the same reason the account is:
+    the authorisation commits to an address and to nothing whatever about what
+    that address contains, so the only check available is one made in advance.
+    """
+    acct = eip712.account(label)
+    op = ops.Delegation(
+        account_address=account_address, implementation=acct.implementation,
+        implementation_label=acct.label, chain_id=acct.chain_id,
+        chain_name=eth.CHAINS[acct.chain_id][0], nonce=nonce)
+    digest = eip712.delegation_digest(acct.chain_id, acct.implementation, nonce)
+    return _sign_typed(op, digest, prov, se, pol, fw_hash, cal_hash,
+                       confirm, run_gate, pin, index, requested_tier,
+                       read_chamber)
 
 
 def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,

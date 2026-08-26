@@ -18,7 +18,7 @@ Orbit it, and export OBJ or glTF straight from the viewer. `diagrams/turntable.m
 
 ## Status
 
-The design is complete and the firmware self-tests on every commit: 42 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
+The design is complete and the firmware self-tests on every commit: 43 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
 
 Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written but unverified against hardware, `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half. **There's a bounty for building one and signing with it, see `BOUNTY.md`.**
 
@@ -156,6 +156,7 @@ The wallet half is implemented here rather than delegated, because the gate has 
 | `psbt.py` / `tx.py` | BIP-174 and BIP-370 parsing, and all three sighash algorithms |
 | `addresses.py` | bech32 and bech32m, every script type, EIP-55 |
 | `eth.py` | RLP and EIP-1559, built on the device from fields it displays |
+| `eip712.py` | EIP-712 typed data for smart accounts, and the EIP-7702 delegation |
 | `seedstore.py` | The seed at rest |
 | `qr.py` | The airgap: animated frames, and reassembly that refuses substitution |
 | `display.py` / `buttons.py` / `camera.py` | The screen, the four buttons, and the only way data gets in |
@@ -164,6 +165,10 @@ The wallet half is implemented here rather than delegated, because the gate has 
 Every one of them is checked against the vectors published in the BIPs, RFC 6979 and the EIPs, not against its own output. The signatures are also compared byte for byte with `embit` and `eth-account` across every script type and six chain ids, and then handed to independent code that has to be *satisfied* rather than merely agree: `python-bitcointx`'s script interpreter runs p2pkh, bare multisig, p2wpkh, p2sh-p2wpkh and p2wsh under the flags a node applies, and libsecp256k1. The implementation Bitcoin Core signs with, checks the taproot key and signature. None of those packages is a dependency; `firmware/test_consensus.py` skips without them.
 
 Multisig has to be registered before it can be signed. Without the co-signers on file, "is this output mine?" can only be answered as "does it contain a key of mine?", and an attacker who controls the coordinator can build a script holding one key of yours and the rest theirs. It hashes correctly, the wallet calls it change, and the balance moves somewhere you cannot spend alone. With the quorum registered the device rebuilds the exact script your co-signers produce and compares it byte for byte. `tools/provision.py multisig` does the registering.
+
+Ethereum can also be signed the way the deployment model actually describes. A transfer out of a registered smart account is an EIP-712 `Execute` message: the account holds the nonce, whoever relays it pays the gas, and the device signs three fields and a domain. `chainId` and `verifyingContract` live in the domain separator, so one signature is pinned to one chain and one deployment, which is more than an EOA signature pins. The account is registered in advance for the same reason a quorum is. Calldata stays refused, so the account's own governance calls are refused with it.
+
+EIP-7702 delegation is supported and blood-locked in every configuration. It moves no value, and it decides what every later signature from that address means. Note what it costs: a delegated EOA keeps its key as a superuser, so a timelock on such an account bounds a relayer and not the key holder. `BUILD.md` §5 draws the line between that and a factory-deployed account.
 
 And `tools/regtest_e2e.py` asks the only question that settles anything on its own: Bitcoin Core funds an address this firmware derived, the firmware signs a PSBT spending it, and Core finalises, accepts and mines the result, p2wpkh, p2sh-p2wpkh, p2pkh, p2tr and p2wsh 2-of-3, on a private regtest chain. It found a real defect the first time it ran: the attestation was written into the PSBT with a malformed proprietary key, and Core rejected the whole document rather than skipping the field.
 
@@ -221,6 +226,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/psbt.py` | BIP-174: what the device recomputes rather than trusts |
 | `firmware/tx.py` | Transactions and all three sighash algorithms |
 | `firmware/eth.py` | RLP and EIP-1559, built from displayed fields |
+| `firmware/eip712.py` | The smart-account path: typed data, and what a delegation costs |
 | `firmware/secp256k1.py` | The curve both chains sign on |
 | `firmware/hashes.py` | RIPEMD-160 and Keccak-256, because the standard library will not |
 | `firmware/bip32.py` / `bip39.py` | HD derivation and the mnemonic |
