@@ -75,7 +75,25 @@ class TouchThresholds:
 
     # T5 a real heart is not a metronome. A mechanical pulsator has near-zero
     # beat-to-beat variability; chaos means the beat detection is unreliable.
-    rmssd_min_ms: float = 5.0
+    #
+    # THE FLOOR IS 15, NOT 5, and the reason is worth writing down. The
+    # separation this gate rests on is stated in the README as "respiratory
+    # sinus arrhythmia puts a resting adult in the tens of milliseconds, where
+    # a mechanical pulsator produces single digits" -- and a floor of 5 admits
+    # single digits, which is the very band it means to exclude.
+    #
+    # Measured across the panel once genuine sessions were made to vary in
+    # rate: a perfectly regular pulsator reads 0.8-7.0 ms depending on how its
+    # period lands on the 50 Hz sampling grid, peaking near 69 bpm where the
+    # beat period is ~43.5 samples and peak positions alias. Genuine sessions
+    # read 43-88 ms. 15 clears the aliasing band with margin and sits far
+    # under any real person. At 5, a metronome at 69 bpm passed this gate.
+    #
+    # Synthetic, so treat it as a corrected starting point rather than a bench
+    # measurement -- it is in TUNABLE and calibration sets it from your own
+    # sessions. What is NOT synthetic is that 5 contradicted the design's own
+    # description of what it separates.
+    rmssd_min_ms: float = 15.0
     rmssd_max_ms: float = 250.0
 
     # T6 the absorber is haemoglobin, not dye. R is the ratio-of-ratios; the
@@ -325,7 +343,15 @@ def _synth(kind: str, seed: int = 0, th: TouchThresholds = TouchThresholds()):
     if kind == "static_object":                       # wood, a printed photo
         return rng.normal(0.35, 0.0015, n), rng.normal(0.35, 0.0015, n), bore
 
-    bpm = {"too_slow": 26, "too_fast": 230}.get(kind, 68)
+    # Genuine sessions VARY, and the panel has to show it. A synthetic person
+    # who is identical every time fits an accept window with no width -- eight
+    # sessions all at 68 bpm give bpm_min = bpm_max = 68, and calibrate.py
+    # then writes a device that rejects its owner at any other rate while
+    # reporting FRR 0%, because those are the sessions it was fitted to. Rate,
+    # perfusion depth and the haemoglobin ratio all move between sessions in a
+    # real person; they move here too. calibrate.window_report is what fails
+    # if this ever collapses again.
+    bpm = {"too_slow": 26, "too_fast": 230}.get(kind, 62 + (seed % 5) * 7)
     hz = bpm / 60.0
     # Respiratory sinus arrhythmia — heart rate rises and falls with breathing
     # at ~0.25 Hz. This is the dominant component of short-term HRV in a healthy
@@ -338,11 +364,15 @@ def _synth(kind: str, seed: int = 0, th: TouchThresholds = TouchThresholds()):
     phase = np.cumsum(hz_inst / th.fs)
     beat = (np.sin(2 * np.pi * phase) + 0.35 * np.sin(4 * np.pi * phase))
 
-    pi_red = 0.020
+    pi_red = 0.016 + (seed % 4) * 0.003          # perfusion depth, 1.6-2.5%
     # ratio-of-ratios: living tissue ~0.6; red dye absorbs almost nothing in IR
-    pi_ir = pi_red / (3.20 if kind == "dye_fake" else 0.62)
+    pi_ir = pi_red / (3.20 if kind == "dye_fake"
+                      else 0.55 + (seed % 3) * 0.05)
 
-    dc = 0.34
+    # The DC level moves between people and between sessions -- skin tone,
+    # contact pressure, LED aging. Held constant it fits a contact window with
+    # no width, which rejects any finger but the one that was calibrated.
+    dc = 0.28 + (seed % 4) * 0.04
     red = dc * (1 - pi_red * beat) + rng.normal(0, 8e-5, n)
     ir = dc * (1 - pi_ir * beat) + rng.normal(0, 8e-5, n)
     if kind == "motion":

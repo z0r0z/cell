@@ -384,6 +384,66 @@ def _choose(genuine: np.ndarray, spoof: np.ndarray, sense: str,
     return thr, rejects, margin
 
 
+# A fitted accept window narrower than this fraction of the shipped one is
+# reported. Not a hard limit -- tightening IS what calibration is for -- but a
+# window a fifth the width of the physics-derived default came from a panel
+# that never saw the range the device will meet.
+NARROW_WINDOW_FRACTION = 0.20
+
+
+def window_report(chosen: dict, tunable: dict, shipped) -> tuple[list[str], list[str]]:
+    """Check every min/max pair the sweep fitted. Returns (fatal, warnings).
+
+    A threshold pair on one feature is an ACCEPT WINDOW, and the sweep sets
+    each end independently from the genuine quantiles. Nothing made it look at
+    the width, so a panel captured under one condition collapses the window
+    onto that condition: eight resting sessions at the same heart rate fit
+    bpm_min = bpm_max = 68, and the device then rejects its owner at any other
+    rate. In-sample FRR still reads 0%, because those are the sessions it was
+    fitted to -- which is exactly why the report cannot catch this and an
+    explicit check has to.
+
+    A zero-width window is fatal rather than advisory: it accepts only the
+    values already observed, so it is not a tuning choice, it is a tier that
+    has stopped working.
+    """
+    pairs: dict[str, dict[str, str]] = {}
+    for name, (feat, sense) in tunable.items():
+        pairs.setdefault(feat, {})[sense] = name
+    fatal, warn = [], []
+    for feat, ends in sorted(pairs.items()):
+        if set(ends) != {"min", "max"}:
+            continue                     # one-sided; no window to collapse
+        lo_name, hi_name = ends["min"], ends["max"]
+        lo, hi = chosen[lo_name], chosen[hi_name]
+        width = hi - lo
+        ship = getattr(shipped, hi_name) - getattr(shipped, lo_name)
+        if width <= 0:
+            fatal.append(
+                f"{feat}: the fitted window is [{lo:.4g}, {hi:.4g}] -- width "
+                f"{width:.4g}. It accepts only what the panel already showed, "
+                f"so every future capture is rejected. Capture genuine "
+                f"sessions across the range you will actually use.")
+        elif ship > 0 and width < ship * NARROW_WINDOW_FRACTION:
+            warn.append(
+                f"{feat}: fitted [{lo:.4g}, {hi:.4g}] is {width/ship*100:.0f}% "
+                f"of the shipped window's width. If your panel was captured "
+                f"under one condition, this will reject you under another.")
+    return fatal, warn
+
+
+def _apply_window_report(chosen: dict, tunable: dict, shipped) -> None:
+    fatal, warn = window_report(chosen, tunable, shipped)
+    for w in warn:
+        print(f"\nNARROW WINDOW  {w}")
+    if fatal:
+        print("\nREFUSING TO WRITE — a fitted accept window has collapsed:\n")
+        for f in fatal:
+            print(f"  {f}")
+        print("\nNothing was written; the device keeps the thresholds it has.")
+        sys.exit(1)
+
+
 def cmd_roc(args):
     data = load_all()
     if "genuine" not in data:
@@ -435,6 +495,8 @@ def cmd_roc(args):
         m = "inf" if margin == float("inf") else f"{margin:.3f}"
         print(f"  {name:<22}{sense:<6}{shipped:>10.3f}{val:>11.3f}"
               f"{rej:>8}/{n_sp:<3}{m:>10}")
+
+    _apply_window_report(chosen, TUNABLE, Thresholds())
 
     th = replace(Thresholds(), **chosen)
     acc = {lab: [evaluate(c, th).accepted for c in caps] for lab, caps in data.items()}
@@ -643,6 +705,8 @@ def cmd_touch_roc(args):
         m = "inf" if margin == float("inf") else f"{margin:.3f}"
         print(f"  {name:<18}{sense:<6}{shipped:>10.3f}{val:>12.3f}"
               f"{rej:>8}/{n_sp:<3}{m:>10}")
+
+    _apply_window_report(chosen, tg.TUNABLE, tg.TouchThresholds())
 
     th = replace(tg.TouchThresholds(), **chosen)
     acc = {lab: [tg.evaluate(c["red"], c["ir"], c["bore"], th, fs=c["fs"]).accepted
@@ -869,6 +933,32 @@ def cmd_selftest(args):
         ok = False
         print(f"UNCOVERED GATES: {', '.join(g.strip() for g in uncovered)} — no "
               f"panel class rejects there, so nothing tests them.")
+
+    # The guard that stops a sweep writing an accept window with no width.
+    # A collapsed window rejects every future capture while the report still
+    # says FRR 0%, because the report only ever sees the sessions it was
+    # fitted to -- so nothing downstream can catch it and this has to.
+    import touch_gate as _tg
+    print()
+    window_cases = [
+        ("a collapsed window is fatal",
+         {"bpm_min": 68.0, "bpm_max": 68.0}, True, False),
+        ("an inverted window is fatal",
+         {"bpm_min": 90.0, "bpm_max": 60.0}, True, False),
+        ("a narrow but usable window warns",
+         {"bpm_min": 60.0, "bpm_max": 74.0}, False, True),
+        ("a healthy window is silent",
+         {"bpm_min": 50.0, "bpm_max": 170.0}, False, False),
+    ]
+    base = {n: getattr(_tg.TouchThresholds(), n) for n in _tg.TUNABLE}
+    for label, override, want_fatal, want_warn in window_cases:
+        fatal, warn = window_report({**base, **override}, _tg.TUNABLE,
+                                    _tg.TouchThresholds())
+        got_f = any("bpm" in m for m in fatal)
+        got_w = any("bpm" in m for m in warn)
+        good = got_f == want_fatal and got_w == want_warn
+        ok &= good
+        print(f"  {label:<48}{'PASS' if good else 'FAIL'}")
     else:
         print(f"Gate coverage: all 6 gates exercised by at least one class.")
 
