@@ -247,6 +247,128 @@ def _pin_table(build_md: str) -> dict[int, str]:
     return out
 
 
+def _docs_references_resolve(root) -> bool:
+    """Every file, section and command the documentation names must exist.
+
+    VALIDATION.md has claimed this for a while and nothing enforced it. Docs
+    rot in a way code does not: a renamed script or a resectioned BUILD.md
+    leaves a sentence that still reads correctly and sends somebody to a file
+    that is not there. For a first builder following a runbook, that is the
+    difference between a weekend and an evening.
+
+    Three kinds of reference, all mechanical:
+      `some/file.py`          must exist somewhere in the tracked tree
+      BUILD.md section N      must be a section BUILD.md actually has
+      python3 tool.py sub --f must name a script, a subcommand and flags the
+                              script's own argparse offers
+    """
+    import re
+    import subprocess
+
+    ok = True
+    docs = ["README.md", "BUILD.md", "VALIDATION.md", "PRINTING.md",
+            "CONTRIBUTING.md", "BOUNTY.md", "SAFETY.md", "models/README.md"]
+    tracked = set(subprocess.run(["git", "ls-files"], cwd=root,
+                                 capture_output=True, text=True).stdout.split())
+    if not tracked:                     # not a git checkout; nothing to check
+        return True
+    by_base: dict[str, list[str]] = {}
+    for f in tracked:
+        by_base.setdefault(f.rsplit("/", 1)[-1], []).append(f)
+
+    # Written by the device or by calibration, so correctly absent from a
+    # clean tree. Naming them is right; shipping them would not be.
+    runtime = {"accounts.json", "chamber.npz", "thresholds.json",
+               "touch_thresholds.json", "seed.blob", "SOFT-SE-INSECURE.json"}
+
+    file_re = re.compile(
+        r"`([A-Za-z0-9_./-]+\.(?:py|md|csv|json|stl|obj|svg|sol|service|txt|"
+        r"yml|npz|html|js|gif|mp4|png))`")
+    for d in docs:
+        text = (root / d).read_text()
+        for ref in sorted(set(file_re.findall(text))):
+            base = ref.rsplit("/", 1)[-1]
+            if base in runtime or ref in tracked:
+                continue
+            hits = by_base.get(base, [])
+            if not hits:
+                print(f"    {d} names {ref}, which does not exist")
+                ok = False
+            elif "/" in ref and not any(h.endswith(ref) for h in hits):
+                print(f"    {d} names {ref}, which exists only as {hits[0]}")
+                ok = False
+
+    sections = {int(m.group(1)) for m in
+                (re.match(r"^##\s+(\d+)\.", ln)
+                 for ln in (root / "BUILD.md").read_text().splitlines())
+                if m}
+    # The section sign spelled as a character, not as \u00a7 -- this is a raw
+    # string, so the escape would be six literal characters and the whole
+    # alternative would never match. It didn't, and only the "section N"
+    # spelling was ever checked.
+    sec_re = re.compile("BUILD\\.md[, ]*(?:\u00a7|section\\s+)(\\d+)", re.I)
+    for f in subprocess.run(["git", "ls-files", "*.py", "*.md", "*.sol", "*.js"],
+                            cwd=root, capture_output=True,
+                            text=True).stdout.split():
+        for n in set(sec_re.findall((root / f).read_text(errors="ignore"))):
+            if int(n) not in sections:
+                print(f"    {f} points at BUILD.md section {n}, which does not exist")
+                ok = False
+
+    cmd_re = re.compile(r"^(?:python3?|py)\s+(\S+\.py)(.*)$")
+    helps: dict[str, "str | None"] = {}
+    for d in docs:
+        for ln in (root / d).read_text().splitlines():
+            line = ln.strip().lstrip("$ ").strip().split("#")[0].strip()
+            m = cmd_re.match(line)
+            if not m:
+                continue
+            script, rest = m.group(1), m.group(2).strip()
+            hit = next((c for c in (script, f"firmware/{script}",
+                                    f"tools/{script}", f"contracts/test/{script}")
+                        if c in tracked), None)
+            if hit is None:
+                print(f"    {d} runs {script}, which does not exist")
+                ok = False
+                continue
+            toks = rest.split()
+            sub = toks[0] if toks and not toks[0].startswith("-") else None
+            flags = [t for t in toks if t.startswith("--")]
+            if not sub and not flags:
+                continue
+            if hit not in helps:
+                r = subprocess.run([sys.executable, hit, "--help"], cwd=root,
+                                   capture_output=True, text=True)
+                # Only an argparse script can be introspected this way. The
+                # self-testing modules have no parser and answer --help by
+                # running their self-test, whose output says nothing about
+                # flags -- so those fall back to reading the source.
+                helps[hit] = r.stdout if r.stdout.lstrip().startswith("usage:") else None
+            doc = helps[hit]
+            src = (root / hit).read_text()
+            if doc is None:
+                for f_ in flags:
+                    if f_ not in src:
+                        print(f"    {d} passes {f_} to {script}, which does "
+                              f"not mention it")
+                        ok = False
+                continue
+            if sub and sub not in doc:
+                print(f"    {d} runs `{script} {sub}`, which is not a subcommand")
+                ok = False
+            for f_ in flags:
+                if f_ in doc:
+                    continue
+                subhelp = subprocess.run(
+                    [sys.executable, hit] + ([sub] if sub else []) + ["--help"],
+                    cwd=root, capture_output=True, text=True).stdout
+                if f_ not in subhelp:
+                    print(f"    {d} passes {f_} to `{script} {sub or ''}`.strip(), "
+                          f"which does not offer it")
+                    ok = False
+    return ok
+
+
 def docs_match_the_code() -> bool:
     """Counts quoted in the docs must equal counts the code actually has.
 
@@ -376,6 +498,9 @@ def docs_match_the_code() -> bool:
     import se_atecc                                          # noqa: E402
     want("BUILD i2c address of the secure element", build,
          f"{se_atecc.I2C_ADDRESS:#04x}".replace("0x", "0x"))
+
+    if not _docs_references_resolve(root):
+        ok = False
 
     n_suites = len(SUITES) + len(IN_PROCESS)
     want("README suite count", readme, f"{n_suites} suites")
