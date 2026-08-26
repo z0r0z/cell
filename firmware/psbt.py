@@ -909,13 +909,21 @@ class PSBT:
         commitment written as the absence of a flag. Anything else is a
         refusal rather than a downgrade.
 
-        Taproot spells ALL two ways and they are NOT interchangeable: the flag
-        byte goes into the digest, and BIP-341 says a signature under anything
-        other than DEFAULT carries that byte after its 64. So the value chosen
-        here has to reach BOTH the digest and the encoding, which is why it is
-        computed once and returned rather than defaulted at each use. Signing
-        the DEFAULT digest for an input that declared 0x01 produces a
-        signature that verifies against nothing a node will ever check.
+        Taproot spells ALL two ways. The flag byte goes into the digest, and
+        BIP-341 gives a signature under anything other than DEFAULT a 65th
+        byte carrying it. So the value chosen here has to reach BOTH the
+        digest and the encoding, which is why it is computed once and returned
+        rather than defaulted at each use.
+
+        BE PRECISE ABOUT WHAT WENT WRONG BEFORE, because it is milder than it
+        sounds and overstating it would misdirect the next reader. Signing the
+        DEFAULT digest for an input that declared 0x01 did NOT produce a dead
+        signature: the two spellings commit to the same transaction data, and
+        a 64-byte witness is validated as DEFAULT, so Bitcoin Core mined it
+        quite happily -- measured, on regtest, both ways. What it did was
+        silently normalise a declared 0x01 to 0x00 and hand back 64 bytes
+        where BIP-341 and BIP-371 want 65. The cost is conformance and any
+        coordinator that checks what it asked for, not a lost signature.
         """
         declared = _get(self.inputs[i], IN_SIGHASH_TYPE)
         if declared is None:

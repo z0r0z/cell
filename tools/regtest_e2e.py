@@ -93,8 +93,15 @@ def gate_ok(_tier):
 
 
 def build_psbt_for(utxo: dict, node, script_type: str, dest: str,
-                   send: int, change: int, ms=None, members=None) -> bytes:
-    """A PSBT spending one real regtest UTXO, as a coordinator would build it."""
+                   send: int, change: int, ms=None, members=None,
+                   sighash_type: "int | None" = None) -> bytes:
+    """A PSBT spending one real regtest UTXO, as a coordinator would build it.
+
+    `sighash_type` writes PSBT_IN_SIGHASH_TYPE. It exists for taproot, which
+    spells SIGHASH_ALL two ways: absent (SIGHASH_DEFAULT, 0x00) and an explicit
+    0x01. They are different digests and the second wants a 65-byte signature,
+    so only a node can settle whether we got it right.
+    """
     txid = bytes.fromhex(utxo["txid"])[::-1]
     vin = TxIn(txid, utxo["vout"])
     vout = [TxOut(send, addresses.address_to_script(dest, NETWORK))]
@@ -113,6 +120,8 @@ def build_psbt_for(utxo: dict, node, script_type: str, dest: str,
         m[bytes([psbtmod.IN_REDEEM_SCRIPT])] = node["redeem"]
     if node.get("witness_script"):
         m[bytes([psbtmod.IN_WITNESS_SCRIPT])] = node["witness_script"]
+    if sighash_type is not None:
+        m[bytes([psbtmod.IN_SIGHASH_TYPE])] = sighash_type.to_bytes(4, "little")
 
     for fp, path, pk in node["origins"]:
         origin = fp + b"".join(i.to_bytes(4, "little") for i in path)
@@ -276,11 +285,20 @@ def run_cases(core: "Core", datadir: Path) -> int:
 
     dest = core("getnewaddress", wallet_name="core")
 
-    cases = [("p2wpkh", None), ("p2sh-p2wpkh", None), ("p2pkh", None),
-             ("p2tr", None), ("p2wsh 2-of-3", ms)]
+    cases = [("p2wpkh", None, None), ("p2sh-p2wpkh", None, None),
+             ("p2pkh", None, None), ("p2tr", None, None),
+             # Taproot with SIGHASH_ALL written out. Worth knowing what this
+             # case can and cannot show: Core MINES a 64-byte signature made
+             # over the DEFAULT digest, because the two spellings commit to
+             # the same transaction and a 64-byte witness simply means
+             # DEFAULT. So acceptance proves nothing here and the check below
+             # reads the witness bytes instead. Verified to bite by reverting
+             # the fix: 64 bytes, no flag.
+             ("p2tr, explicit SIGHASH_ALL", None, 0x01),
+             ("p2wsh 2-of-3", ms, None)]
 
-    for label, quorum in cases:
-        script_type = "p2wsh" if quorum else label
+    for label, quorum, sighash_type in cases:
+        script_type = "p2wsh" if quorum else label.split(",")[0]
         print(f"\n {label}")
         try:
             spend_info = describe(root, script_type, 0, 0, quorum,
@@ -307,7 +325,8 @@ def run_cases(core: "Core", datadir: Path) -> int:
             node["change_witness_script"] = change_info.get("witness_script")
             node["change_redeem"] = change_info.get("redeem")
 
-            blob = build_psbt_for(utxo, node, script_type, dest, 600_000, 395_000)
+            blob = build_psbt_for(utxo, node, script_type, dest, 600_000,
+                                   395_000, sighash_type=sighash_type)
 
             se2 = SoftSE(pin=PIN)
             prov2 = wallet.provision(MNEMONIC, se2, PIN,
@@ -354,6 +373,19 @@ def run_cases(core: "Core", datadir: Path) -> int:
                   accept[0].get("reject-reason", ""))
             if not ok:
                 continue
+
+            # What the WITNESS ended up carrying. Core validates a 64-byte
+            # taproot signature as SIGHASH_DEFAULT and a 65-byte one by its
+            # trailing flag, and both commit to the same transaction -- so a
+            # device that ignores a declared 0x01 and signs the DEFAULT digest
+            # still produces a transaction Core mines. Acceptance therefore
+            # proves nothing about this; only the bytes do.
+            if sighash_type is not None and script_type == "p2tr":
+                wit = Transaction.parse(bytes.fromhex(final["hex"])).vin[0].witness
+                check(f"the witness is a {sighash_type:#04x} signature, "
+                      f"65 bytes with the flag appended",
+                      len(wit[0]) == 65 and wit[0][-1] == sighash_type,
+                      f"{len(wit[0])} bytes, last={wit[0][-1] if wit[0] else None}")
 
             sent = core("sendrawtransaction", final["hex"])
             core("generatetoaddress", 1, addr)

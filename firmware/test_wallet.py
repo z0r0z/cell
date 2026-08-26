@@ -653,10 +653,12 @@ def main() -> int:
 
     # Taproot spells SIGHASH_ALL two ways and they are not the same signature.
     # BIP-341 puts the flag byte INTO the digest and BIP-341/371 append it
-    # after the 64, so a device that accepts an explicit 0x01 and then signs
-    # the DEFAULT digest emits something no node will ever accept -- and it
-    # verifies perfectly against itself, which is why only an independently
-    # recomputed digest catches it.
+    # after the 64. A device that accepts an explicit 0x01 and signs the
+    # DEFAULT digest does not emit something invalid -- both spellings commit
+    # to the same data, and Core mines the 64-byte version -- it silently
+    # answers a different question from the one it was asked. Only an
+    # independently recomputed digest and the byte count catch that;
+    # regtest_e2e.py checks the same thing from the witness side.
     for declared, want_len in ((None, 64), (0x00, 64), (0x01, 65)):
         blob = build_psbt(root, "p2tr", sighash_type=declared)
         signed = PSBT.parse(run_psbt(blob, se, prov).psbt)

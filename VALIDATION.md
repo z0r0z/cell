@@ -168,6 +168,15 @@ silently.
 | **The runbook itself** | `tools/test_first_build.py` runs `provision.py` as a subprocess exactly as BUILD.md §12 writes it — import, show, chain, multisig, enroll-chamber — then boots `app.load_device` against the directory those commands wrote, shows a receive address and signs a PSBT with it | Passes on the `--soft` path. **Found three defects**, none of which a unit test could reach because none ran two commands in a row against one directory: the boot path ignored the network in the record, so a testnet device came up as mainnet and found none of its own accounts; registering a quorum defaulted to mainnet and refused with a message blaming the xpub; and the software secure element drew a fresh secret per invocation, so the one irreversible step could not be rehearsed at all |
 | **The pin map** | BUILD.md's GPIO table parsed and compared against the firmware constants and against `tools/gen_wiring.py`'s sheet | Three copies, now one check. A pin that moves in one and not the others fails CI instead of failing on a bench as a laser that never lights |
 
+### Corrected claims
+
+Kept because a verification record that quietly edits its own history is worth
+less than one that shows where it was wrong.
+
+| Claim | What measurement showed |
+|---|---|
+| "A taproot input declaring SIGHASH_ALL produced a signature no node would accept" | **Overstated.** Bitcoin Core mines it. SIGHASH_DEFAULT and SIGHASH_ALL commit to the same transaction data, and a 64-byte witness simply means DEFAULT, so the pre-fix behaviour produced a valid spend — it silently answered 0x00 when asked for 0x01, and returned 64 bytes where BIP-341/371 want 65. The fix stands; the severity does not. Measured on regtest both ways, which is also why `regtest_e2e.py` now asserts the witness bytes rather than trusting acceptance |
+
 ### Accepted by Bitcoin Core
 
 `tools/regtest_e2e.py`, against a private regtest chain with no peers. Not part
