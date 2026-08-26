@@ -51,12 +51,30 @@
  *   background — CSS color behind the scene (default a warm paper tone)
  *   autorotate — when present, a slow turntable until the user interacts
  *
+ * Theming — set these on the host and every piece of chrome follows:
+ *   --stage-bg     CSS background behind the scene
+ *   --stage-ink    "r, g, b" triple for note / button / error text
+ *   --stage-panel  "r, g, b" triple for the button fill
+ * Setting --stage-bg alone on a dark page is what used to leave the hint
+ * text dark-on-dark; the two triples exist so that cannot happen.
+ *
+ * Slot:
+ *   <p slot="fallback">…</p>  shown instead of the developer error text when
+ *   the canvas cannot start — the case a public page needs to speak to.
+ *
+ * Rendering is on demand: the stage draws when the controls move and when
+ * something calls stage.invalidate(). Move a light or retune its shadow
+ * frustum and call stage.invalidateShadow() — the shadow map is baked once
+ * and held, because the object does not move.
+ *
  * Model in real-world meters, centered on the origin, y-up — exports
  * inherit the scene's units and orientation. The stage fills its own box;
  * size it with ordinary CSS (default 100vw/100vh page hero).
  *
  * Default setup: neutral studio lighting (hemisphere + key + fill), a
- * soft ground shadow, and NO environment map — so high metalness has
+ * ground shadow (PCF — shadow.radius and shadow.blurSamples are VSM-only
+ * knobs and do nothing here; soften with the ShadowMaterial's opacity), and
+ * NO environment map — so high metalness has
  * nothing to reflect and renders near-black. Cap metalness around
  * 0.3–0.4 and carry a metal look with a brighter base color. The copied
  * file is yours: adjust the lights, shadow, or background in _boot()
@@ -66,12 +84,18 @@
 
 (() => {
   const stylesheet = `
+    /* The three --stage-* custom properties are the whole theming surface.
+       They default to the light studio the starter ships with; a dark page
+       sets them once and every chrome element follows. Before they existed,
+       a page that overrode only --stage-bg got dark-on-dark body text. */
     :host {
       position: relative;
       display: block;
       width: 100%;
-      height: 100vh;
+      height: 100dvh;
       background: var(--stage-bg, #f0eee6);
+      --_ink: var(--stage-ink, 26, 25, 21);
+      --_panel: var(--stage-panel, 255, 255, 255);
       overflow: hidden;
     }
     canvas { display: block; outline: none; }
@@ -85,29 +109,39 @@
     }
     .toolbar button {
       appearance: none;
-      border: 1px solid rgba(20, 20, 19, 0.18);
+      border: 1px solid rgba(var(--_ink), 0.18);
       border-radius: 8px;
-      background: rgba(255, 255, 255, 0.92);
-      color: #1a1915;
+      background: rgba(var(--_panel), 0.92);
+      color: rgb(var(--_ink));
       font-family: inherit;
       font-size: 12.5px;
       font-weight: 500;
       line-height: 1;
       padding: 9px 12px;
       cursor: default;
+      transition: background 120ms ease, border-color 120ms ease;
     }
-    .toolbar button:hover { background: #fff; }
+    .toolbar button:hover { background: rgba(var(--_panel), 1); }
     .toolbar button:active { transform: translateY(1px); }
     .toolbar button[disabled] { opacity: 0.5; pointer-events: none; }
+    /* Bottom-centre, not bottom-left: pages routinely put their own credit or
+       repo link in the bottom corners and a heading in the top ones, and this
+       used to land straight on top of the credit. The centre column is the
+       one strip no other chrome here claims. */
     .note {
       position: absolute;
-      left: 16px;
+      left: 50%;
       bottom: 16px;
+      transform: translateX(-50%);
+      text-align: center;
       max-width: 60%;
       font: 400 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: rgba(26, 25, 21, 0.55);
+      color: rgba(var(--_ink), 0.55);
       user-select: none;
+      pointer-events: none;
+      transition: opacity 600ms ease;
     }
+    .note[hidden] { display: block; opacity: 0; }
     .err {
       position: absolute;
       inset: 0;
@@ -116,9 +150,17 @@
       justify-content: center;
       padding: 24px;
       font: 500 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: #8a2f20;
+      color: rgba(var(--_ink), 0.75);
       text-align: center;
       white-space: pre-line;
+    }
+    /* Narrow viewports: the two export buttons and a page's own bottom-left
+       credit cannot share one 390px row. Give the toolbar the full width and
+       lift it clear. */
+    @media (max-width: 560px) {
+      .toolbar { left: 16px; right: 16px; bottom: 52px; }
+      .toolbar button { flex: 1; padding: 11px 8px; }
+      .note { bottom: 104px; max-width: calc(100% - 32px); }
     }
   `;
 
@@ -155,11 +197,23 @@
       root.appendChild(style);
       this._err = document.createElement('div');
       this._err.className = 'err';
+      // A page can supply visitor-facing copy for the dead-canvas case:
+      //   <three-d-stage><p slot="fallback">…</p></three-d-stage>
+      // Without one the element falls back to the developer text below, which
+      // is the right message on a dev page and the wrong one on a public URL.
+      this._fallback = document.createElement('slot');
+      this._fallback.name = 'fallback';
+      this._err.appendChild(this._fallback);
       root.appendChild(this._err);
-      const note = document.createElement('div');
-      note.className = 'note';
-      note.textContent = 'Drag to orbit · scroll to zoom · right-drag to pan';
-      root.appendChild(note);
+      this._note = document.createElement('div');
+      this._note.className = 'note';
+      // Name the gestures this device actually has. "scroll to zoom,
+      // right-drag to pan" is instructions for a mouse nobody is holding.
+      const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
+      this._note.textContent = touch
+        ? 'Drag to orbit · pinch to zoom · two-finger drag to pan'
+        : 'Drag to orbit · scroll to zoom · right-drag to pan';
+      root.appendChild(this._note);
       this._toolbar = document.createElement('div');
       this._toolbar.className = 'toolbar';
       this._objBtn = document.createElement('button');
@@ -193,14 +247,30 @@
       }
       this._booted = true;
       this._boot().catch((err) => {
-        this._err.style.display = 'flex';
-        this._err.textContent =
-          'three.js failed to load.\n' +
-          'Check that the pinned <script type="importmap"> from the usage ' +
-          'notes is in <head> before any module script.\n\n' +
-          String(err && err.message ? err.message : err);
+        this._showFailure(err);
         this._readyReject(err);
       });
+    }
+
+    /** Dead canvas. Two very different causes, and only one of them is the
+     *  developer's fault, so say which. A page that provided slotted fallback
+     *  copy gets that instead of either message. */
+    _showFailure(err) {
+      this._err.style.display = 'flex';
+      this._setButtonsEnabled(false);
+      this._note.hidden = true;
+      if (this._fallback.assignedNodes().length) return;
+      const msg = String((err && err.message) || err);
+      const noGL = /webgl|context/i.test(msg);
+      const body = document.createElement('div');
+      body.textContent = noGL
+        ? 'This page draws a 3D object, and this browser could not open a ' +
+          'WebGL canvas.\n\nHardware acceleration may be off, or the browser ' +
+          'may be in a hardened mode that blocks it.'
+        : 'three.js failed to load.\n' +
+          'Check that the pinned <script type="importmap"> from the usage ' +
+          'notes is in <head> before any module script.\n\n' + msg;
+      this._err.appendChild(body);
     }
 
     async _boot() {
@@ -221,7 +291,16 @@
       });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // PCFSoftShadowMap is deprecated in r184: three warns and falls back to
+      // PCF anyway, so asking for PCF is honest about what you get. It also
+      // means shadow.radius / blurSamples do NOTHING — those are VSM knobs.
+      // Soften the contact shadow with the ShadowMaterial's opacity instead.
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+      // The scene is static: baking the shadow map once and holding it is the
+      // single biggest saving here. A 4096 map over 100k triangles re-rendered
+      // at 60fps is most of the GPU cost of a page where nothing moves.
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 0.95;
       this._renderer = renderer;
@@ -296,6 +375,7 @@
       controls.autoRotateSpeed = 1.2;
       controls.addEventListener('start', () => {
         controls.autoRotate = false;
+        this._note.hidden = true;      // it has done its job
       });
 
       const fit = () => {
@@ -304,12 +384,21 @@
         renderer.setSize(w, h);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
+        this.invalidate();
       };
       fit();
       this._ro = new ResizeObserver(fit);
+      // Draw only when something changed. controls.update() reports whether it
+      // moved the camera, which covers the drag itself and the damping tail;
+      // everything else asks for a frame through invalidate(). The rAF keeps
+      // ticking either way — it is the render that is expensive, not the
+      // callback — so resize and damping stay as simple as they were.
       this._loop = () => {
-        controls.update();
-        renderer.render(scene, camera);
+        const moved = controls.update();
+        if (moved || this._dirty) {
+          this._dirty = false;
+          renderer.render(scene, camera);
+        }
       };
       // Detached while three.js was fetching? Stay idle — the
       // connectedCallback resume starts the loop and observer on
@@ -320,6 +409,19 @@
       }
 
       this._readyResolve({ THREE });
+    }
+
+    /** Ask for one more frame. Call after changing anything the renderer can
+     *  see from outside the loop — camera, materials, visibility. */
+    invalidate() {
+      this._dirty = true;
+    }
+
+    /** Re-bake the (otherwise frozen) shadow map. Call after moving a light,
+     *  retuning its frustum, or changing what casts. */
+    invalidateShadow() {
+      if (this._renderer) this._renderer.shadowMap.needsUpdate = true;
+      this._dirty = true;
     }
 
     disconnectedCallback() {
@@ -369,6 +471,7 @@
       }
       this._scene.add(object);
       this._setButtonsEnabled(true);
+      this.invalidateShadow();
     }
 
     get _basename() {

@@ -75,6 +75,10 @@ async function run() {
   // Stop the stage driving its own loop; we step the camera by hand.
   renderer.setAnimationLoop(null);
   controls.autoRotate = false;
+  // The stage bakes the shadow map once and holds it, because on the page
+  // nothing moves. Here the OBJECT turns, so the shadow has to be re-cast for
+  // every frame or all 240 of them carry the pose the model loaded in.
+  renderer.shadowMap.autoUpdate = true;
   // Supersample in GL, then downsample HERE rather than in ffmpeg. Rendering
   // at SS x and shrinking is the antialiasing that matters: SwiftShader has no
   // hardware MSAA, so edges and the fine index ticks alias badly at 1:1.

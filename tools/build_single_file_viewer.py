@@ -6,8 +6,10 @@ attachment -- and have it open into the orbitable instrument with no network
 access of any kind. three.js r184 is fetched once from unpkg, checked against
 the integrity map already pinned in viewer/instrument.html, and inlined.
 
-Every payload rides in a <script type="text/plain"> block and is handed to the
-page as a blob: URL at load time. That indirection is what lets a single file
+The page's <style> and its .wrap markup are both lifted out of
+viewer/instrument.html, so the bundle cannot show something the source page
+does not. Every payload rides in a <script type="text/plain"> block and is
+handed to the page as a blob: URL at load time. That indirection is what lets a single file
 carry ES modules: an import map is built at runtime pointing the bare 'three'
 specifier at the blob, before the first module script is inserted.
 
@@ -108,11 +110,7 @@ TEMPLATE = """<!DOCTYPE html>
 <style>%(style)s</style>
 </head>
 <body>
-<div class="wrap">
-  <three-d-stage name="instrument"></three-d-stage>
-  <div class="vignette"></div>
-  <a class="repo" href="https://github.com/z0r0z/cell" target="_blank" rel="noopener">github.com/z0r0z/cell</a>
-</div>
+%(body)s
 <noscript>
   <!-- The page is a WebGL canvas and nothing else, so without scripting it is
        a black rectangle with no explanation. Say what it was and where to go. -->
@@ -215,6 +213,14 @@ def main():
     if not style:
         sys.exit("no <style> block in viewer/instrument.html")
 
+    # Lift the markup out of the source page rather than keeping a second copy
+    # here. The template used to carry its own hardcoded copy of .wrap, so any
+    # element added to instrument.html -- a heading, a fallback for a dead
+    # canvas -- was silently missing from the file actually deployed.
+    body = re.search(r'<div class="wrap">(?:.*?)\n</div>', page, re.S)
+    if not body:
+        sys.exit('no <div class="wrap"> block in viewer/instrument.html')
+
     # An inline block ends at the first '</script' anywhere in its text, even
     # inside a JS comment -- three-d-stage.js's usage docs contain three.
     blocks = "\n".join(
@@ -226,7 +232,7 @@ def main():
     html = TEMPLATE % {"title": args.title, "card_title": args.card_title,
                        "description": args.description, "url": args.url,
                        "image": args.image, "style": style.group(1),
-                       "payloads": blocks, "boot": BOOT,
+                       "body": body.group(0), "payloads": blocks, "boot": BOOT,
                        "favicon": favicon_data_uri()}
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

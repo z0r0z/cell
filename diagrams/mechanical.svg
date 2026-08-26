@@ -4,7 +4,7 @@
 <rect x="47" y="61" width="26" height="2" fill="#B23A48"/>
 <text x="46" y="82" font-size="10" letter-spacing="2" fill="#6F7178">Every dimension read from instrument.obj at generation time. Regenerate after any model change. Millimetres.</text>
 <text x="1116" y="50" text-anchor="end" font-size="10.5" letter-spacing="1.8" fill="#6F7178">116.2 × 73.2 × 28.3</text>
-<text x="1116" y="68" text-anchor="end" font-size="10.5" letter-spacing="1.8" fill="#6F7178">99 objects · 295,366 verts</text>
+<text x="1116" y="68" text-anchor="end" font-size="10.5" letter-spacing="1.8" fill="#6F7178">103 objects · 297,790 verts</text>
 <text x="46" y="122" font-size="10" letter-spacing="3" fill="#6F7178">TOP</text>
 <rect x="128.0" y="138.0" width="482.2" height="303.8" rx="12.5" fill="#121211" stroke="#8A8B8F" stroke-width="0.9"/>
 <circle cx="487.4" cy="310.6" r="97.9" fill="#171514" stroke="#8A8B8F" stroke-width="0.8"/>

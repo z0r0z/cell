@@ -1,7 +1,11 @@
 # Enclosure model
 
-`instrument.obj` — 131 named objects with materials, 116.2 × 73.2 × 28.3 mm.
+`instrument.obj` — 103 named objects with materials, 116.2 × 73.2 × 28.3 mm.
 ~53 MB, tracked with Git LFS (see `.gitattributes`).
+
+The object and vertex counts are printed in the corner of `diagrams/mechanical.svg`,
+which is generated from this file — that is the copy to trust if this line ever
+drifts again.
 
 ## The chain is one-way
 
@@ -27,8 +31,9 @@ of a hand edit can be reconciled with a parametric change.
 `instrument.mtl` is written by `tools/export_model.py` in the same pass as the
 OBJ, from the viewer's own materials, so the two stay in step. Material names
 also ride on the objects themselves (`shell`, `oxblood`, `trim_oxblood`,
-`glass`, `pad`, `etch_floor`, `steel`, `cavity`), so the separation survives
-even if you drop the MTL and assign your own.
+`glass`, `pad`, `etch_floor`, `steel`, `cavity`, `screen`, `silkscreen`,
+`silkscreen_mark`), so the separation survives even if you drop the MTL and
+assign your own.
 
 ## Coordinate convention: centre-origin
 
@@ -72,7 +77,23 @@ python tools/export_model.py        # model.js  -> instrument.obj + .mtl
 python tools/gen_mechanical.py      # instrument.obj -> diagrams/mechanical.svg
 ```
 
-Run both after any model change, in the same commit. CI checks the second link.
+Run both after any model change, in the same commit. CI checks both links: the
+`model-export` job re-exports and diffs the OBJ, and `drawings` regenerates the
+SVG from it.
+
+Three more things are rendered from this same model and are stale the moment it
+changes. None of them is checked by CI, because each needs a browser:
+
+```bash
+python3 tools/render_turntable.py       # -> diagrams/turntable.gif + .mp4
+python3 tools/render_social_card.py     # -> diagrams/social-card.png
+python3 tools/build_single_file_viewer.py   # -> viewer/instrument-standalone.html
+```
+
+The last one is what `cell.wei.is` serves, so it is the one that matters
+outside the repository — and building it is not deploying it. CI's `viewer` job
+checks the bundle in the tree carries this tree's viewer; nothing can check
+what the host is serving.
 
 ## Geometry check
 
@@ -88,3 +109,26 @@ the slot and the ring share a centreline:
 Cartridge travel front face to read spot is **31.6 mm**, which is what sets the
 45 mm cartridge length in `BUILD.md` §8 — it leaves 13.4 mm proud of the slot to
 grip. If you move the dish, re-derive the cartridge length from this number.
+
+## The sensor port
+
+The dish floor is an annulus, not a disc: `PORT_D` 9.8 opens through it to the
+optical chamber, and the Ø10 × 0.5 ring window that `BOM.csv` buys sits in a
+Ø10.2 × 0.6 rebate under the ring's inner lip, flush with the floor. Four
+objects carry it — `recess_floor_etch` (the annulus), `ring_window`,
+`port_sleeve` and `port_floor`. The numbers come from `tools/gen_enclosure.py`,
+which owns the inside; this file's job is only to look like it.
+
+## The deck's top face is 28.32, not 28.0
+
+`shell_skin` extrudes 27.5 → 28.0 with a 0.4 bevel, which is thicker than half
+the slab, so `ExtrudeGeometry` clamps the depth and the chamfer adds its full
+thickness on top. The deck therefore finishes at 28.32 — which is where the
+envelope's 28.32 comes from, and what `gen_enclosure.py` pins `ENV_Z` to.
+
+Anything that sits ON the deck has to be placed against 28.32. Four things
+were placed against 28.0 instead and spent a long time invisible inside the
+shell: the pad marking, the display bezel, the CONFIRM collar and the edge
+break. They are coplanar with the deck now and depth-offset rather than
+floated, because lifting them even a hundredth would raise the envelope that
+`gen_enclosure.check_viewer_envelope()` compares against the printed shells.

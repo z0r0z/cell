@@ -88,6 +88,53 @@ jobs:
             exit 1
           fi
 
+  viewer:
+    # viewer/instrument-standalone.html is what cell.wei.is serves. It inlines
+    # model.js, three-d-stage.js, the page's <style> and the page's markup, and
+    # NOTHING rebuilt it — so a change to any of those four shipped a bundle
+    # still carrying the previous one, with every other job green. That is not
+    # hypothetical: the deployed page went three commits without the link
+    # preview that had already landed here.
+    #
+    # Rebuilding needs the network (three.js comes from unpkg), so this job
+    # compares the payloads instead: the bundle must already contain exactly
+    # the sources in this tree.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: The bundle carries this tree's viewer
+        run: python3 tools/check_standalone.py
+
+  model-export:
+    # The link the `drawings` job checks is instrument.obj -> mechanical.svg.
+    # The link BEFORE it -- model.js -> instrument.obj -- was checked by
+    # nothing, so editing the parametric source and forgetting to re-export
+    # left a stale OBJ, a drawing faithfully generated from the stale OBJ, and
+    # every job green. Close it the same way: regenerate and diff.
+    #
+    # Split from `viewer` on purpose. This one reaches unpkg for three.js, and
+    # a CDN outage should not redden the cheap text-only check next door.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true          # a pointer file would diff against everything
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # ubuntu-latest ships Google Chrome; export_model.py finds it on PATH.
+      - run: python3 tools/export_model.py
+      - run: |
+          if ! git diff --quiet models/instrument.obj models/instrument.mtl; then
+            echo "::error::models/instrument.obj is out of date."
+            echo "Run: python3 tools/export_model.py && python3 tools/gen_mechanical.py"
+            git diff --stat models/instrument.obj models/instrument.mtl
+            exit 1
+          fi
+
   printables:
     # The STLs in models/print are what a builder actually prints. They are
     # generated from the same constants BUILD.md specifies, so a change to the
