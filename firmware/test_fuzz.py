@@ -246,10 +246,131 @@ def structured_psbts() -> None:
           f"only {reached} got past parse; the fuzzer is bouncing off the magic")
 
 
+def encoder_properties() -> None:
+    """Round trips over many random valid inputs, not a handful of vectors.
+
+    The suites elsewhere pin these against published vectors, which is the
+    right primary check and says nothing about the inputs nobody wrote a
+    vector for. An encoder that is wrong for one value in ten thousand does
+    not fail loudly -- it produces a different address, and the money goes
+    there.
+    """
+    import random
+
+    import bip39
+    import qr as qrmod
+
+    rng = random.Random(SEED + 2)
+    print("\n properties — round trips over random valid inputs")
+
+    # Every script type this device can own, on every network it knows.
+    # NOTE testnet and regtest share base58 version bytes (0x6f / 0xc4), so a
+    # legacy address really is valid on both; only the bech32 prefixes differ.
+    # That is Bitcoin's design, not a leak, and the assertion allows for it.
+    round_trip = cross = True
+    for i in range(400):
+        sk = __import__("hashlib").sha256(f"addr{i}".encode()).digest()
+        pub = ec.pubkey_compressed(sk)
+        xonly, _ = ec.taproot_tweak_pubkey(ec.schnorr_pubkey(sk))
+        scripts = [addresses.p2wpkh_script(pub),
+                   addresses.p2wsh_script(b"\x51" + pub),
+                   addresses.p2tr_script(xonly),
+                   addresses.p2pkh_script(pub),
+                   addresses.p2sh_p2wpkh_script(pub)]
+        for net in ("mainnet", "testnet", "regtest"):
+            for spk in scripts:
+                a = addresses.script_to_address(spk, net)
+                if addresses.address_to_script(a, net) != spk:
+                    round_trip = False
+                other = "mainnet" if net != "mainnet" else "testnet"
+                if a.startswith(addresses.NETWORKS[net]["hrp"] + "1"):
+                    try:
+                        addresses.address_to_script(a, other)
+                        cross = False           # a bech32 address crossed nets
+                    except addresses.BadAddress:
+                        pass
+    check("every script type round-trips on every network", round_trip)
+    check("...and a bech32 address is refused on another network", cross)
+
+    # The mutation that matters: an address that still decodes is money gone.
+    charset, mutated, accepted = addresses.CHARSET, 0, 0
+    for i in range(200):
+        sk = __import__("hashlib").sha256(f"mut{i}".encode()).digest()
+        a = addresses.script_to_address(addresses.p2wpkh_script(
+            ec.pubkey_compressed(sk)))
+        for _ in range(6):
+            j = rng.randrange(a.index("1") + 1, len(a))
+            c = rng.choice(charset)
+            if c == a[j]:
+                continue
+            mutated += 1
+            try:
+                addresses.address_to_script(a[:j] + c + a[j + 1:])
+                accepted += 1
+            except addresses.BadAddress:
+                pass
+    check(f"all {mutated} single-character address mutations refused",
+          accepted == 0, f"{accepted} decoded anyway")
+
+    def nested(depth=0):
+        if depth > 2 or rng.random() < 0.4:
+            return bytes(rng.randrange(256) for _ in range(rng.randrange(0, 70)))
+        return [nested(depth + 1) for _ in range(rng.randrange(0, 5))]
+    check("RLP round-trips nested structures",
+          all(eth.rlp_decode(eth.rlp_encode(v := nested())) == v
+              for _ in range(1500)))
+
+    # BIP-39's checksum is 4 bits for 12 words and 8 for 24, so a single wrong
+    # word is undetectable about 1 time in 2^k -- 6% at twelve words, 0.4% at
+    # twenty-four. That is the specification, not a defect, and asserting
+    # "always caught" would be asserting something BIP-39 never promised. What
+    # IS checkable is that the checksum still has the width it claims: a miss
+    # rate far above 2^-k means it has stopped doing its job. It is also the
+    # arithmetic behind provision.py defaulting to 24 words.
+    ok_39, width = True, True
+    words = bip39.wordlist()
+    rates = []
+    for n in (16, 20, 24, 28, 32):
+        trials, missed = 200, 0
+        for i in range(trials):
+            e = __import__("hashlib").sha256(f"{n}-{i}".encode()).digest()[:n]
+            m = bip39.entropy_to_mnemonic(e)
+            if bip39.mnemonic_to_entropy(m) != e:
+                ok_39 = False
+            w = m.split()
+            j = rng.randrange(len(w))
+            w[j] = words[(words.index(w[j]) + rng.randrange(1, 2048)) % 2048]
+            if bip39.validate(" ".join(w)):
+                missed += 1
+        k = n * 8 // 32
+        rates.append((len(w), missed / trials, 2.0 ** -k))
+        if missed / trials > 3 * 2.0 ** -k + 0.02:
+            width = False
+    check("BIP-39 round-trips at every length", ok_39)
+    check("...and the checksum still has the width it claims", width,
+          "; ".join(f"{n}w missed {r*100:.1f}% vs {e*100:.2f}%"
+                    for n, r, e in rates))
+    check("...and a word outside the list is always refused",
+          not bip39.validate("satoshi " + " ".join(
+              bip39.entropy_to_mnemonic(bytes(16)).split()[1:])))
+
+    ok_qr = True
+    for _ in range(300):
+        payload = bytes(rng.randrange(256) for _ in range(rng.randrange(0, 900)))
+        frames = qrmod.encode(payload, chunk=rng.randrange(16, 300))
+        shuffled = list(frames)
+        rng.shuffle(shuffled)
+        if qrmod.decode(shuffled) != payload or \
+                qrmod.decode(frames + frames) != payload:
+            ok_qr = False
+    check("QR frames reassemble shuffled and duplicated", ok_qr)
+
+
 def main() -> int:
     print("Fuzzing — hostile bytes at every point they can enter\n")
     flat_entry_points()
     structured_psbts()
+    encoder_properties()
     print("\n" + "-" * 66)
     if FAILURES:
         print(f"FAIL — {len(FAILURES)}:")
