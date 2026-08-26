@@ -108,6 +108,11 @@ SUITES = [
     # the maths underneath does not need the parts.
     ("bench arithmetic — bounce measurement and the PIN budget",
      [sys.executable, "../tools/bench.py", "selftest"]),
+    # Everything this device learns arrives as pixels through a lens, so the
+    # parsers are the whole input attack surface. This holds each of them to
+    # the exceptions it declares, on noise and on corrupted valid PSBTs.
+    ("fuzzing — hostile bytes at every entry point",
+     [sys.executable, "test_fuzz.py"]),
     ("drift margins — what the normalisation actually cancels",
      [sys.executable, "robustness.py", "--quick"]),
     ("speckle physics — exposure, frame rate and grain",

@@ -371,6 +371,12 @@ def parse_eth_request(payload: bytes) -> eth.EthTransaction:
     field it cannot display, and therefore one the owner cannot consent to.
     """
     doc = json.loads(payload.decode("utf-8"))
+    # JSON's top level is not necessarily an object: `4` and `[]` are both
+    # valid documents, and iterating them raises TypeError, which is not in
+    # the set app.sign_eth catches -- so a refusal became an "internal error"
+    # screen. ops.parse makes the same check for the same reason.
+    if not isinstance(doc, dict):
+        raise ValueError("the Ethereum request is not an object")
     known = {"type", "chain_id", "nonce", "max_priority_fee_per_gas",
              "max_fee_per_gas", "gas_limit", "to", "value"}
     unknown = set(doc) - known

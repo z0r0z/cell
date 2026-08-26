@@ -64,6 +64,15 @@ def check_fits(lines: list[str]) -> None:
     twice is deliberate, because the composed screen — operation lines plus
     whatever the caller appended — is not the same object either check saw.
     """
+    # The same control-character rule ops.check_fits applies, restated at the
+    # last moment for the same reason the width check is: this is the exact
+    # list about to be painted, and a newline inside one of these strings is a
+    # row the count above never saw.
+    control = [ln for ln in lines if any(c < " " or c == "\x7f" for c in ln)]
+    if control:
+        raise UnrenderableOperation(
+            f"line contains a control character, which the display cannot "
+            f"render as one row: {control[0]!r}")
     over = [ln for ln in lines if len(ln) > DISPLAY_COLS]
     if over:
         raise UnrenderableOperation(

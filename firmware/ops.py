@@ -94,7 +94,19 @@ def wrap_full(value: str, width: int, indent: str = "           ") -> list[str]:
     than truncating.
     """
     room = max(1, width - len(indent))
-    return [indent + value[i:i + room] for i in range(0, len(value), room)]
+    # Split on newlines FIRST. Slicing straight through a string that contains
+    # one produces a "line" the length check passes -- a newline is one
+    # character -- and the panel then draws two rows in the space of one,
+    # overlapping whatever was under it. Gate rejection messages carry a
+    # newline by construction ("Rejected at T3.\n72 bpm is outside..."), so
+    # this was every failed capture, not an edge case.
+    out: list[str] = []
+    for segment in str(value).split("\n"):
+        if not segment:
+            out.append(indent.rstrip())
+            continue
+        out += [indent + segment[i:i + room] for i in range(0, len(segment), room)]
+    return out or [indent.rstrip()]
 
 
 def truncate_middle(s: str, keep: int = 8) -> str:
@@ -513,6 +525,17 @@ def check_fits(lines: list[str], width: int = DISPLAY_COLS,
     check. A line that runs off a 240x240 display is a field the owner did not
     read, and silently truncating it defeats the entire point of rendering.
     """
+    # A control character is not a character the panel draws -- a newline is a
+    # row it never counted, a carriage return or an escape is a glyph nobody
+    # can predict. Refusing them keeps len(line) an honest measure of width and
+    # len(lines) an honest measure of height, which is what every other check
+    # here relies on. Same rule eth.register_chain applies to a chain name, for
+    # the same reason: the owner cannot trust what such a label renders as.
+    control = [ln for ln in lines if any(c < " " or c == "\x7f" for c in ln)]
+    if control:
+        raise UnrenderableOperation(
+            f"line contains a control character, which the display cannot "
+            f"render as one row: {control[0]!r}")
     too_long = [ln for ln in lines if len(ln) > width]
     if too_long:
         raise UnrenderableOperation(
