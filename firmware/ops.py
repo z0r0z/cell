@@ -20,10 +20,13 @@ So the operation set is CLOSED. Five spending shapes, all renderable:
                         EIP-712 typed data. No gas, because it does not build
                         the transaction that carries it
 
-and one that spends nothing and is blood-locked anyway:
+and two that spend nothing:
 
     Delegation     an EIP-7702 authorisation. It moves no value and decides
-                   what every later signature from that address means
+                   what every later signature from that address means, so it
+                   is blood-locked anyway
+    ProofOfLife    a beacon. It authorises nothing, and it is the one
+                   operation that signs with no spend key at all
 
 Everything else is refused, including generic EVM calldata and bare hashes.
 This is a scope decision — see BUILD.md section 5.
@@ -532,6 +535,65 @@ class Delegation:
 
 
 @dataclass(frozen=True)
+class ProofOfLife:
+    """A beacon: the attestation with no transaction under it.
+
+    It moves nothing and it authorises nothing, which is why it is the one
+    operation that signs with no spend key at all. What it asserts is that a
+    living human authenticated on this device during one period, and
+    `CellRegistry.heartbeat` writes down when that last happened.
+
+    THE DATE IS THE SECURITY CONTROL. The device has no clock, so the period
+    comes from the companion. A companion that wants to keep a dead owner
+    alive has to get future periods signed, one gate at a time, each showing a
+    date that is not today. So the period is the first thing on the screen and
+    it is spelled out in full rather than given as an index.
+    """
+
+    registry: str                   # the CellRegistry deployment, EIP-55
+    claimant: str                   # whose life this proves, EIP-55
+    chain_id: int
+    chain_name: str
+    period_start: str               # ISO date, from beacon.epoch_dates
+    period_end: str                 # ISO date, inclusive
+
+    def op_class(self) -> str:
+        return "life.beacon"
+
+    def amount_for_policy(self) -> int:
+        return 0
+
+    def render(self) -> list[str]:
+        if not self.registry or not self.claimant:
+            raise UnrenderableOperation("beacon is missing an address")
+        if not self.period_start or not self.period_end:
+            raise UnrenderableOperation(
+                "a beacon with no period is a beacon the owner cannot date, "
+                "and the date is the only part of it they can check")
+        if self.chain_id <= 0:
+            raise UnrenderableOperation(
+                "refusing chain id 0: a proof of life addressed to every "
+                "chain is redeemable on all of them")
+        if not self.chain_name:
+            raise UnrenderableOperation(
+                f"chain {self.chain_id} has no name; the owner cannot tell "
+                f"which network this lands on")
+        if self.registry.lower() == self.claimant.lower():
+            raise UnrenderableOperation(
+                "the registry and the claimant are the same address")
+        lines = ["PROVE YOU ARE ALIVE",
+                 f"  period   {self.period_start}",
+                 f"  through  {self.period_end}",
+                 f"  chain    {self.chain_name} ({self.chain_id})",
+                 "  registry"]
+        lines += wrap_full(self.registry, DISPLAY_COLS)
+        lines.append("  for")
+        lines += wrap_full(self.claimant, DISPLAY_COLS)
+        lines.append("  moves    nothing at all")
+        return lines
+
+
+@dataclass(frozen=True)
 class PolicyChange:
     """A change to the tier floor. Blood-locked in both directions.
 
@@ -583,7 +645,7 @@ class PolicyChange:
 # before it reaches the renderer, so an unknown type cannot reach the key by
 # arriving with a render() method that returns something plausible.
 ALLOWED = (BitcoinSpend, NoteSpend, DirectTransfer, EthereumSpend,
-           SmartAccountExecute, Delegation, PolicyChange)
+           SmartAccountExecute, Delegation, ProofOfLife, PolicyChange)
 
 
 # The closed set, as data rather than as a table inside parse(). policy.py
@@ -597,6 +659,7 @@ OPERATIONS = {
     "eth_spend": EthereumSpend,
     "account_execute": SmartAccountExecute,
     "account_delegate": Delegation,
+    "proof_of_life": ProofOfLife,
     "policy_change": PolicyChange,
 }
 

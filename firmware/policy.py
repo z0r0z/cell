@@ -65,6 +65,11 @@ KNOWN_OPS = frozenset({
     "device.reprovision",
     "recipient.allowlist",
     "account.delegate",
+    # A beacon moves nothing, so no amount floor reaches it, and it must stay
+    # cheap: proof of life that costs a lancet is proof of life nobody
+    # produces, and a dead-man switch that fires on the living is worse than
+    # no switch at all. A pulse is what the claim rests on anyway.
+    "life.beacon",
 })
 
 ALWAYS_BLOOD = frozenset({

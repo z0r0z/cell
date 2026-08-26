@@ -31,6 +31,7 @@ import hmac
 from dataclasses import dataclass, field
 
 import bip32
+import beacon
 import bip39
 import duress
 import eip712
@@ -655,6 +656,68 @@ def _sign_typed(op, digest: bytes, prov: Provisioning, se: SecureElement,
                            digest="0x" + digest.hex(),
                            attestation=result.attestation.pack(),
                            tier=result.tier, display=result.display)
+
+
+@dataclass
+class SignedBeacon:
+    """One proof of life. There is no spend signature here, by construction."""
+
+    attestation: bytes
+    digest: str                     # 0x-hex, what CellRegistry.heartbeat wants
+    epoch: int
+    period: str                     # the dates the owner was shown
+    tier: Tier
+    display: list[str]
+
+
+def sign_beacon(registry: str, claimant: str, chain_id: int, epoch: int,
+                prov: Provisioning, se: SecureElement, pol: Policy,
+                fw_hash: bytes, cal_hash: bytes, confirm, run_gate, pin: str,
+                period_days: int = beacon.DEFAULT_PERIOD_DAYS,
+                requested_tier: Tier | None = None,
+                read_chamber=None) -> SignedBeacon:
+    """Attest that a living human was here, in this period.
+
+    Nothing is spent and nothing is signed with the seed. The claim is made by
+    the attestation key in the secure element, over a digest built here from
+    the fields the owner reads, so `needs_seed=False` and the seed never leaves
+    its blob. Everything before the unwrap is the ordinary chain: render,
+    policy, confirm, PIN, gate.
+    """
+    if chain_id not in eth.CHAINS:
+        raise WalletError(
+            f"chain {chain_id} is not registered on this device, so the "
+            f"confirmation screen could not name the network. Register it "
+            f"before asking for a beacon on it.")
+    b = beacon.Beacon(registry=registry, claimant=claimant, chain_id=chain_id,
+                      chain_name=eth.CHAINS[chain_id][0], epoch=epoch,
+                      period_days=period_days)
+    try:
+        digest = b.digest()
+    except beacon.BadBeacon as e:
+        raise WalletError(str(e)) from None
+    start, end = b.window()
+    op = ops.ProofOfLife(registry=b.registry, claimant=b.claimant,
+                         chain_id=b.chain_id, chain_name=b.chain_name,
+                         period_start=start.isoformat(),
+                         period_end=end.isoformat())
+
+    def never(_seed, _bound):                           # pragma: no cover
+        raise WalletError(
+            "a beacon must not reach the signing key. Reaching here means the "
+            "chain unwrapped a seed for an operation that spends nothing.")
+
+    sg = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
+                       confirm=confirm, run_gate=run_gate,
+                       unwrap_seed=never, sign_digest=never,
+                       read_chamber=read_chamber)
+    result = sg.authorize_and_sign(
+        signer.SignRequest(operation=op, sighash=digest,
+                           requested_tier=requested_tier, needs_seed=False), pin)
+    return SignedBeacon(attestation=result.attestation.pack(),
+                        digest="0x" + digest.hex(), epoch=epoch,
+                        period=f"{start.isoformat()} to {end.isoformat()}",
+                        tier=result.tier, display=result.display)
 
 
 def sign_account_execute(label: str, destination: str, amount_wei: int,

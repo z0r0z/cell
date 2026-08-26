@@ -13,7 +13,7 @@ samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py`, 43 suites, no hardware required.
+`python firmware/run_tests.py`, 44 suites, no hardware required.
 
 ### The signing stack
 
@@ -60,7 +60,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Speckle physics | Ornstein-Uhlenbeck field, exposure-integrated | Reproduces frozen and liquid limits; exposure, frame interval and grain each swept against the G5/G6 thresholds |
 | Drift margins | 7 disturbance axes, bisected | Tightest budget reported and ranked; a finite tolerance on an invariance axis fails the suite |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
-| A fresh clone | `git clone`, install, `run_tests.py` | 43 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
+| A fresh clone | `git clone`, install, `run_tests.py` | 44 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
 
 ### Multisig, and the registry it depends on
 
@@ -275,6 +275,37 @@ misbehave and watching it refuse tests the property itself.
   threshold changes and cancelling a queued transaction are all calldata. A
   fixed selector table would make them renderable. Until then the device cannot
   administer an account it can spend from.
+
+## Proof of life
+
+| Claim | Method | Result |
+|---|---|---|
+| **The digest is the registry's** | `beacon.py` against the committed vectors in `contracts/test/registry_vectors.json`, which foundry's own ABI encoder produced | Identical. The beacon tag in the contract is the one the firmware signs under, and the period length matches `EPOCH_SECONDS` |
+| **What the digest binds** | Registry, claimant, chain id and period perturbed one at a time | All four move it, and all five digests are distinct |
+| **Domain separation** | An allowlist record submitted to `heartbeat` | Refused as the wrong digest. A beacon does not redeem as an allowlist entry |
+| **The seed is not involved** | The step trace against `signer.EXPECTED_ORDER_NO_SEED`, with unwrap and sign callbacks that raise if reached | The chain runs render, policy, confirm, PIN, gate, attest. The seed never leaves its blob |
+| **The period cannot be spent early or late** | A beacon for the next period submitted in this one, then two periods later | `EpochNotCurrent` both times. Accepted only during its own period |
+| **The screen** | Rendered at 40x20 with the tier footer reserved | 11 rows. The period is above the addresses, and both addresses are shown in full |
+| **The switch** | `CellDormancy` driven through claim, cancel, finalise and release | A claim releases nothing. One beacon inside the challenge window cancels it, and a beacon in the same block as the claim counts for the owner. Silence through the window releases, and release is final |
+| **The contracts** | `forge test` | 42 tests pass, 23 of them new |
+
+### Open on this path
+
+- **Nothing is deployed.** The contracts compile and their tests pass against
+  records the firmware produced. No deployment exists, and no beacon has been
+  submitted to a live chain.
+- **Harvesting future periods.** A companion that gets N future periods signed
+  can keep a dead owner alive for N periods. Each costs a separate gate and
+  shows the owner a date that is not today, so the cost is linear in the lie,
+  but the defence is the owner reading the screen rather than anything
+  mechanical.
+- **The registry address is not registered in advance.** A smart account is
+  recorded at provisioning; a beacon's registry is not, so it is checked only
+  by being displayed in full. A wrong registry sends proof of life to a
+  contract nobody reads, which loses an inheritance path rather than funds.
+- **`EPOCH_SECONDS` is fixed at 30 days.** Deliberate, because a device with no
+  clock has to compute the period from a number both sides already know, but it
+  means one registry cannot serve a quarterly cadence and a monthly one.
 
 ## Written but unverified
 

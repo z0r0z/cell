@@ -54,7 +54,7 @@ contract CellRegistryTest is Test {
         vm.prank(user);
         reg.redeem(rec, purpose);
         assertTrue(reg.allowlisted(user));
-        (, uint64 last, ) = reg.signers(user);
+        (, uint64 last, , ) = reg.signers(user);
         assertEq(last, 7);
     }
 
@@ -73,7 +73,7 @@ contract CellRegistryTest is Test {
         reg.redeem(rec, purpose);
         reg.redeem(recLater, purpose);
         vm.stopPrank();
-        (, uint64 last, ) = reg.signers(user);
+        (, uint64 last, , ) = reg.signers(user);
         assertEq(last, 9);
     }
 

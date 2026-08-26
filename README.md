@@ -18,7 +18,7 @@ Orbit it, and export OBJ or glTF straight from the viewer. `diagrams/turntable.m
 
 ## Status
 
-The design is complete and the firmware self-tests on every commit: 43 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
+The design is complete and the firmware self-tests on every commit: 44 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
 
 Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written but unverified against hardware, `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half. **There's a bounty for building one and signing with it, see `BOUNTY.md`.**
 
@@ -119,6 +119,37 @@ The limit is the one every hardware attestation has. As with a TPM quote or a Se
 
 Implementation in `firmware/attest.py`.
 
+## Proof of life
+
+Every dead-man switch in self-custody keys off signing activity, which answers
+the wrong question. "This key moved" is not "this person is alive": a stolen
+key resets the clock, and an owner who simply does not spend for a year looks
+dead. The touch gate measures a body, so CELL can separate them.
+
+A beacon is the attestation with no transaction under it. Fifteen seconds, no
+consumable, nothing signed with the seed. `CellRegistry.heartbeat` writes down
+when a living human was last proven present, and anything that needs to know
+can read it: an inheritance path, a recovery quorum, a multisig that wants a
+co-signer's pulse before treating them as present.
+
+Nothing new is signed. `actionDigest` already commits to the chain, the
+contract and the claimant, and takes a purpose word. The beacon is that
+function with a purpose carrying a period index, so it is the same record
+format, the same key and the same curve.
+
+**The date on the screen is the security control.** The device has no clock and
+does not pretend to. The period comes from the companion and is displayed as a
+date range, so the owner is the clock, and `heartbeat` accepts a beacon only
+while its period is the current one. A record harvested for a future period
+cannot be spent early and cannot be spent late. What remains is that a
+companion which tricks the owner into approving N future periods can keep a
+dead owner alive for N periods, at one gate and one wrong date each.
+
+`CellDormancy.sol` is the switch that reads it, in two phases on purpose. A
+claim releases nothing; it opens a challenge window, and one beacon during that
+window cancels it. A device that spent six months in a drawer is the ordinary
+case, not the attack, and fifteen seconds of a fingertip undoes it.
+
 ## What it protects against
 
 The device defeats remote malware, automated signing, signing at scale, and signing without the owner's knowledge. A compromised host cannot produce a pulse or a clotting sample, and there is no batch mode. Every signature costs a physical act, and at blood tier the rate is set by your body and not by the attacker's budget.
@@ -157,6 +188,7 @@ The wallet half is implemented here rather than delegated, because the gate has 
 | `addresses.py` | bech32 and bech32m, every script type, EIP-55 |
 | `eth.py` | RLP and EIP-1559, built on the device from fields it displays |
 | `eip712.py` | EIP-712 typed data for smart accounts, and the EIP-7702 delegation |
+| `beacon.py` | The beacon digest, and the period the owner reads |
 | `seedstore.py` | The seed at rest |
 | `qr.py` | The airgap: animated frames, and reassembly that refuses substitution |
 | `display.py` / `buttons.py` / `camera.py` | The screen, the four buttons, and the only way data gets in |
@@ -227,6 +259,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/tx.py` | Transactions and all three sighash algorithms |
 | `firmware/eth.py` | RLP and EIP-1559, built from displayed fields |
 | `firmware/eip712.py` | The smart-account path: typed data, and what a delegation costs |
+| `firmware/beacon.py` | Proof of life: the attestation with no transaction under it |
 | `firmware/secp256k1.py` | The curve both chains sign on |
 | `firmware/hashes.py` | RIPEMD-160 and Keccak-256, because the standard library will not |
 | `firmware/bip32.py` / `bip39.py` | HD derivation and the mnemonic |

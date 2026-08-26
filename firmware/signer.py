@@ -84,6 +84,14 @@ class SignRequest:
     operation: ops.Operation
     sighash: bytes                      # 32, what the wallet layer will sign
     requested_tier: Optional[Tier] = None
+    # Some operations attest and sign nothing. A proof of life is the whole of
+    # that set today: the claim is "a living human authenticated on this
+    # device in this period", and the attestation key in the secure element
+    # makes it. No spend key is involved, so the seed is not unwrapped and
+    # never reaches RAM. CONTRIBUTING.md names that exposure as one of the
+    # parts most worth attacking, and the cheapest way to survive an attack on
+    # it is not to be there.
+    needs_seed: bool = True
 
 
 @dataclass
@@ -310,7 +318,8 @@ class Signer:
         if not passed:
             raise Refused(gate_att.get("message", "Liveness gate rejected the sample."))
 
-        # 6. Unwrap. The key comes from stable inputs only — PIN plus the
+        # 6. Unwrap, unless there is nothing to sign with it. See needs_seed.
+        #    The key comes from stable inputs only — PIN plus the
         #    on-chip secret — because a key mixed with this capture's
         #    measurements could never reopen the seed it wrapped. What the
         #    gate gates is REACHING this step at all: the chain refuses above,
@@ -340,16 +349,19 @@ class Signer:
                     "Refused: the optical chamber did not answer as enrolled. "
                     f"Restore from your recovery words on a new build. ({e})"
                 ) from None
-        key = self.se.kdf(unwrap_context(pin, chamber))
-        seed = self._unwrap_seed(key)
+        if req.needs_seed:
+            key = self.se.kdf(unwrap_context(pin, chamber))
+            seed = self._unwrap_seed(key)
 
-        # 7. Sign, then zeroise on every path.
-        self._step("sign")
-        try:
-            signature = self._sign_digest(seed, req.sighash)
-        finally:
-            zeroise(seed)
-            self._step("zeroise")
+            # 7. Sign, then zeroise on every path.
+            self._step("sign")
+            try:
+                signature = self._sign_digest(seed, req.sighash)
+            finally:
+                zeroise(seed)
+                self._step("zeroise")
+        else:
+            signature = b""
 
         # 8. Attest the tier, bound to this sighash and a fresh counter.
         self._step("attest")
@@ -369,3 +381,10 @@ class Signer:
 # chain fails loudly instead of quietly.
 EXPECTED_ORDER = ["render", "policy", "confirm", "pin", "gate",
                   "unwrap", "sign", "zeroise", "attest"]
+
+# The same chain for an operation that signs nothing. Every gate before the
+# unwrap is identical; what is missing is the seed. Asserted in the tests
+# beside the one above, so a change that quietly starts unwrapping for a
+# beacon fails loudly.
+EXPECTED_ORDER_NO_SEED = ["render", "policy", "confirm", "pin", "gate",
+                          "unwrap", "attest"]

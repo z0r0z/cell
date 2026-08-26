@@ -51,6 +51,10 @@ SUITES = [
     # and the delegation that decides what every later signature means.
     ("EIP-712 and EIP-7702 — typed data, delegation, and what they bind",
      [sys.executable, "test_eip712.py"]),
+    # The beacon, against the registry's own vectors, and the one operation
+    # whose chain must not reach the seed.
+    ("proof of life — the beacon digest, the period, and the unwrap it skips",
+     [sys.executable, "test_beacon.py"]),
     ("seed store — AES-256-GCM wrap and tamper detection",
      [sys.executable, "seedstore.py"]),
     ("QR transport — framing and hostile frames",

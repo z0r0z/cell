@@ -368,6 +368,26 @@ their own owners. That is security consideration 2 of the EIP itself. Check the
 account's state against an explorer after a delegation lands and before you
 fund it. `VALIDATION.md` carries it open.
 
+### Proof of life
+
+The device signs one thing that authorises nothing. A beacon asserts that a
+living human authenticated here during one period, and it is the only operation
+whose chain never unwraps the seed: the claim is made by the attestation key in
+the secure element, so `signer.SignRequest(needs_seed=False)` skips the unwrap
+entirely and `EXPECTED_ORDER_NO_SEED` is asserted beside the ordinary order.
+
+Touch tier, by policy and by design. Proof of life that costs a lancet is proof
+of life nobody produces, and a dead-man switch that fires on the living is
+worse than no switch. `life.beacon` is in `KNOWN_OPS` and not in
+`ALWAYS_BLOOD`, and an owner who wants it blood-locked can still do that
+through the policy floor.
+
+The period is the whole of what the owner can check, so it is the first thing
+on the screen and it is spelled out as two dates. The chain enforces the rest:
+`heartbeat` takes a beacon only while its period is the current one, which
+means a harvested record cannot be spent early or late. `firmware/beacon.py`
+states plainly what that does and does not bound.
+
 ### Dual chain is nearly free
 
 Bitcoin and Ethereum both use secp256k1, so one signing core serves both. The difference is transaction encoding, not cryptography. The same spend pubkey can own value on either side, which means one identity and one blood-gated key rather than two devices.
@@ -1312,7 +1332,7 @@ A sequence of checks, not a schedule, with the parts in front of you this is a w
 | 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure, early D, late D, the drop and its direction, not on a curve fit |
 | 7 | **Spoof panel**, the reader is done | ROC generated, thresholds set, documented. **This is the result the whole design rests on** |
 | 8 | ATECC608B configured, zones locked, PIN counter live | `atecc_config.py verify --behaviour` passes every line BEFORE `lock-data`; `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
-| 9 | Firmware installed, `run_tests.py` green on the Pi | 43 suites pass on the device itself, not just your laptop |
+| 9 | Firmware installed, `run_tests.py` green on the Pi | 44 suites pass on the device itself, not just your laptop |
 | 10 | Provisioned, and the backup written down | `provision.py` re-reads its own seed; you have the words on paper |
 | 10a | Chamber enrolled (optional) | `provision.py enroll-chamber`. The seed re-wraps and still reopens. Back up `chamber.npz` beside the words |
 | 11 | Regtest round trip | `tools/regtest_e2e.py`. Core accepts and mines what the device signed |
