@@ -171,6 +171,12 @@ class Provisioning:
     seed_pair: "duress.SeedPair"
     accounts: list[Account] = field(default_factory=list)
     master_fingerprint: bytes = b"\x00\x00\x00\x00"
+    # The chain this device was provisioned for. Recorded because every
+    # account is recorded against it and NOTHING else can recover it at boot:
+    # a device provisioned for testnet whose loop defaults to mainnet finds no
+    # accounts, cannot show a receive address, and cannot sign -- it is simply
+    # a brick with a confusing error. app.load_device reads it from here.
+    network: str = "mainnet"
     # The second wallet's watch-only half. Present whether or not a duress PIN
     # was configured, for the same reason the second blob is: a record that
     # appears only on devices with a decoy is a record that announces them.
@@ -204,12 +210,22 @@ class Provisioning:
         # actually produced. Otherwise a coordinator could register a quorum
         # that merely claims to include us.
         want = {a.xpub for a in self.accounts if a.network == ms.network}
+        if not want:
+            # The commonest way to land here is a forgotten --network, not a
+            # bad xpub. Saying "this seed does not derive that xpub" sends
+            # somebody hunting a key that was correct all along.
+            raise WalletError(
+                f"this device has no accounts on {ms.network}; it was "
+                f"provisioned for "
+                f"{', '.join(sorted({a.network for a in self.accounts})) or 'nothing'}. "
+                f"Register the quorum on the network this device is on.")
         for c in ours:
             if c.xpub not in want:
                 raise WalletError(
                     f"the co-signer entry for this device quotes an xpub this "
-                    f"seed does not derive at {c.path}. Take your xpub from "
-                    f"`provision.py show`, not from the coordinator.")
+                    f"seed does not derive at {c.path} on {ms.network}. Take "
+                    f"your xpub from `provision.py show`, not from the "
+                    f"coordinator.")
         if any(m.label == ms.label for m in self.multisig):
             raise WalletError(f"a quorum labelled {ms.label!r} is already registered")
         self.multisig.append(ms)
@@ -314,7 +330,8 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
     return Provisioning(seed_pair=pair, accounts=accounts,
                         master_fingerprint=root.fingerprint(),
                         decoy_accounts=decoy_accounts,
-                        decoy_fingerprint=decoy_root.fingerprint())
+                        decoy_fingerprint=decoy_root.fingerprint(),
+                        network=network)
 
 
 # --------------------------------------------------------------------------

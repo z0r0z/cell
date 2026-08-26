@@ -41,6 +41,41 @@ from se import SoftSE                                           # noqa: E402
 BLOB = "seed.blob"
 ACCOUNTS = "accounts.json"
 CHAMBER = "chamber.npz"
+# Only ever written on the --soft path. See _soft_secret.
+SOFT_SE = "SOFT-SE-INSECURE.json"
+
+
+def _soft_secret(directory: Path) -> bytes:
+    """A stable software-chip secret, so a --soft rehearsal survives a second
+    command.
+
+    SoftSE draws a random secret at construction, so every invocation of this
+    tool got a DIFFERENT software chip. `new --soft` wrapped the seed under
+    one; `enroll-chamber --soft` then derived another and reported "nothing on
+    this device opens with that PIN", which reads as a bricked device rather
+    than as an artefact of the rehearsal.
+
+    That mattered more than it looks. Enrolment is the one step with no way
+    back except the words, and it was the one step nobody could practise
+    before doing it for real on hardware.
+
+    Written in the clear, under a name that says what it is. It exists only on
+    the --soft path: a device with a real ATECC608B never has one and never
+    reads one, because the secret it needs is inside the chip.
+    """
+    p = Path(directory) / SOFT_SE
+    if p.exists():
+        return bytes.fromhex(json.loads(p.read_text())["secret"])
+    secret = os.urandom(32)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "_comment": "Software secure-element secret for a --soft REHEARSAL. "
+                    "NOT a security boundary. A seed provisioned this way "
+                    "must never hold real funds.",
+        "secret": secret.hex(),
+    }, indent=2) + "\n")
+    p.chmod(0o600)
+    return secret
 
 
 def _se(args):
@@ -49,7 +84,9 @@ def _se(args):
         print("! Using the SOFTWARE secure element. This is for rehearsal on a")
         print("! laptop only — it is not a security boundary, and a seed")
         print("! provisioned this way must never hold real funds.\n")
-        return SoftSE(pin=args.pin, duress_pin=args.duress_pin)
+        where = getattr(args, "out", None) or getattr(args, "dir", None) or "."
+        return SoftSE(pin=args.pin, duress_pin=args.duress_pin,
+                      secret=_soft_secret(Path(where)))
     try:
         from se_atecc import ATECC608B
         return ATECC608B()
@@ -312,6 +349,7 @@ def _load(d: Path) -> wallet.Provisioning:
     data = json.loads((d / ACCOUNTS).read_text())
     prov = wallet.Provisioning(
         seed_pair=duress.SeedPair.unpack((d / BLOB).read_bytes()),
+        network=data["network"],
         master_fingerprint=bytes.fromhex(data["master_fingerprint"]),
         accounts=[wallet.Account(**a) for a in data["accounts"]],
         decoy_fingerprint=bytes.fromhex(data.get("decoy_fingerprint")
@@ -345,6 +383,11 @@ def cmd_multisig(args) -> int:
     """
     d = Path(args.dir)
     prov = load(d)
+    # Default to the network this device was provisioned for rather than to
+    # mainnet. Forgetting --network on a testnet device produced a refusal
+    # that blamed the xpub, which is the one part that was right.
+    if args.network is None:
+        args.network = prov.network
     cosigners = []
     for n, line in enumerate(Path(args.cosigners).read_text().splitlines(), 1):
         line = line.strip()
@@ -507,9 +550,14 @@ def cmd_enroll_chamber(args) -> int:
     try:
         mnemonic = bytes(duress.unwrap_any(prov.seed_pair, old_key)).decode()
     except duress.NoBlobOpened:
-        print("Nothing on this device opens with that PIN. If a chamber is "
-              "already enrolled, the seed is bound to it and this is the "
-              "expected answer — there is no way back except the words.")
+        print("Nothing on this device opens with that PIN.")
+        if args.soft:
+            print(f"\nOn --soft, check {SOFT_SE} is still beside the seed: the "
+                  f"software\nsecure element keeps its secret there, and "
+                  f"without it every command\nderives a different chip.")
+        print("\nIf a chamber is already enrolled, the seed is bound to it and "
+              "this is\nthe expected answer — there is no way back except the "
+              "words.")
         return 1
 
     decoy = None
@@ -602,8 +650,9 @@ def main() -> int:
     p.add_argument("--threshold", type=int, required=True)
     p.add_argument("--cosigners", required=True,
                    help="file of `label fingerprint path xpub` lines")
-    p.add_argument("--network", default="mainnet",
-                   choices=["mainnet", "testnet", "regtest"])
+    p.add_argument("--network", default=None,
+                   choices=["mainnet", "testnet", "regtest"],
+                   help="defaults to the network this device was provisioned for")
     p.add_argument("--wrapped", action="store_true", help="p2sh-p2wsh")
     p.add_argument("--unsorted", action="store_true",
                    help="do NOT sort keys (BIP-67 is the default)")

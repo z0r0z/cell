@@ -554,6 +554,12 @@ def load_device(directory: str, console: bool = False, **kw) -> Device:   # prag
             finally:
                 head.close()
 
+    # The network comes from the RECORD, not from Device's default. Every
+    # account is filed under it, so a testnet device booting as mainnet finds
+    # none of its own: RECEIVE says "no account" and signing dies in
+    # _watch_root, both of which read as a broken provisioning rather than as
+    # a boot that guessed.
+    kw.setdefault("network", prov.network)
     return Device(prov=prov, se=se, display=disp,
                   read_chamber=read_chamber,
                   buttons=btn.open_buttons(console),
