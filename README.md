@@ -18,7 +18,7 @@ Orbit it, and export OBJ or glTF straight from the viewer. `diagrams/turntable.m
 
 ## Status
 
-The design is complete and the firmware self-tests on every commit: 45 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
+The design is complete and the firmware self-tests on every commit: 46 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
 
 Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written but unverified against hardware, `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half. **There's a [bounty](https://poidh.xyz/mainnet/bounty/24) for building one and signing with it. `BOUNTY.md` says what a claim looks like, and a reader-only run counts.**
 
@@ -118,6 +118,38 @@ What that buys is a signature nobody can farm. A script can produce a million of
 The limit is the one every hardware attestation has. As with a TPM quote or a Secure Enclave receipt, the claim rests on the firmware and the tamper seal: someone who opens the case and extracts the key can sign records without bleeding. So treat it as raising the cost of faking a human, not as proof of a unique one. Co-signers register firmware hashes alongside keys, and `verify()` refuses builds it does not recognise.
 
 Implementation in `firmware/attest.py`.
+
+## One of these devices bled, and you cannot tell which
+
+The record in `attest.py` carries the device's own key, so publishing one says
+"this address is a CELL device, and this action was authorised with blood".
+That is why the default is to strip it, and it throws away the part of this
+design with the widest reach.
+
+The interesting claim is not "device 7 bled". It is "a human bled", and that is
+a rate limit denominated in something nobody can buy more of. A script produces
+a million signatures. A body produces about two a day, each costing a lancet
+and ten minutes. Allowlists, mints, quorum votes and one-human-one-action all
+want exactly that, and none of them want to know which device.
+
+`firmware/ring.py` signs the claim as one member of a registered set, using
+LSAG over the same secp256k1 everything else here signs on. A key image
+`I = d · H(event ‖ P)` makes two claims from one device in one event link, so
+nobody votes twice — and makes claims in different events unlinkable, so
+nobody accumulates a voting history. That second half is the one people get
+wrong, and it is the difference between resisting sybils and publishing a
+dossier.
+
+The firmware and calibration hashes are deliberately absent from this claim.
+They are what makes the ordinary record auditable, and they are exactly what
+would narrow a ring of forty to a ring of three. What replaces them is the
+ring: a verifier admits a set of keys, and it already checked their firmware
+when it registered them.
+
+Both halves cost about 2n scalar multiplications for a ring of n, which is
+slow in pure Python and does not matter, because the ring computes while the
+sample clots. It is not cheap enough to verify on chain; use it off chain or
+in an allowlist a coordinator maintains.
 
 ## Proof of life
 
@@ -289,6 +321,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/eip712.py` | The smart-account path: typed data, and what a delegation costs |
 | `firmware/beacon.py` | Proof of life: the attestation with no transaction under it |
 | `firmware/chamber_trng.py` | Seed entropy from the chamber, and the health tests it has to pass |
+| `firmware/ring.py` | The attestation with the device's name taken off it |
 | `firmware/secp256k1.py` | The curve both chains sign on |
 | `firmware/hashes.py` | RIPEMD-160 and Keccak-256, because the standard library will not |
 | `firmware/bip32.py` / `bip39.py` | HD derivation and the mnemonic |

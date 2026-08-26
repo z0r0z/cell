@@ -13,7 +13,7 @@ samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py`, 45 suites, no hardware required.
+`python firmware/run_tests.py`, 46 suites, no hardware required.
 
 ### The signing stack
 
@@ -60,7 +60,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Speckle physics | Ornstein-Uhlenbeck field, exposure-integrated | Reproduces frozen and liquid limits; exposure, frame interval and grain each swept against the G5/G6 thresholds |
 | Drift margins | 7 disturbance axes, bisected | Tightest budget reported and ranked; a finite tolerance on an invariance axis fails the suite |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
-| A fresh clone | `git clone`, install, `run_tests.py` | 45 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
+| A fresh clone | `git clone`, install, `run_tests.py` | 46 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
 
 ### Multisig, and the registry it depends on
 
@@ -340,6 +340,43 @@ misbehave and watching it refuse tests the property itself.
 - **Sixteen frames is eight pairs.** Enough by a wide margin on a 768 px ROI,
   but it is the PUF's frame count rather than one chosen for this. A chamber
   that turns out noisier or quieter than the simulation may want its own.
+
+## The unlinkable attestation
+
+| Claim | Method | Result |
+|---|---|---|
+| **Every member can sign** | Rings of 2, 3, 5 and 8, every index in each | All sign and all verify |
+| **The signature is bound to the ring** | A member swapped, added, removed, and the ring reordered | None verifies. The message commits to the ring, so a signature cannot be lifted onto a smaller one, and a ring of two names the signer half the time |
+| **...and to the claim** | Tier, action digest and event each changed | None verifies |
+| **...and to every byte of itself** | `c0`, each scalar, and the key image each altered | None verifies |
+| **An outsider cannot sign** | A key that is not in the ring | Refused at signing, rather than producing something that verifies against nothing |
+| **Double voting is caught** | Two claims from one device in one event, including over two different actions | Same key image both times. One device gets one vote per event, whatever it votes on |
+| **Voting history is not published** | The same device in two different events | Unrelated images. The event tag is inside the hash-to-point, so nothing joins a device's rounds up |
+| **An image cannot be borrowed** | Sign as one device, present another device's image | Refused. The verification equation only closes for the image the signer's own key produces, so this cannot be used to vote twice or to frame somebody |
+| **The nonce** | The deterministic form twice, the hedged form twice | Deterministic repeats exactly, hedged does not, all four verify. A repeated `u` leaks the key outright here, which is sharper than ECDSA, so it is derived from the key and the message and hedged with fresh randomness rather than drawn from the RNG alone |
+| **Malformed input** | A ring of one, a ring of zero, a duplicate member, a member off the curve, a short key, a claim with no event, an unknown tier, a short digest, too few scalars, an out-of-range scalar, a key image of the wrong length, a key image that is not a point | Twelve refusals, none of them a crash |
+| **Cost** | Measured, rings of 4 to 32 | 0.04 s to 0.59 s to sign on a desktop, similar to verify. A Pi Zero 2 W is 15-25x slower and a blood capture takes 600 s, so the ring computes while the sample clots |
+
+### Open on this path
+
+- **Anonymity is a theorem, not a test.** That a ring signature hides its
+  signer is a property of LSAG (Liu, Wei and Wong, 2004), not something
+  `test_ring.py` establishes. What the suite asserts is the structural half:
+  every signature is the same shape, all verify, and no component varies with
+  the signer's position in a way the test can find. Treat the rest as resting
+  on the construction.
+- **No independent implementation has checked this one.** Every other
+  signature in this repo is cross-checked against somebody else's code:
+  libsecp256k1 for BIP-340, `eth_account` for EIP-712, an interpreter for the
+  scripts. There is no equivalent here, and a hand-rolled ring signature is
+  exactly the sort of thing that wants one. The group law underneath it is
+  checked by `test_curve.py` against the affine definition.
+- **Not verifiable on chain.** About 2n scalar multiplications, with no
+  precompile to lean on. A contract that wants this needs a different
+  construction.
+- **Nothing consumes it yet.** `CellRegistry` verifies the ordinary record.
+  Nothing in `contracts/` reads a ring claim, and the coordinator side that
+  would collect key images and refuse repeats is not written.
 
 ## Somebody else's bug, checked against this design
 

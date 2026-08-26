@@ -59,6 +59,10 @@ SUITES = [
     # image is the PUF, so one frame is a constant, not a sample.
     ("chamber entropy — the residual, its health tests, and the XOR",
      [sys.executable, "test_chamber_trng.py"]),
+    # The attestation with the device's name taken off it, and the key image
+    # that stops one device voting twice without publishing a voting history.
+    ("unlinkable attestation — LSAG, and what the key image links",
+     [sys.executable, "test_ring.py"]),
     ("seed store — AES-256-GCM wrap and tamper detection",
      [sys.executable, "seedstore.py"]),
     ("QR transport — framing and hostile frames",
