@@ -98,24 +98,71 @@ def _se(args):
         raise SystemExit(1)
 
 
-def _entropy(nbytes: int, se) -> bytes:
-    """Kernel randomness, XORed with the chip's if there is one.
+def _chamber_entropy(nbytes: int) -> "tuple[bytes, list[str]]":
+    """A third term, from the laser and the camera that watch blood clot.
 
-    XOR of independent sources is at least as good as the better of them, so
-    this cannot be worse than trusting one — which is the whole reason to do it.
+    Optional in every sense. A build with no sensor head, a chamber that is
+    dark, a laser that is dead, or a sample that fails its health tests all
+    return zeros, and zeros XOR into nothing. The seed is never weaker for
+    having asked.
+
+    What makes it worth asking is that this is the only one of the three a
+    person can check. The kernel pool and the ATECC are both sound and both
+    opaque; this one prints the min-entropy it measured on the sample it
+    actually drew. See firmware/chamber_trng.py for why the source is the
+    difference between frames rather than the frames.
     """
-    kernel = os.urandom(nbytes)
+    try:
+        import chamber_trng
+        import hardware
+    except ImportError:
+        return bytes(nbytes), ["  chamber: no sensor libraries here, skipped"]
+    try:
+        # The same burst optical_puf reads, taken raw. That module averages
+        # the frames because it wants the pattern; this one subtracts them
+        # because it wants what the averaging was removing.
+        frames = hardware.RealSensorHead().read_chamber_burst()
+    except Exception as e:                                      # noqa: BLE001
+        return bytes(nbytes), [f"  chamber: not available ({e}), skipped"]
+    try:
+        raw, report = chamber_trng.harvest(frames, nbytes)
+    except chamber_trng.NotEnoughEntropy as e:
+        return bytes(nbytes), [f"  chamber: REFUSED, contributing nothing. {e}"]
+    return raw, ["  chamber: mixed in"] + report.lines()
+
+
+def _entropy(nbytes: int, se) -> bytes:
+    """Kernel randomness, XORed with the chip's and with the chamber's.
+
+    XOR of independent sources is at least as good as the best of them, so
+    this cannot be worse than trusting one — which is the whole reason to do
+    it, and the reason a source is allowed to contribute zeros rather than
+    being allowed to fail the provisioning.
+    """
+    out = bytearray(os.urandom(nbytes))
+    used = ["kernel CSPRNG"]
+
     try:
         import cryptoauthlib as cal
         buf = bytearray(32)
         if cal.atcab_random(buf) == cal.Status.ATCA_SUCCESS:
-            chip = bytes(buf) * ((nbytes // 32) + 1)
-            print("  entropy: kernel CSPRNG XOR ATECC608B hardware RNG")
-            return bytes(a ^ b for a, b in zip(kernel, chip[:nbytes]))
+            chip = (bytes(buf) * ((nbytes // 32) + 1))[:nbytes]
+            for i, b in enumerate(chip):
+                out[i] ^= b
+            used.append("ATECC608B hardware RNG")
     except Exception:                                           # noqa: BLE001
         pass
-    print("  entropy: kernel CSPRNG only")
-    return kernel
+
+    chamber, notes = _chamber_entropy(nbytes)
+    if any(chamber):
+        for i, b in enumerate(chamber):
+            out[i] ^= b
+        used.append("optical chamber")
+
+    print(f"  entropy: {' XOR '.join(used)}")
+    for line in notes:
+        print(line)
+    return bytes(out)
 
 
 def _confirm_words(mnemonic: str) -> None:

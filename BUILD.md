@@ -1102,6 +1102,31 @@ Two seeds, always, whether or not you asked for a duress PIN. See §12's duress 
 
 Before it reports success it re-reads the store through the same path signing uses, verify_pin, then the chip's KDF, then decrypt, and refuses to declare the device provisioned unless the words come back byte for byte. With a duress PIN it does this twice, and checks that the duress PIN opens the *decoy* rather than the real wallet. A device that cannot reopen its own seed is the worst outcome available here, and it costs nothing to rule out.
 
+### The third seed source
+
+`provision.py new` XORs three sources: the kernel CSPRNG, the ATECC608B's
+hardware RNG, and the optical chamber. The first two are sound and neither can
+be audited by the person whose coins depend on them. The third prints what it
+measured.
+
+The source is not the speckle pattern. That pattern is the PUF and reproduces
+by construction, so a seed drawn from one frame would be identical on every
+power cycle of that device while passing every statistical test anybody ran on
+it. What varies is the reading: photon shot noise, sensor read noise, and the
+diode's own amplitude wander. So `chamber_trng.py` subtracts disjoint pairs of
+frames, which cancels the field and leaves the noise, and measures what is
+left with the two SP 800-90B estimators plus the continuous repetition-count
+and adaptive-proportion tests.
+
+A sample is refused unless its measured min-entropy is twice the bits being
+asked for. Twice, because per-bit min-entropy does not compose to joint
+min-entropy under correlation the estimators cannot see, and a margin is what
+stands in for a proof this cannot give.
+
+A refusal costs nothing. All three sources are XORed, so a chamber that is
+dark, overexposed, stuck or absent contributes zeros and says which. A build
+with no sensor head provisions exactly as it did before.
+
 ### Configuring the ATECC608B
 
 **This is the step that used to be missing, and it is the one that is permanent.** The slot map below is not something to transcribe by hand from the datasheet; `tools/atecc_config.py` builds it, shows it to you, writes it, reads it back and only then locks.
@@ -1332,7 +1357,7 @@ A sequence of checks, not a schedule, with the parts in front of you this is a w
 | 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure, early D, late D, the drop and its direction, not on a curve fit |
 | 7 | **Spoof panel**, the reader is done | ROC generated, thresholds set, documented. **This is the result the whole design rests on** |
 | 8 | ATECC608B configured, zones locked, PIN counter live | `atecc_config.py verify --behaviour` passes every line BEFORE `lock-data`; `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
-| 9 | Firmware installed, `run_tests.py` green on the Pi | 44 suites pass on the device itself, not just your laptop |
+| 9 | Firmware installed, `run_tests.py` green on the Pi | 45 suites pass on the device itself, not just your laptop |
 | 10 | Provisioned, and the backup written down | `provision.py` re-reads its own seed; you have the words on paper |
 | 10a | Chamber enrolled (optional) | `provision.py enroll-chamber`. The seed re-wraps and still reopens. Back up `chamber.npz` beside the words |
 | 11 | Regtest round trip | `tools/regtest_e2e.py`. Core accepts and mines what the device signed |

@@ -55,6 +55,10 @@ SUITES = [
     # whose chain must not reach the seed.
     ("proof of life — the beacon digest, the period, and the unwrap it skips",
      [sys.executable, "test_beacon.py"]),
+    # The third seed source, and the failure it would have had: a speckle
+    # image is the PUF, so one frame is a constant, not a sample.
+    ("chamber entropy — the residual, its health tests, and the XOR",
+     [sys.executable, "test_chamber_trng.py"]),
     ("seed store — AES-256-GCM wrap and tamper detection",
      [sys.executable, "seedstore.py"]),
     ("QR transport — framing and hostile frames",

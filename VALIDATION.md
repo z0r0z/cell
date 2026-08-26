@@ -13,7 +13,7 @@ samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py`, 44 suites, no hardware required.
+`python firmware/run_tests.py`, 45 suites, no hardware required.
 
 ### The signing stack
 
@@ -60,7 +60,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Speckle physics | Ornstein-Uhlenbeck field, exposure-integrated | Reproduces frozen and liquid limits; exposure, frame interval and grain each swept against the G5/G6 thresholds |
 | Drift margins | 7 disturbance axes, bisected | Tightest budget reported and ranked; a finite tolerance on an invariance axis fails the suite |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
-| A fresh clone | `git clone`, install, `run_tests.py` | 44 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
+| A fresh clone | `git clone`, install, `run_tests.py` | 45 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
 
 ### Multisig, and the registry it depends on
 
@@ -310,6 +310,32 @@ misbehave and watching it refuse tests the property itself.
 - **`EPOCH_SECONDS` is fixed at 30 days.** Deliberate, because a device with no
   clock has to compute the period from a number both sides already know, but it
   means one registry cannot serve a quarterly cadence and a monthly one.
+
+## Chamber entropy
+
+| Claim | Method | Result |
+|---|---|---|
+| **It is not the PUF** | The same simulated chamber read twice, with different noise | Different bytes. Read with the *same* noise and a *different* diffuser it gives the same bytes, which is the field cancelling in the subtraction rather than being hashed. That is the mechanism, stated as a test |
+| **A static field is not a source** | Identical frames, and a single frame | The residual is exactly zero and both are refused. This is the failure the whole design exists to avoid, and it would have passed every statistical test |
+| **Pairs are disjoint** | Six frames through `residuals` | Three differences, (0,1) (2,3) (4,5). Successive differences would share a frame, and a shared term is a correlation the estimators cannot see. An odd frame is dropped rather than reused |
+| **The ways a chamber fails** | A stuck sensor, a dark chamber, an overexposed one, and a sample too small to cover 256 bits with margin | Each refused, and each says which test it failed. A laser still settling puts a DC step between paired frames and is survived, because the threshold is the residual's own median |
+| **The health tests** | SP 800-90B 4.4.1 repetition count and 4.4.2 adaptive proportion, against stuck and biased inputs, and a fair sample | Both trip on the bad inputs and clear on the fair one |
+| **The mix is XOR** | Three sources combined, then one replaced with zeros | A dead chamber leaves the other two exactly as they were. Nothing the chamber returns can reduce the entropy of the seed |
+
+### Open on this path
+
+- **The estimator is simulated, as everything on this rig is.** The noise
+  model here is additive and independent of intensity. Real shot noise is
+  Poisson and scales with it, so the field cancels only partially on hardware
+  and the measured per-bit figure will differ. The health tests and the
+  2x margin are what the design leans on, not the simulated number.
+- **Nobody has run it on a chamber.** `provision.py` reads
+  `RealSensorHead.read_chamber_burst`, which is in the same untested-driver
+  bucket as the rest of `hardware.py`. Until a build exists, the printed
+  min-entropy is a number the code would produce and not one it has.
+- **Sixteen frames is eight pairs.** Enough by a wide margin on a 768 px ROI,
+  but it is the PUF's frame count rather than one chosen for this. A chamber
+  that turns out noisier or quieter than the simulation may want its own.
 
 ## Written but unverified
 

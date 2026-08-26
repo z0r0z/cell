@@ -18,7 +18,7 @@ Orbit it, and export OBJ or glTF straight from the viewer. `diagrams/turntable.m
 
 ## Status
 
-The design is complete and the firmware self-tests on every commit: 44 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
+The design is complete and the firmware self-tests on every commit: 45 suites covering the signing stack against published test vectors, both liveness gates, the whole device loop, and the documented build sequence driven end to end. Bitcoin Core accepts and mines what it signs.
 
 Nothing has been built on a bench yet. The sensor head, the panel, the buttons and the gate chip are written but unverified against hardware, `VALIDATION.md` lists each one and what closes it. Start with the reader kit: $62 of hardware plus $31 of consumables, and a weekend proves the sensing before you spend anything on the wallet half. **There's a bounty for building one and signing with it, see `BOUNTY.md`.**
 
@@ -206,6 +206,32 @@ And `tools/regtest_e2e.py` asks the only question that settles anything on its o
 
 `firmware/test_wallet.py` and `firmware/test_app.py` are the other half of the argument. They are a list of the ways hardware wallets have actually lost people's money, fee inflation through a lying witness UTXO, change substitution, a co-signer swapped out of a quorum, a key quoted at a path that does not derive it, sighash downgrades, calldata smuggled into a transfer, chain-id replay. Each written as a hostile input, each of which must be refused.
 
+## Where the seed comes from
+
+Most hardware wallets draw the seed from one or two sources you are asked to
+take on faith. This one draws from three, and the third can be measured.
+
+The kernel CSPRNG and the ATECC608B's hardware RNG are both sound and both
+opaque: a ring oscillator behind Linux's pool, and Microchip's behind a
+datasheet paragraph. The laser and the lensless camera already in the device
+are neither. `provision.py` takes a third term from them and prints the
+min-entropy it measured on the sample it actually drew, using the two NIST SP
+800-90B estimators and taking the smaller.
+
+The easy way to get this wrong is instructive. A speckle image is the optical
+PUF, reproducible by construction, so a seed drawn from one frame would be the
+same on every power cycle of that device forever while passing every
+statistical test. The randomness is not in the pattern. It is in what changes
+between frames, so the source is the difference between disjoint pairs of
+them, where the static field cancels and photon shot noise does not.
+
+Nice symmetry, and it is load-bearing: the PUF keeps the cells that are stable
+and discards the rest, and this wants exactly what it discarded.
+
+All three are XORed. A chamber that is dark, blocked, overexposed or simply
+absent contributes zeros and says so, and zeros XOR into nothing, so the seed
+is never weaker for having asked.
+
 ## Keys and backup
 
 The device holds a standard BIP39 seed, encrypted at rest and unwrapped only after the gate passes. The unwrapping key comes from your PIN and the secure element's own secret, so the encrypted seed is inert on any other machine and recoverable on this one. Back it up on paper or steel as with any hardware wallet. If the device fails, restore to a Ledger, a Trezor or a replacement build.
@@ -260,6 +286,7 @@ The `edta` row is the interesting one: anticoagulated tube blood is chemically i
 | `firmware/eth.py` | RLP and EIP-1559, built from displayed fields |
 | `firmware/eip712.py` | The smart-account path: typed data, and what a delegation costs |
 | `firmware/beacon.py` | Proof of life: the attestation with no transaction under it |
+| `firmware/chamber_trng.py` | Seed entropy from the chamber, and the health tests it has to pass |
 | `firmware/secp256k1.py` | The curve both chains sign on |
 | `firmware/hashes.py` | RIPEMD-160 and Keccak-256, because the standard library will not |
 | `firmware/bip32.py` / `bip39.py` | HD derivation and the mnemonic |
