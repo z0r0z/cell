@@ -58,7 +58,7 @@ def cmd_atecc(args) -> int:
     a counter that survives being tested is a counter that was never tested. Do
     it on a chip that holds nothing, before the device is provisioned.
     """
-    from se import PinLockout
+    from se import MAX_PIN_ATTEMPTS, PinLockout
     from se_atecc import ATECC608B, DeviceError
     import signer
 
@@ -99,7 +99,15 @@ def cmd_atecc(args) -> int:
     if not check("the correct PIN is accepted", ok_pin,
                  "" if ok_pin else "wrong --pin, or the verifier was never written"):
         return 1
-    check("a correct PIN restores the budget", se.attempts_remaining() == start)
+    # Against the FULL budget, not against whatever the chip happened to show
+    # when this started. A correct PIN moves the baseline to the counter, so
+    # the answer afterwards is always MAX_PIN_ATTEMPTS -- while `start` is
+    # lower on any chip that has ever seen a wrong PIN, which includes every
+    # chip this tool has been run on before. Comparing the two reported a
+    # failure for behaviour that was correct.
+    check("a correct PIN restores the budget",
+          se.attempts_remaining() == MAX_PIN_ATTEMPTS,
+          f"{se.attempts_remaining()} of {MAX_PIN_ATTEMPTS}")
 
     key1 = se.kdf(signer.unwrap_context(args.pin))
     check("...and authorises a derive", len(key1) == 32)
@@ -151,6 +159,34 @@ def cmd_atecc(args) -> int:
 # --------------------------------------------------------------------------
 
 
+# A gap longer than this ends the burst of edges belonging to one transition.
+# Far above any switch's ringing and far below how long a finger stays down,
+# which is the whole reason it can separate the two.
+SETTLE_GAP_S = 0.05
+
+
+def _bounce_ms(edges: list[float]) -> float:
+    """How long the FIRST transition rang, in milliseconds.
+
+    Every edge inside the capture window used to count, so the span ran from
+    the press through the release: `edges[-1] - edges[0]` is how long a finger
+    was on the button, typically 100-300 ms. Against a 30 ms debounce that
+    fails every switch ever made, and the advice printed underneath is to
+    raise DEBOUNCE_S past a fifth of a second -- on CONFIRM, the button that
+    means consent.
+
+    Bounce is a property of ONE transition, so only the first burst counts.
+    """
+    if len(edges) < 2:
+        return 0.0
+    last = edges[0]
+    for t in edges[1:]:
+        if t - last > SETTLE_GAP_S:
+            break                       # the burst ended; the rest is release
+        last = t
+    return (last - edges[0]) * 1000.0
+
+
 def cmd_buttons(args) -> int:
     """Measure how long each switch actually bounces.
 
@@ -180,6 +216,7 @@ def cmd_buttons(args) -> int:
         b.when_pressed = lambda: edges.append(time.monotonic())
         b.when_released = lambda: edges.append(time.monotonic())
 
+
         print(f"  press {name} ({args.presses}x) ", end="", flush=True)
         spans = []
         for _ in range(args.presses):
@@ -191,7 +228,7 @@ def cmd_buttons(args) -> int:
                 print("  timed out")
                 break
             time.sleep(0.5)                 # let the ringing finish
-            spans.append((edges[-1] - edges[0]) * 1000 if len(edges) > 1 else 0.0)
+            spans.append(_bounce_ms(list(edges)))
             print(".", end="", flush=True)
         b.close()
 
@@ -402,6 +439,54 @@ def cmd_thermal(args) -> int:
 # --------------------------------------------------------------------------
 
 
+def cmd_selftest(args) -> int:
+    """The arithmetic in this file, without any of the hardware.
+
+    Both bench checks shipped giving false alarms, and neither could have been
+    caught by running the tool -- you need the parts, and the parts are what
+    the tool exists to test. The pure functions underneath them do not need
+    the parts, so they get checked here on every commit.
+    """
+    print("Bench arithmetic — no hardware required\n")
+    ms = 0.001
+    cases = [
+        # A real press: 4 ms of ring, held 180 ms, 3 ms of ring on release.
+        # The whole capture used to be measured, reporting 183 ms and telling
+        # the builder to raise the debounce past a fifth of a second.
+        ("a press separates from its release",
+         [0, 1 * ms, 2 * ms, 4 * ms, 180 * ms, 181 * ms, 183 * ms], 4.0),
+        ("a clean edge is zero bounce", [0.0], 0.0),
+        ("a single pair still measures", [0.0, 6 * ms], 6.0),
+        ("a long ring is reported in full",
+         [0, 10 * ms, 20 * ms, 30 * ms, 45 * ms, 300 * ms], 45.0),
+        ("nothing seen is zero", [], 0.0),
+    ]
+    ok = True
+    for label, edges, want in cases:
+        got = _bounce_ms(list(edges))
+        good = abs(got - want) < 0.01
+        ok &= good
+        print(f"  {label:<52}{'PASS' if good else 'FAIL'}"
+              + ("" if good else f"   got {got:.1f} ms, want {want:.1f}"))
+
+    # The budget a correct PIN restores is the FULL one, never whatever the
+    # chip showed when the tool started.
+    from se import MAX_PIN_ATTEMPTS, SoftSE
+    se = SoftSE(pin="12345678")
+    se.verify_pin("00000000")                       # spend one
+    started_at = se.attempts_remaining()
+    se.verify_pin("12345678")                       # then get it right
+    good = (started_at < MAX_PIN_ATTEMPTS
+            and se.attempts_remaining() == MAX_PIN_ATTEMPTS)
+    ok &= good
+    print(f"  {'a correct PIN restores the full budget':<52}"
+          f"{'PASS' if good else 'FAIL'}")
+
+    print("\n" + ("PASS" if ok else "FAIL"))
+    print("\nThe checks that need the parts are still open — see VALIDATION.md.")
+    return 0 if ok else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -422,6 +507,8 @@ def main() -> int:
     p.add_argument("--console", action="store_true")
     p.set_defaults(fn=cmd_display)
 
+    sub.add_parser("selftest", help="the arithmetic, without the hardware"
+                   ).set_defaults(fn=cmd_selftest)
     p = sub.add_parser("thermal", help="SoC temperature in the sealed case")
     p.add_argument("--minutes", type=float, default=10.0,
                    help="default 10, the length of a blood capture")

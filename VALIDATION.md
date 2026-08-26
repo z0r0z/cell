@@ -13,7 +13,7 @@ samples. That step is one of the build milestones in `BUILD.md` §15.
 
 ## Verified in CI, every commit
 
-`python firmware/run_tests.py` — 39 suites, no hardware required.
+`python firmware/run_tests.py` — 40 suites, no hardware required.
 
 ### The signing stack
 
@@ -60,7 +60,7 @@ trip against our own implementation proves nothing, so none of these are that.
 | Speckle physics | Ornstein-Uhlenbeck field, exposure-integrated | Reproduces frozen and liquid limits; exposure, frame interval and grain each swept against the G5/G6 thresholds |
 | Drift margins | 7 disturbance axes, bisected | Tightest budget reported and ranked; a finite tolerance on an invariance axis fails the suite |
 | Mechanical drawing | Regenerated from the mesh | Byte-identical, enforced in CI |
-| A fresh clone | `git clone`, install, `run_tests.py` | 39 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
+| A fresh clone | `git clone`, install, `run_tests.py` | 40 suites pass; every path and command the docs name resolves; the LFS mesh arrives as a mesh; all four generators reproduce `models/`, `diagrams/` and `viewer/` byte for byte |
 
 ### Multisig, and the registry it depends on
 
@@ -167,6 +167,7 @@ silently.
 | **Taproot** | libsecp256k1 via `coincurve` — the implementation Bitcoin Core itself signs with | Our BIP-341 output key equals its `tweak_add`; it verifies our BIP-340 signature and we verify its own over the same digest; tampered, cross-transaction and untweaked-key signatures are all rejected. Script execution is still uncovered — no interpreter available implements it |
 | **The runbook itself** | `tools/test_first_build.py` runs `provision.py` as a subprocess exactly as BUILD.md §12 writes it — import, show, chain, multisig, enroll-chamber — then boots `app.load_device` against the directory those commands wrote, shows a receive address and signs a PSBT with it | Passes on the `--soft` path. **Found three defects**, none of which a unit test could reach because none ran two commands in a row against one directory: the boot path ignored the network in the record, so a testnet device came up as mainnet and found none of its own accounts; registering a quorum defaulted to mainnet and refused with a message blaming the xpub; and the software secure element drew a fresh secret per invocation, so the one irreversible step could not be rehearsed at all |
 | **Every reference the docs make** | Every backticked filename in the documentation resolved against the tracked tree; every BUILD.md section cross-reference resolved against the sections BUILD.md actually has; every documented command, subcommand and flag resolved against that script's own argparse | 41 commands, and every file and section reference across eight documents. VALIDATION.md had claimed this for a while and nothing enforced it; docs rot in a way code does not, and a renamed script leaves a sentence that still reads correctly. Verified to bite by planting a renamed script, a bad section number and a flag that does not exist |
+| **The bench tool's own arithmetic** | `bench.py selftest` — the bounce measurement and the PIN-budget comparison, without the parts | **Found two false alarms**, both in checks a builder runs once on a bench and would have believed. The bounce measurement spanned press *through release*, reporting how long a finger was down (100–300 ms) against a 30 ms debounce — failing every switch ever made, and advising a debounce past a fifth of a second on the button that means consent. And "a correct PIN restores the budget" compared against the reading taken when the tool started, which is lower on any chip that has ever seen a wrong PIN |
 | **The pin map** | BUILD.md's GPIO table parsed and compared against the firmware constants and against `tools/gen_wiring.py`'s sheet | Three copies, now one check. A pin that moves in one and not the others fails CI instead of failing on a bench as a laser that never lights |
 
 ### Corrected claims

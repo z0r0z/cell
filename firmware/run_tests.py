@@ -103,6 +103,11 @@ SUITES = [
     # defects were living because nothing ever did it.
     ("first build — the documented sequence, end to end",
      [sys.executable, "../tools/test_first_build.py"]),
+    # The bench tool's own arithmetic. Its checks need the parts, so nobody
+    # can run them here -- but both of them shipped giving false alarms, and
+    # the maths underneath does not need the parts.
+    ("bench arithmetic — bounce measurement and the PIN budget",
+     [sys.executable, "../tools/bench.py", "selftest"]),
     ("drift margins — what the normalisation actually cancels",
      [sys.executable, "robustness.py", "--quick"]),
     ("speckle physics — exposure, frame rate and grain",
