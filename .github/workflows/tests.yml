@@ -19,6 +19,49 @@ jobs:
       - run: pip install -r firmware/requirements.txt
       - run: python firmware/run_tests.py
 
+  cross-checks:
+    # The same suites, with the OPTIONAL second opinions installed.
+    #
+    # requirements.txt lists these as optional and every suite that uses them
+    # skips when they are absent — so on the job above they all skipped, and
+    # the strongest independent verification this repo has was running on
+    # nobody's machine but the last person's who happened to install them.
+    # What skips here is what VALIDATION.md leans on hardest:
+    #
+    #   coincurve          libsecp256k1 checks our BIP-341 tweak and verifies
+    #                      our BIP-340 signatures — the implementation Core signs with
+    #   python-bitcointx   an independent interpreter EXECUTES our scripts
+    #   cryptoauthlib      Microchip's own config-zone definition and their own
+    #                      CheckMac digest, against our transcription of both
+    #
+    # Split from the job above so a packaging break in an optional dependency
+    # reddens this and not the suite a first-time cloner runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r firmware/requirements.txt
+      - run: pip install coincurve python-bitcointx cryptoauthlib
+      # The driver-conformance checks need the device libraries to introspect.
+      # Headless OpenCV, because CI has no display.
+      - run: pip install pillow qrcode gpiozero opencv-python-headless
+             adafruit-circuitpython-rgb-display
+      - run: python firmware/run_tests.py
+      # A skip here is a check that did not run. Fail rather than pass quietly.
+      - name: No cross-check may skip
+        run: |
+          python firmware/test_consensus.py | tee /tmp/c.log
+          python firmware/test_drivers.py   | tee -a /tmp/c.log
+          python firmware/test_se_atecc.py  | tee -a /tmp/c.log
+          python tools/atecc_config.py selfcheck | tee -a /tmp/c.log
+          if grep -q "SKIP" /tmp/c.log; then
+            echo "::error::a cross-check skipped despite its library being installed"
+            grep -n "SKIP" /tmp/c.log
+            exit 1
+          fi
+
   drawings:
     # The mechanical drawing is generated from the model. If a commit changes
     # one without regenerating the other they have drifted, which is exactly
