@@ -33,6 +33,9 @@ jobs:
     #   python-bitcointx   an independent interpreter EXECUTES our scripts
     #   cryptoauthlib      Microchip's own config-zone definition and their own
     #                      CheckMac digest, against our transcription of both
+    #   eth-account        the EIP-712 domain, the Execute struct, the EIP-7702
+    #                      authorisation hash and the v byte, all four against
+    #                      the library every EVM coordinator already uses
     #
     # Split from the job above so a packaging break in an optional dependency
     # reddens this and not the suite a first-time cloner runs.
@@ -43,7 +46,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r firmware/requirements.txt
-      - run: pip install coincurve python-bitcointx cryptoauthlib
+      - run: pip install coincurve python-bitcointx cryptoauthlib eth-account
       # The driver-conformance checks need the device libraries to introspect.
       # Headless OpenCV, because CI has no display.
       - run: pip install pillow qrcode gpiozero opencv-python-headless

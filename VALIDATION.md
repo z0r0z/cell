@@ -246,6 +246,7 @@ misbehave and watching it refuse tests the property itself.
 | **Refusals** | Calldata, a self-call, a nonce past the account's uint32, a value past uint256, a failed EIP-55 checksum, a short address, a non-string address, chain id 0 on a delegation | Each raises. None is masked or truncated |
 | **Registration** | Twelve hostile registrations: a second account under one label, one address under two labels, an unregistered chain, chain 0, the zero address, a self-implementation, a threshold past the owner count, a repeated owner, a label carrying a control character | All refused |
 | **The screens** | Both operations rendered at 40x20 with the tier footer reserved | Both fit in 11 rows. Destination, account and implementation are shown in full, never abbreviated |
+| **Against the library every coordinator uses** | `eth_account`: the domain separator, the Execute struct hash, the signing digest, and `Account.sign_authorization` for the EIP-7702 hash | All four agree. It also recovers a signature this device made to the address this device derives, which is what settles `v = 27 + y_parity`. **Found nothing in the implementation, and one bug in the check itself**: the first version compared our digest against the wrong two thirds of a `SignableMessage` and reported a disagreement that was not there |
 | **The whole chain, on a soft chip** | `sign_account_execute` and `sign_delegation` driven end to end: confirm, PIN, gate, unwrap, sign, attest | Signs, and the signature recovers to the address the mnemonic derives through an independent BIP-39 to BIP-32 to EIP-55 walk. `v` is 27 or 28, which is the branch the account contract reads as ECDSA. Declining, a failed gate, a wrong PIN and an unregistered account each sign nothing |
 | **Tier policy** | `account.delegate` against `ALWAYS_BLOOD` | Blood at any amount, with no policy able to unlock it |
 
@@ -256,9 +257,12 @@ misbehave and watching it refuse tests the property itself.
   particular deployment accepts the signature is a question only that
   deployment answers. The equivalent of `regtest_e2e.py` for this path does not
   exist yet.
-- **`eth_account` as a second opinion is written and skipped.** The suite
-  cross-checks the Execute digest against `eth_account.messages.encode_typed_data`
-  where it is installed. It is not installed here, so that check has not run.
+- ~~`eth_account` as a second opinion is written and skipped.~~ **Closed.** It
+  runs in the cross-check job now, and agrees on four separate things: the
+  domain separator, the Execute struct hash, the signing digest, and the
+  EIP-7702 authorisation hash against `Account.sign_authorization`. It also
+  recovers a signature this device made to the address this device derives,
+  which is what settles the `v` byte.
 - **The 7702 initialisation gap.** An authorisation commits to
   `[chain_id, address, nonce]` and not to the `init` call that runs beside it,
   so a relayer can delegate to the approved implementation and initialise it

@@ -323,10 +323,16 @@ def _missing_refused(good) -> bool:
 
 
 def second_opinion() -> bool:
-    """eth_account on both digests, when it is installed."""
+    """eth_account on both digests, and on the signature, when it is installed.
+
+    Not a dependency. A second opinion that shared our code would not be one,
+    so this is the same argument test_consensus.py makes for the Bitcoin side:
+    hand the output to somebody else's implementation and see whether it is
+    satisfied.
+    """
     try:
+        from eth_account import Account
         from eth_account.messages import encode_typed_data
-        from eth_account import Account                     # noqa: F401
     except ImportError:
         print("  eth_account not installed -- skipped, and not a dependency")
         return True
@@ -348,11 +354,41 @@ def second_opinion() -> bool:
                    "chainId": a.chain_id, "verifyingContract": a.address},
         "message": {"target": BOB, "value": 10**18, "data": b"", "nonce": 7},
     }
-    msg = encode_typed_data(full_message=typed)
-    theirs = eip712.keccak256(b"\x19" + msg.version + msg.body)
+    # SignableMessage is (version, header, body): the 0x01 version byte, the
+    # domain separator, and the struct hash. Comparing the three separately
+    # says WHERE an encoder disagrees, which a single digest comparison never
+    # does -- and the first version of this check compared the wrong two of
+    # them and reported a disagreement that was not there.
+    m = encode_typed_data(full_message=typed)
+    theirs = eip712.keccak256(b"\x19" + m.version + m.header + m.body)
+
+    # The delegation, against their own EIP-7702 signer.
+    sk = bytes.fromhex("00" * 31 + "07")
+    signed = Account.sign_authorization(
+        {"chainId": 1, "address": IMPL, "nonce": 3}, sk)
+    their_auth = bytes(signed.authorization_hash)
+
+    # And the signature itself, recovered by their code. This is what settles
+    # the v byte: 27 + y_parity is the branch an account contract reads as
+    # ECDSA, and getting it wrong produces a signature that recovers to
+    # somebody who is not an owner.
+    import secp256k1 as ec
+    from addresses import eth_address
+    digest = a.spend_digest(BOB, 10**18, 7)
+    r, s_, rec = ec.ecdsa_sign(digest, sk, grind_low_r=False)
+    sig = r.to_bytes(32, "big") + s_.to_bytes(32, "big") + bytes([27 + (rec & 1)])
+    recovered = Account._recover_hash(digest, signature=sig)
+
     return _report([
-        ("eth_account agrees on the Execute digest",
-         theirs == a.spend_digest(BOB, 10**18, 7)),
+        ("eth_account agrees on the domain separator",
+         bytes(m.header) == a.separator()),
+        ("eth_account agrees on the Execute struct hash",
+         bytes(m.body) == eip712.execute_struct_hash(BOB, 10**18, b"", 7)),
+        ("eth_account agrees on the signing digest", theirs == digest),
+        ("eth_account agrees on the EIP-7702 authorisation hash",
+         their_auth == eip712.delegation_digest(1, IMPL, 3)),
+        ("eth_account recovers our signature to our own address",
+         recovered.lower() == eth_address(ec.pubkey_compressed(sk)).lower()),
     ])
 
 
