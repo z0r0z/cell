@@ -615,7 +615,25 @@ class PolicyChange:
 
     @staticmethod
     def _floor(v: int | None) -> str:
-        return "no amount limit" if v is None else f"blood above {format_btc(v)}"
+        # "no amount limit" reads both ways. It is meant as "the amount is not a
+        # factor", and it reads just as naturally as "no amount is exempt" --
+        # which is the opposite setting. None is the LOOSER of the two, so the
+        # ambiguity resolved in the attacker's favour on the one screen that
+        # exists to state a direction.
+        return ("any amount, no blood" if v is None
+                else f"blood above {format_btc(v)}")
+
+    @staticmethod
+    def _rank(v: int | None) -> float:
+        """How much this floor lets through. Higher is looser.
+
+        None is the LOOSEST setting, not the tightest: BUILD.md section 6 and
+        policy.py both spell it "amount-based escalation is off", so nothing
+        escalates on the amount at all. It sorts above every integer, which is
+        why it is ranked as infinity here rather than special-cased at each
+        comparison -- special-casing it is how the direction came out inverted.
+        """
+        return float("inf") if v is None else float(v)
 
     def render(self) -> list[str]:
         lines = ["CHANGE SIGNING POLICY",
@@ -627,12 +645,14 @@ class PolicyChange:
             lines.append(f"  lock     {op}")
         for op in removed:
             lines.append(f"  UNLOCK   {op}")
-        loosening = (
-            (self.old_blood_above is None and self.new_blood_above is not None)
-            or (self.old_blood_above is not None and self.new_blood_above is not None
-                and self.new_blood_above > self.old_blood_above)
-            or bool(removed)
-        )
+        # Ordered on _rank, so all four transition shapes go through one
+        # comparison. Enumerating them by hand got both None cases backwards:
+        # None -> 10_000_000 turns amount escalation ON and was announced as
+        # LOOSENS, and 10_000_000 -> None turns it OFF -- the "lower the
+        # threshold, then use a finger" attack in BUILD.md section 6 -- and was
+        # announced as TIGHTENS on the line the owner reads to decide.
+        loosening = (self._rank(self.new_blood_above)
+                     > self._rank(self.old_blood_above)) or bool(removed)
         # The direction is the whole security question. "Fewer operations need
         # blood" is the attacker's goal, so it gets the emphatic line.
         lines.append("  effect   " + ("LOOSENS: fewer need blood"
