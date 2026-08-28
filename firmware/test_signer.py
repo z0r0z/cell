@@ -220,6 +220,45 @@ def run() -> int:
           any("LOOSENS" in ln or "TIGHTENS" in ln
               for ln in log9["confirmed_with"]))
 
+    # ...and shows the RIGHT direction. Asserting only that one of the two words
+    # appears is what let both None transitions render inverted: this very case,
+    # None -> 10_000_000, turns amount escalation ON and used to say LOOSENS.
+    #
+    # None is the LOOSEST floor, not the tightest -- BUILD.md section 6 spells
+    # it "amount-based escalation off" -- so every shape is checked, in both
+    # directions, against the ordering rather than against a remembered answer.
+    def direction(old, new):
+        line = next(ln for ln in ops.PolicyChange(
+            old_blood_above=old, new_blood_above=new).render()
+            if ln.lstrip().startswith("effect"))
+        return "LOOSENS" if "LOOSENS" in line else "TIGHTENS"
+
+    for old, new, want in [
+        (None, 10_000_000, "TIGHTENS"),      # escalation off -> on
+        (10_000_000, None, "LOOSENS"),       # on -> off: the finger attack
+        (0, None, "LOOSENS"),                # tightest -> loosest
+        (None, 0, "TIGHTENS"),
+        (10_000_000, 50_000_000, "LOOSENS"),
+        (50_000_000, 10_000_000, "TIGHTENS"),
+    ]:
+        check(f"policy change {old} -> {new} reads {want}",
+              direction(old, new) == want)
+
+    # Unlocking an operation class is a loosening whatever the floor does.
+    unlock = ops.PolicyChange(old_blood_above=1, new_blood_above=1,
+                              old_locked=frozenset({"tx.send"}),
+                              new_locked=frozenset())
+    check("unlocking a class reads LOOSENS",
+          any("LOOSENS" in ln for ln in unlock.render()))
+
+    # The floor is stated in words that only read one way. "no amount limit"
+    # reads as "no amount is exempt" just as easily as "the amount is not a
+    # factor", and those are opposite settings.
+    check("the loosest floor is not described ambiguously",
+          "no amount limit" not in "".join(
+              ops.PolicyChange(old_blood_above=1,
+                               new_blood_above=None).render()))
+
     # ---- unrenderable operations never reach the key ---------------------
     class Sneaky:
         """Has the right shape but is not in the closed set."""
