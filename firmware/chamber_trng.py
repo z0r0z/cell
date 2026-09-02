@@ -55,6 +55,7 @@ proof this cannot give.
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -64,9 +65,20 @@ import optical_puf as puf
 # Twice the requested bits, in measured min-entropy, before a sample is used.
 ENTROPY_MARGIN = 2.0
 
-# SP 800-90B 4.4.1. C is chosen so a healthy binary source trips it about once
-# in 2^20 samples: for H = 1 bit/sample, C = 1 + ceil(20 / H) = 21.
-REPETITION_CUTOFF = 21
+# SP 800-90B 4.4.1. The standard's C = 1 + ceil(-log2(alpha) / H) buys a false
+# alarm rate of alpha PER SAMPLE. A fixed 21 (alpha = 2^-20, H = 1) is right
+# for a source read one sample at a time and wrong for a one-shot draw: the
+# 64x96x96 burst this module harvests is ~295k samples, each getting its own
+# chance at the alarm, so a perfectly healthy chamber was refused about a
+# quarter of the time -- with a message blaming a dead laser. Size the cutoff
+# for the number of samples actually drawn.
+REPETITION_ALPHA = 2.0 ** -20                   # per DRAW, not per sample
+
+
+def repetition_cutoff(n_bits: int, h: float = 1.0,
+                      alpha: float = REPETITION_ALPHA) -> int:
+    """SP 800-90B 4.4.1's C, sized for a draw of `n_bits` samples."""
+    return 1 + math.ceil(-math.log2(alpha / max(n_bits, 1)) / h)
 
 # SP 800-90B 4.4.2, binary: a 1024-sample window, and a cutoff a fair source
 # clears with room to spare. 650/1024 is about 8.8 sigma from balanced.
@@ -155,8 +167,12 @@ def bits_from(residual: np.ndarray) -> np.ndarray:
     return np.concatenate(out) if out else np.zeros(0, dtype=np.uint8)
 
 
-def repetition_count(bits: np.ndarray, cutoff: int = REPETITION_CUTOFF) -> int:
-    """The longest run. SP 800-90B 4.4.1 catches a source that has stopped."""
+def repetition_count(bits: np.ndarray) -> int:
+    """The longest run. SP 800-90B 4.4.1 catches a source that has stopped.
+
+    The cutoff is not a parameter here because it depends on how many samples
+    were drawn — see `repetition_cutoff`, which `assess` sizes per draw.
+    """
     b = np.asarray(bits, dtype=np.uint8).ravel()
     if b.size == 0:
         return 0
@@ -171,7 +187,10 @@ def adaptive_proportion(bits: np.ndarray, window: int = PROPORTION_WINDOW
     """The commonest value's count in the worst window. SP 800-90B 4.4.2."""
     b = np.asarray(bits, dtype=np.uint8).ravel()
     if b.size < window:
-        return 0
+        # -1, not 0. Zero is well under the cutoff, so assess() read "the test
+        # could not run" as "the test passed" for every sample shorter than
+        # one window.
+        return -1
     n = b.size // window
     blocks = b[:n * window].reshape(n, window)
     ones = blocks.sum(axis=1)
@@ -185,12 +204,17 @@ def assess(bits: np.ndarray, want_bits: int, frames: int, pairs: int) -> Report:
     rep = repetition_count(b)
     prop = adaptive_proportion(b)
     failures = []
-    if rep >= REPETITION_CUTOFF:
+    rep_cut = repetition_cutoff(b.size)
+    if rep >= rep_cut:
         failures.append(
             f"repetition count: a run of {rep} identical bits, cutoff "
-            f"{REPETITION_CUTOFF}. A dark chamber, a dead laser or a stuck "
+            f"{rep_cut}. A dark chamber, a dead laser or a stuck "
             f"sensor looks exactly like this")
-    if prop >= PROPORTION_CUTOFF:
+    if prop < 0:
+        failures.append(
+            f"adaptive proportion: {b.size} bits is less than one "
+            f"{PROPORTION_WINDOW}-bit window, so the test could not run")
+    elif prop >= PROPORTION_CUTOFF:
         failures.append(
             f"adaptive proportion: {prop} of {PROPORTION_WINDOW} in one "
             f"window, cutoff {PROPORTION_CUTOFF}")
@@ -222,8 +246,12 @@ def harvest(frames: np.ndarray, want_bytes: int = 32
     # formatting, and salted so this cannot collide with any other use of the
     # same capture.
     q = np.rint(res * 256.0).astype(np.int32)
-    h = hashlib.sha256(b"CELL/chamber-trng-v1" + q.tobytes())
-    return h.digest()[:want_bytes], report
+    # SHAKE, not SHA-256: the health check is run against the number of bytes
+    # ASKED FOR, and a fixed 32-byte digest silently returned fewer than that
+    # for any larger request -- so a future 48- or 64-byte seed would have
+    # taken no chamber contribution at all past byte 32, with report.ok True.
+    h = hashlib.shake_256(b"CELL/chamber-trng-v1" + q.tobytes())
+    return h.digest(want_bytes), report
 
 
 def _selftest() -> int:                                     # pragma: no cover

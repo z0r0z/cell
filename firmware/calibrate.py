@@ -522,6 +522,18 @@ def cmd_roc(args):
         want = (a == n) if label == "genuine" else (a == 0)
         print(f"  {label:<16} {a:>3}/{n:<4}{'' if want else '   <-- LOOK AT THIS'}")
 
+    # And a sweep whose own thresholds reject the captures they were fitted to
+    # is not a tight calibration, it is a broken one -- most often a feature
+    # swept in different units from the one its gate compares. Writing the
+    # file anyway hands the device a tier that refuses every genuine session
+    # while reporting itself as calibrated.
+    if frr >= 1.0 or frr > max(0.5, args.frr_budget * 10):
+        print(f"\nREFUSING TO WRITE thresholds.json — the fitted thresholds reject "
+              f"{frr*100:.0f}% of the very genuine captures they were fitted "
+              f"to. Check that each swept feature is the quantity its gate "
+              f"actually compares before re-running.")
+        return 1
+
     out = dict(chosen)
     out.update({
         "_comment": "Written by calibrate.py roc. Loaded by "
@@ -681,7 +693,10 @@ def cmd_touch_roc(args):
     table: dict[str, dict[str, list]] = {}
     for label, cs in caps.items():
         for c in cs:
-            for k, v in tg.features(c["red"], c["ir"], fs=c["fs"]).items():
+            # bore included: T1 judges the contact FRACTION, so a sweep
+            # that measured raw DC counts fitted a window in the wrong units.
+            for k, v in tg.features(c["red"], c["ir"], fs=c["fs"],
+                                    bore=c["bore"]).items():
                 table.setdefault(k, {}).setdefault(label, []).append(v)
 
     per_th = args.frr_budget / len(tg.TUNABLE)
@@ -725,6 +740,18 @@ def cmd_touch_roc(args):
         a, n = sum(acc[label]), len(acc[label])
         want = (a == n) if label == "genuine" else (a == 0)
         print(f"  {label:<16} {a:>3}/{n:<4}{'' if want else '   <-- LOOK AT THIS'}")
+
+    # And a sweep whose own thresholds reject the captures they were fitted to
+    # is not a tight calibration, it is a broken one -- most often a feature
+    # swept in different units from the one its gate compares. Writing the
+    # file anyway hands the device a tier that refuses every genuine session
+    # while reporting itself as calibrated.
+    if frr >= 1.0 or frr > max(0.5, args.frr_budget * 10):
+        print(f"\nREFUSING TO WRITE touch_thresholds.json — the fitted thresholds reject "
+              f"{frr*100:.0f}% of the very genuine captures they were fitted "
+              f"to. Check that each swept feature is the quantity its gate "
+              f"actually compares before re-running.")
+        return 1
 
     out = dict(chosen)
     out.update({
@@ -933,6 +960,8 @@ def cmd_selftest(args):
         ok = False
         print(f"UNCOVERED GATES: {', '.join(g.strip() for g in uncovered)} — no "
               f"panel class rejects there, so nothing tests them.")
+    else:
+        print("Gate coverage: all 6 gates exercised by at least one class.")
 
     # The guard that stops a sweep writing an accept window with no width.
     # A collapsed window rejects every future capture while the report still
@@ -959,8 +988,6 @@ def cmd_selftest(args):
         good = got_f == want_fatal and got_w == want_warn
         ok &= good
         print(f"  {label:<48}{'PASS' if good else 'FAIL'}")
-    else:
-        print(f"Gate coverage: all 6 gates exercised by at least one class.")
 
     print("PASS: pipeline behaves as designed." if ok else "FAIL: see flagged rows.")
     return 0 if ok else 1

@@ -173,6 +173,11 @@ class TouchSensor(ABC):
 
 
 # Cardiac passband. Wider than T3's accept range on purpose — see ppg_features.
+# filtfilt's padlen for the 3rd-order Butterworth in _bandpass is 3*(3+1) = 12
+# per end plus the filter itself; 40 samples clears it with room to spare and
+# is still well under a second of capture at any usable rate.
+MIN_SAMPLES = 40
+
 PASSBAND_LO = 0.35
 PASSBAND_HI = 4.0
 
@@ -195,16 +200,26 @@ def _bandpass(x: np.ndarray, fs: float,
 
 
 def ppg_features(red: np.ndarray, ir: np.ndarray, th: TouchThresholds,
-                 fs: float | None = None) -> dict:
+                 fs: float | None = None,
+                 bore: tuple[float, float] | None = None) -> dict:
     """Extract every quantity the gates test. Pure function, no hardware.
 
     `fs` is the ACHIEVED sample rate, which is not necessarily th.fs — see
     TouchThresholds.fs. Every frequency-derived quantity (bpm, RMSSD) scales
     directly with it, so passing the nominal rate when the hardware ran slower
     reports a wrong heart rate with total confidence.
+
+    `bore` is the empty-bore reference, and `dc_frac` is what T1 actually
+    compares. It is a FEATURE here rather than something evaluate() computes
+    on the side, because the calibration sweep reads features: while T1's
+    thresholds pointed at the raw `dc_red` and the gate compared `dc_frac`,
+    `calibrate.py touch-roc` fitted a window in ADC counts to a gate that
+    judges in units of the bore — and wrote a file that rejected every genuine
+    session on a device reporting itself as calibrated.
     """
     fs = th.fs if fs is None else fs
     dc_red, dc_ir = float(np.mean(red)), float(np.mean(ir))
+    dc_frac = dc_red / max((bore or (1.0, 1.0))[0], 1e-9)
     ac_red, ac_ir = _bandpass(red, fs), _bandpass(ir, fs)
 
     def pk2pk(x):
@@ -221,11 +236,15 @@ def ppg_features(red: np.ndarray, ir: np.ndarray, th: TouchThresholds,
     # rejected by T3 rather than being missed and mistaken for a harmonic.
     band = (freq >= PASSBAND_LO) & (freq <= PASSBAND_HI)
     if not band.any() or spec[band].sum() <= 0:
-        return {"dc_red": dc_red, "dc_ir": dc_ir, "perfusion": perfusion,
-                "bpm": 0.0, "band_snr": 0.0, "rmssd_ms": 0.0, "r_ratio": 0.0}
+        return {"dc_red": dc_red, "dc_ir": dc_ir, "dc_frac": dc_frac,
+                "perfusion": perfusion, "bpm": 0.0, "band_snr": 0.0,
+                "rmssd_ms": 0.0, "r_ratio": 0.0}
 
     f0 = float(freq[band][np.argmax(spec[band])])
-    near = (freq >= f0 - 0.15) & (freq <= f0 + 0.15)
+    # Intersected with the band, because the denominator is. Without it a
+    # peak within 0.15 Hz of a passband edge counts bins the denominator never
+    # saw, and "the fraction of band energy near the peak" comes out above 1.
+    near = (freq >= f0 - 0.15) & (freq <= f0 + 0.15) & band
     band_snr = float(spec[near].sum() / spec[band].sum())
 
     # beat-to-beat variability
@@ -245,9 +264,9 @@ def ppg_features(red: np.ndarray, ir: np.ndarray, th: TouchThresholds,
     r_ratio = ((pk2pk(ac_red) / max(dc_red, 1e-9)) /
                max(pk2pk(ac_ir) / max(dc_ir, 1e-9), 1e-9))
 
-    return {"dc_red": dc_red, "dc_ir": dc_ir, "perfusion": perfusion,
-            "bpm": f0 * 60.0, "band_snr": band_snr, "rmssd_ms": rmssd,
-            "r_ratio": r_ratio}
+    return {"dc_red": dc_red, "dc_ir": dc_ir, "dc_frac": dc_frac,
+            "perfusion": perfusion, "bpm": f0 * 60.0, "band_snr": band_snr,
+            "rmssd_ms": rmssd, "r_ratio": r_ratio}
 
 
 # --------------------------------------------------------------------------
@@ -265,19 +284,26 @@ def evaluate(red: np.ndarray, ir: np.ndarray, bore: tuple[float, float],
     # too slowly cannot be analysed, and reporting a wrong bpm from it would be
     # worse than refusing: it fails T3 and sends the user hunting a heart
     # problem that is really an I2C timing problem.
-    if fs < th.fs_min:
+    # SHAPE as well as rate. `_bandpass` runs filtfilt, which raises on a
+    # buffer shorter than its padlen, and a mismatched red/ir pair silently
+    # compares two different lengths of signal. Both are hardware faults, and
+    # a gate must name a gate rather than throw: test_gate_robustness pins
+    # that contract for the blood tier, and the touch tier had no equivalent.
+    n = min(len(np.asarray(red)), len(np.asarray(ir)))
+    if fs < th.fs_min or n < MIN_SAMPLES or len(red) != len(ir):
         return TouchResult(
             accepted=False,
             gates=[GateResult("T0 capture rate", False, fs, th.fs_min,
-                              f"Sampled at {fs:.1f} Hz, need >={th.fs_min:.0f} Hz. "
-                              f"This is a hardware timing fault, not a failed "
-                              f"pulse — see hardware.py read_ppg.")],
-            attestation={"accepted": False, "fs_achieved": fs},
+                              f"Sampled at {fs:.1f} Hz with {len(red)}/{len(ir)} "
+                              f"red/IR samples; need >={th.fs_min:.0f} Hz and "
+                              f">={MIN_SAMPLES} matched samples. This is a "
+                              f"hardware timing fault, not a failed pulse — "
+                              f"see hardware.py read_ppg.")],
+            attestation={"accepted": False, "fs_achieved": fs, "n": n},
         )
 
-    f = ppg_features(red, ir, th, fs)
-    bore_red = max(bore[0], 1e-9)
-    dc_frac = f["dc_red"] / bore_red
+    f = ppg_features(red, ir, th, fs, bore)
+    dc_frac = f["dc_frac"]
 
     g = [
         GateResult("T0 capture rate", True, fs, th.fs_min, ""),
@@ -411,8 +437,10 @@ NOT_TUNABLE = {
 }
 
 TUNABLE = {
-    "dc_min":        ("dc_red",     "min"),
-    "dc_max":        ("dc_red",     "max"),
+    # dc_frac, not dc_red: T1 compares the contact fraction, so a sweep over
+    # the raw DC would fit a window in whatever units the ADC happens to use.
+    "dc_min":        ("dc_frac",    "min"),
+    "dc_max":        ("dc_frac",    "max"),
     "perfusion_min": ("perfusion",  "min"),
     "perfusion_max": ("perfusion",  "max"),
     "bpm_min":       ("bpm",        "min"),
@@ -427,14 +455,15 @@ TUNABLE = {
 
 def features(red: np.ndarray, ir: np.ndarray,
              th: "TouchThresholds | None" = None,
-             fs: float | None = None) -> dict:
+             fs: float | None = None,
+             bore: tuple[float, float] | None = None) -> dict:
     """Every raw number the gates compare, with no thresholds applied.
 
     Same separation of measurement from judgement that blood_gate.metrics()
     makes, and for the same reason: a sweep needs the distribution of each
     feature across the panel, not a pass/fail that has already collapsed it.
     """
-    return ppg_features(red, ir, th or TouchThresholds(), fs)
+    return ppg_features(red, ir, th or TouchThresholds(), fs, bore)
 
 
 def selftest(n: int = 6) -> int:

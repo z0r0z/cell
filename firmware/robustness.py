@@ -248,15 +248,20 @@ def tolerance(perturb, th: bg.Thresholds, seeds: int, hi: float = 0.60,
 
 
 def first_failure(perturb, th: bg.Thresholds, m: float) -> str:
-    """Which gate gives way first at magnitude m. Where to spend bench time."""
-    cap = perturb(_base(GENUINE, 0), m)
-    g = bg.evaluate(cap, th).first_failure()
-    if g:
-        return g.name
-    for sp in SPOOFS:
-        r = bg.evaluate(perturb(_base(sp, 0), m), th)
-        if r.accepted:
-            return f"{sp} accepted"
+    """Which gate gives way first at magnitude m. Where to spend bench time.
+
+    BOTH SIGNS, because `tolerance` above decides on the worse of them. Probing
+    only +m left the column blank for exactly the axes whose budget was set by
+    the negative direction -- so the sweep printed a tolerance next to a dash
+    and said nothing about what gives way at it.
+    """
+    for x in (m, -m):
+        g = bg.evaluate(perturb(_base(GENUINE, 0), x), th).first_failure()
+        if g:
+            return g.name
+        for sp in SPOOFS:
+            if bg.evaluate(perturb(_base(sp, 0), x), th).accepted:
+                return f"{sp} accepted"
     return "-"
 
 

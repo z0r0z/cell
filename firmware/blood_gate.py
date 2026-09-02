@@ -404,6 +404,16 @@ def speckle_metrics(burst: np.ndarray,
     f = _highpass(b, th.envelope_px).reshape(len(b), -1)
     f = f - f.mean(1, keepdims=True)
     f = f / np.clip(f.std(1, keepdims=True), 1e-9, None)
+    # A STALLED SENSOR IS NOT AN ARRESTED SAMPLE, and this is the only place
+    # that can tell them apart. A CSI or DMA stall hands back the same buffer
+    # repeatedly; the frames are bit-identical, r is exactly 1.0, and D is
+    # exactly 0.0 -- which G6 reads as a perfect clot. That fails OPEN on the
+    # panel's most important negative: EDTA blood, which never clots, was
+    # accepted at every stall point tried. Real speckle can never do it, since
+    # shot noise alone floors D around 0.005, so a run of identical frames is
+    # a hardware fault and is reported as no measurement.
+    if len(b) > 1 and np.array_equal(b[:-1], b[1:]):
+        return float("nan"), K
     r = float(np.mean((f[:-1] * f[1:]).mean(1))) if len(f) > 1 else 1.0
     return 1.0 - r, K
 
@@ -573,6 +583,16 @@ def gate6_motion_arrested(t: np.ndarray, D: np.ndarray, th: Thresholds) -> GateR
     if len(late) < 2 or len(early) < 1:
         return GateResult("G6 motion arrested", False, 1.0, th.d_clot_max,
                           "Capture too short.")
+    if not np.all(np.isfinite(D)):
+        # speckle_metrics reports NaN for a run of bit-identical frames, which
+        # is a stalled camera rather than an arrested sample. Name it, because
+        # "this never stopped moving" would send the owner looking at their
+        # blood instead of at the CSI cable.
+        return GateResult("G6 motion arrested", False, float("nan"),
+                          th.d_clot_max,
+                          "The camera returned identical frames — the sensor "
+                          "stalled, so nothing was measured. This is a "
+                          "hardware fault, not a failed clot.")
     d_late, d_early = float(np.mean(late)), float(np.mean(early))
     drop = d_early - d_late
     rho = _trend(t, D)

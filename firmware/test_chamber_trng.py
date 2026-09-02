@@ -146,7 +146,22 @@ def the_ways_a_chamber_fails() -> bool:
          _raises(trng.harvest, thin)),
         ("the repetition test sees a stuck run",
          trng.repetition_count(np.zeros(4096, dtype=np.uint8))
-         >= trng.REPETITION_CUTOFF),
+         >= trng.repetition_cutoff(4096)),
+        # The cutoff is sized for the draw, not per sample: a fixed 21 refused
+        # a healthy chamber roughly a quarter of the time on the 294,912-bit
+        # burst this module harvests.
+        ("the cutoff grows with the size of the draw",
+         trng.repetition_cutoff(4096) > trng.repetition_cutoff(1)
+         and trng.repetition_cutoff(64 * 96 * 96) > trng.repetition_cutoff(4096)),
+        ("a healthy chamber is not refused by the run test",
+         all(trng.repetition_count(
+                 np.random.default_rng(s_).integers(0, 2, 64 * 96 * 96
+                                                    ).astype(np.uint8))
+             < trng.repetition_cutoff(64 * 96 * 96) for s_ in range(6))),
+        # A sample too short for one window has to say so. Returning 0 meant
+        # assess() read "could not run" as "comfortably passed".
+        ("a sample shorter than one window reports that it could not run",
+         trng.adaptive_proportion(np.ones(600, dtype=np.uint8)) < 0),
         ("the proportion test sees a biased window",
          trng.adaptive_proportion(
              np.concatenate([np.ones(900, dtype=np.uint8),
@@ -155,7 +170,15 @@ def the_ways_a_chamber_fails() -> bool:
         ("a fair sample clears both",
          trng.repetition_count(
              np.random.default_rng(2).integers(0, 2, 8192).astype(np.uint8))
-         < trng.REPETITION_CUTOFF),
+         < trng.repetition_cutoff(8192)
+         and trng.adaptive_proportion(
+             np.random.default_rng(2).integers(0, 2, 8192).astype(np.uint8))
+         < trng.PROPORTION_CUTOFF),
+        # harvest() checks the health of the bits against the number of bytes
+        # asked for, so it has to return that many.
+        ("a request larger than one digest is answered in full",
+         len(trng.harvest(_burst(_field(np.random.default_rng(5)),
+                                 np.random.default_rng(5)), 64)[0]) == 64),
     ])
 
 

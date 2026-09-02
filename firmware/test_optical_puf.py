@@ -333,8 +333,13 @@ def _checks():
         # is what stops that, and this is the check that notices if it goes.
         gw = ch.size // ch.grain_px
         chosen_set = set(int(i) for i in helper.mask)
+        # BOTH axes. `_spaced` excludes vertical neighbours as well, and
+        # checking only i+1 left half of what it enforces untested -- a
+        # regression that admitted the grain directly below would have read
+        # PASS.
         touching = sum(1 for i in chosen_set
-                       if (i + 1) in chosen_set and (i + 1) % gw != 0)
+                       if ((i + 1) in chosen_set and (i + 1) % gw != 0)
+                       or (i + gw) in chosen_set)
         checks.append((f"no two key bits are adjacent grains ({touching})",
                        touching == 0))
 
