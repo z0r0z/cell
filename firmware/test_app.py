@@ -500,7 +500,7 @@ def main() -> int:
 
     _real_change = ops.BitcoinSpend(
         amount_sats=1_000, destination="bc1qx", fee_sats=200,
-        change_sats=50_000_000, change_address="bc1qours")
+        change_sats=50_000_000)
     check("change the wallet DID derive does not escalate — it comes back",
           _policy.decide(_pol, _real_change.op_class(),
                          _real_change.amount_for_policy()).tier_to_run

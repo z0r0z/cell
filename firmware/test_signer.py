@@ -341,7 +341,7 @@ def run() -> int:
     for n in range(40, 400):
         long_dest = ops.BitcoinSpend(
             amount_sats=1, destination="bc1q" + "x" * n, fee_sats=1,
-            change_sats=5, change_address="bc1q" + "z" * 40,
+            change_sats=5,
             unverified_sats=5, unverified_address="bc1q" + "y" * 40,
             quorum_needed=2, quorum_size=3)
         try:

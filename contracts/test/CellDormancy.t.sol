@@ -282,6 +282,13 @@ contract CellDormancyTest is Test {
         new CellDormancy(reg, user, user, DORMANCY, CHALLENGE);
         vm.expectRevert(CellDormancy.BadConfiguration.selector);
         new CellDormancy(reg, user, HEIR, DORMANCY, 0);
+        // And the far end: claimStartedAt + challengeWindow has to be
+        // computable, or finalize() reverts on the addition and the switch can
+        // never be closed.
+        vm.expectRevert(CellDormancy.BadConfiguration.selector);
+        new CellDormancy(reg, user, HEIR, DORMANCY, type(uint64).max);
+        vm.expectRevert(CellDormancy.BadConfiguration.selector);
+        new CellDormancy(reg, user, HEIR, DORMANCY, uint64(366 days));
     }
 
     /// The pre-generated beacon for one period. The vectors carry nine of

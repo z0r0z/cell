@@ -549,7 +549,14 @@ def _wallet_of_seed(prov: Provisioning, root: ExtendedKey):
         # BOTH are always compared and neither short-circuits, for the same
         # reason se.verify_pin checks both PIN slots: a duress unlock must not
         # be distinguishable from a normal one by how long it takes.
-        hit = bool(accounts) and hmac.compare_digest(fp, recorded)
+        #
+        # `and` DOES short-circuit, so an empty accounts list skipped the
+        # compare entirely and the loop took a different amount of time
+        # depending on which slot was populated. The comparison runs either
+        # way now, against a recorded value that is bytes whatever happens,
+        # and emptiness is folded in afterwards.
+        same = hmac.compare_digest(fp, recorded or b"")
+        hit = bool(accounts) and same
         if hit and match is None:
             match = (accounts, recorded)
     return match if match is not None else (None, None)

@@ -101,8 +101,14 @@ def redeem_purpose(word: bytes) -> bytes:
 
 def purpose(epoch: int) -> bytes:
     """keccak(abi.encode(bytes32 tag, uint256 epoch)), as the registry computes it."""
-    if not 0 <= epoch <= eip712.UINT256_MAX:
-        raise BadBeacon(f"period {epoch} does not fit a uint256")
+    # uint64, which is what CellRegistry.heartbeat takes -- not the uint256
+    # the ABI word can hold. Past that the device signs a structurally valid
+    # beacon no deployment can ever accept, and the owner has spent a gate on
+    # it.
+    if not 0 <= epoch <= 2**64 - 1:
+        raise BadBeacon(
+            f"period {epoch} does not fit the uint64 CellRegistry.heartbeat "
+            f"takes, so no deployment could redeem it")
     return keccak256(BEACON_TAG + eip712._word(epoch))
 
 

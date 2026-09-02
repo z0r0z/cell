@@ -67,7 +67,13 @@ contract CellDormancy {
         // the owner this check exists to protect: alive, compliant, and
         // between beacons.
         if (_dormancyPeriod < 2 * _registry.EPOCH_SECONDS()) revert BadConfiguration();
-        if (_challengeWindow == 0) revert BadConfiguration();
+        // Bounded at both ends. Zero is no window at all; a value near the
+        // top of uint64 overflows `claimStartedAt + challengeWindow` in
+        // finalize(), which reverts on the addition and leaves the switch
+        // permanently unfinalisable. A year is far past any use for it.
+        if (_challengeWindow == 0 || _challengeWindow > 365 days) {
+            revert BadConfiguration();
+        }
         registry = _registry;
         owner = _owner;
         beneficiary = _beneficiary;

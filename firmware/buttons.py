@@ -164,8 +164,17 @@ def confirm(buttons: Buttons, present: Callable[[], None],
     buttons.drain()
     present()
     shown_at = clock()
+    deadline = shown_at + 120.0
     while True:
-        press = buttons.wait(timeout=120.0)
+        # Measured from when the SCREEN went up, not from the last press. A
+        # per-press timeout meant every ignored edge started the 120 s again,
+        # so a bouncing switch or a stream of stray edges held a confirmation
+        # screen up indefinitely -- and the whole point of the timeout is that
+        # an unattended screen decides for itself.
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return False
+        press = buttons.wait(timeout=remaining)
         if press is None:
             return False                    # walked away; that is a decline
         if press == BACK:

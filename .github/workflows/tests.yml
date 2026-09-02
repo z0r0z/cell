@@ -58,10 +58,14 @@ jobs:
           python firmware/test_consensus.py | tee /tmp/c.log
           python firmware/test_drivers.py   | tee -a /tmp/c.log
           python firmware/test_se_atecc.py  | tee -a /tmp/c.log
+          python firmware/test_lms.py       | tee -a /tmp/c.log
           python tools/atecc_config.py selfcheck | tee -a /tmp/c.log
-          if grep -q "SKIP" /tmp/c.log; then
+          # -i, because the message that hid the LMS vectors for the life of
+          # this file was lowercase: "skipping vector check". A gate that only
+          # sees SKIP is a gate a lowercase skip walks through.
+          if grep -qi "skip" /tmp/c.log; then
             echo "::error::a cross-check skipped despite its library being installed"
-            grep -n "SKIP" /tmp/c.log
+            grep -ni "skip" /tmp/c.log
             exit 1
           fi
 

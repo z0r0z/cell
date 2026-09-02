@@ -206,7 +206,14 @@ class SmartAccount:
                 continue                # optional; the delegation screen asks
             if not text or len(text) > 16:
                 raise BadTypedData(f"an {role} label is 1 to 16 characters")
-            if any(c < " " or c == "\x7f" or not c.isprintable() for c in text):
+            # `isprintable` admits double-width CJK, which len() counts as
+            # one and the panel paints as two -- a 16-character label measured
+            # 16 to check_fits and overflowed "SEND FROM {label}". East Asian
+            # Wide and Fullwidth are the two classes that do it.
+            import unicodedata
+            if any(c < " " or c == "\x7f" or not c.isprintable()
+                   or unicodedata.east_asian_width(c) in ("W", "F")
+                   or unicodedata.combining(c) for c in text):
                 raise BadTypedData(
                     f"{role} label {text!r} carries a character the display "
                     f"cannot render as one column")

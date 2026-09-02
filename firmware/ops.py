@@ -161,8 +161,11 @@ class BitcoinSpend:
     both, with a flag to say which, is how the screen ends up showing a
     foreign address next to a number that includes money coming home:
 
-        change_sats / change_address
-            proved ours. Comes back, and is excluded from TOTAL.
+        change_sats
+            proved ours. Comes back, and is excluded from TOTAL. Its address
+            is deliberately NOT carried: the output was derived and checked,
+            so showing it would spend two of the panel's scarce rows on the
+            one output that needs no scrutiny.
         unverified_sats / unverified_address
             labelled change, underivable. Leaves, counts toward TOTAL, and
             says so in amber.
@@ -176,7 +179,6 @@ class BitcoinSpend:
     destination: str
     fee_sats: int
     change_sats: int = 0
-    change_address: str = ""
     unverified_sats: int = 0
     unverified_address: str = ""
     # Multisig context, when the input is an m-of-n script. `quorum_needed`

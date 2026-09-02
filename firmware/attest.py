@@ -210,11 +210,29 @@ class Attestation:
         )
 
 
+def chain_verifiable(attest_pub: bytes) -> bool:
+    """Can CellAttestation.verifySchnorr check a record under this key?
+
+    The Solidity verifier rearranges BIP-340 into one `ecrecover`, which puts
+    the public key's x-coordinate in as `r` -- and ecrecover requires r < N.
+    An x in [N, P) is a perfectly good BIP-340 key that this module verifies
+    and the chain cannot, so every record such a device ever made would be
+    unredeemable. About one key in 2^128, and cheaper to refuse at the source
+    than to discover from a rejected transaction.
+    """
+    return len(attest_pub) == 32 and int.from_bytes(attest_pub, "big") < _N
+
+
 def attest(tier: Tier, counter: int, sighash: bytes, fw_hash: bytes,
            cal_hash: bytes, live_hash: bytes, sign: Callable[[bytes], bytes],
            attest_pub: bytes) -> Attestation:
     """Device side. `sign` is the ATECC608B/SE signing callable — the raw key
     never appears here."""
+    if not chain_verifiable(attest_pub):
+        raise ValueError(
+            "this device's attestation key has an x-coordinate at or above "
+            "the curve order, which CellAttestation.verifySchnorr cannot "
+            "check: every record it signs would be unredeemable on chain")
     a = Attestation(tier, counter, sighash, fw_hash, cal_hash, live_hash,
                     attest_pub)
     return Attestation(tier, counter, sighash, fw_hash, cal_hash, live_hash,

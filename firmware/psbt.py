@@ -845,7 +845,7 @@ class PSBT:
                           f"transaction cannot be valid")
 
         warnings: list[str] = []
-        recipients, change_sats, change_addr = [], 0, ""
+        recipients, change_sats = [], 0
         # Outputs LABELLED change that could not be derived, kept SEPARATE from
         # the change that was. Two reasons, both learned the hard way:
         #
@@ -868,7 +868,6 @@ class PSBT:
                                 or _get(self.outputs[i], OUT_TAP_INTERNAL_KEY))
             if self._output_is_ours(i, root):
                 change_sats += out.value
-                change_addr = change_addr or addr
             elif claimed_ours:
                 # The host labelled this output as ours and the device cannot
                 # derive it. It gets its own slot rather than becoming a second
@@ -913,7 +912,6 @@ class PSBT:
             destination=recipients[0][0],
             fee_sats=fee,
             change_sats=change_sats,
-            change_address=change_addr,
             unverified_sats=unverified[0][1] if unverified else 0,
             unverified_address=unverified[0][0] if unverified else "",
             quorum_needed=quorum.quorum_needed if quorum else 0,
