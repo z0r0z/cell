@@ -1,8 +1,8 @@
 # CELL Build Specification
 
-Single device, $97.55 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
+Single device, $96.95 in hardware plus $31.00 of consumables, Raspberry Pi Zero 2 W, 3D-printed shell over the Pi.
 
-The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export, 131 named objects with materials, 116.2 × 73.2 × 28.3 mm, and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
+The enclosure comes from `viewer/model.js`, a parametric three.js model. `models/instrument.obj` is its export, 104 named objects with materials, 116.2 × 73.2 × 28.3 mm, and `diagrams/mechanical.svg` is generated from that by `tools/gen_mechanical.py`, so the drawing cannot drift from the model. See §10.
 
 This specification is complete enough to build from. Sensing thresholds ship as physics-derived defaults and are calibrated to your hardware in §13. The same step any instrument needs before it is trusted. `VALIDATION.md` is the engineering status record. Use testnet until you have run the calibration.
 
@@ -46,7 +46,7 @@ The blood reader is the novel component. The wallet layer is a solved problem th
 |---|---|---|
 | `Reader` | The blood reader hardware, Pi, spectrometer, laser, camera, LEDs, filament | $62.25 |
 | `Reader consumable` | Lancets, alcohol pads, PET window film, tape, sharps container. Needed to run the reader at all. About 100 blood readings, limited by the lancet and pad counts | $31.00 |
-| `Wallet` | The signing half, secure element, display, buttons, QR camera, ring window, fasteners | $35.30 |
+| `Wallet` | The signing half, secure element, display, buttons, QR camera, ring window, fasteners | $34.70 |
 
 Order the reader kit and its consumables together; they are one purchase and the reader is useless without both. The wallet kit is a second purchase you only make if the reader works.
 
@@ -71,7 +71,7 @@ The reader has no security requirements, because nothing is being signed. Leave 
 
 It answers the question that determines whether the rest is worth building: does the gate separate real blood from every fake? Run the spoof panel in §13. If it does not, you never order the wallet kit.
 
-### Kit 2, the wallet (+$35.30)
+### Kit 2, the wallet (+$34.70)
 
 | Item | ~USD |
 |---|---|
@@ -87,7 +87,7 @@ It answers the question that determines whether the rest is worth building: does
 
 The signing firmware is in this repository, see §12. Build it, provision a seed, then do the airgap hardening: radios disabled, antenna trace cut, read-only rootfs.
 
-**Full device: $97.55 of hardware,** plus $31.00 of consumables. $128.55 all in.
+**Full device: $96.95 of hardware,** plus $31.00 of consumables. $127.95 all in.
 
 **What a signature costs.** A touch-tier signature costs nothing, no
 cartridge, no lancet, and touch is the everyday default. A blood-tier
@@ -432,7 +432,7 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 
 ---
 
-## 6. Parts (~US$98 complete, ~US$62 for the reader alone)
+## 6. Parts (~US$97 complete, ~US$62 for the reader alone)
 
 | Item | Part | ~USD | Notes |
 |---|---|---|---|
@@ -451,7 +451,7 @@ For a device used twice a year, forgetting the PIN is a more likely loss event t
 | Storage | 16 GB A2 microSD | 6 | |
 | Test cartridges | Printed once, sealed, kept with the device | 0 | Wallet kit. REFERENCE + NULL, see §4 |
 | Filament | PETG black ~90 g, white ~60 g | 5 | Not PLA |
-| Fasteners | M2.5×8 + heat-set inserts ×8 | 3 | |
+| Fasteners | M2.5×8 + heat-set inserts ×6 | 3 | |
 | Ring window | Ø10 × 0.5 mm clear acrylic or glass disc | 1 | Seals the chamber, contact surface for touch mode |
 
 **Consumables:** contact-activated sterile lancets 28G/1.8 mm (~$0.06 ea, any pharmacy), alcohol prep pads, 0.1 mm PET film for cartridge windows (transparency or laminating pouch, ~$8/100 sheets ≈ 1,600 windows), a 1 L sharps container. No reagents. Nothing here has a shelf life.
@@ -574,7 +574,7 @@ The length follows from the geometry: the well must reach the read spot, which p
 | Overflow moat | Ø7.0 annulus, 0.4 mm deep | Accepts 8–15 µL without flooding the optics |
 | White reference patch | 4 × 4 mm, ironed, coplanar with the well rim | Per-measurement normalisation |
 | Lid | 0.1 mm PET film, taped along one edge | Optical window. **The tape is the hinge**. No printed living hinge to tune |
-| Grip tab | 13.4 × 14 mm, proud of the slot | Keeps fingers off the optics |
+| Grip tab | 8.9 × 14 mm, proud of the slot | Keeps fingers off the optics |
 
 Four features in total. Two of them matter more than their size suggests:
 
@@ -582,7 +582,7 @@ Four features in total. Two of them matter more than their size suggests:
 
 **Every cartridge carries its own white and black references.** LED aging, sensor drift, and print variation are all first-order effects that would walk your thresholds out of spec within weeks, silently. Normalising against a patch printed in the same layer, on the same part, from the same filament cancels nearly all of it. This one choice is the difference between a device that works for a year and one that works for a week.
 
-**No black reference feature.** The dark reading is taken at the *same position as the white patch with the LEDs off*, dark current plus any ambient leak, for free. That removes a printed feature from every cartridge, and the light-tightness test in §8 is what validates the assumption.
+**No black reference feature.** The dark reading is taken at the *same position as the white patch with the LEDs off*, dark current plus any ambient leak, for free. That removes a printed feature from every cartridge, and the light-tightness test in §9 is what validates the assumption.
 
 ### Printing them
 
@@ -590,7 +590,7 @@ Four features in total. Two of them matter more than their size suggests:
 python3 tools/gen_printables.py     # -> models/print/*.stl
 ```
 
-That one command builds everything printable. The shells included, via `tools/gen_enclosure.py`, dimensioned from the constants in this section: the cartridge, the pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the slot baffle, the display bezel, a jig for cutting the PET windows, and the two shells. It validates each mesh before writing it. Every shell closed, consistently wound, positive in volume, and exits non-zero instead of handing a slicer something it would have to guess at. It also re-checks the cartridge geometry, the bezel, and the filament the BOM buys against what the parts actually weigh. `models/print/MANIFEST.md` is regenerated in the same pass and lists quantities, orientation, settings and every dimension the generator had to derive. It is interpolated from those constants, so it cannot drift from the STLs beside it. `PRINTING.md` walks the whole print through in order.
+That one command builds everything printable. The shells included, via `tools/gen_enclosure.py`, dimensioned from the constants in this section: the cartridge, the pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the slot baffle, the display bezel, the rear bay blank, a jig for cutting the PET windows, and the two shells. It validates each mesh before writing it. Every shell closed, consistently wound, positive in volume, and exits non-zero instead of handing a slicer something it would have to guess at. It also re-checks the cartridge geometry, the bezel, and the filament the BOM buys against what the parts actually weigh. `models/print/MANIFEST.md` is regenerated in the same pass and lists quantities, orientation, settings and every dimension the generator had to derive. It is interpolated from those constants, so it cannot drift from the STLs beside it. `PRINTING.md` walks the whole print through in order.
 
 **Why the well sits 10.5 mm back.** It has to leave room for a 4 mm patch *ahead* of it. Features nearer the tip cross the read spot first, so a patch ahead of the well is read before the sample; a patch behind it would only be reachable after the sample had already been read, which is no use for normalising that same reading. At the original 6.0 mm the moat wall was 2.5 mm from the tip and there was nowhere to put the patch at all, which is exactly how this shipped with a white patch that no optical path could reach. `tools/gen_printables.py` re-checks all six distances on every run and refuses to write a cartridge that breaks any of them.
 
@@ -734,7 +734,7 @@ The viewer model is an appearance model, solid extrusions, with the openings dra
 viewer/model.js  ──export──▶  models/instrument.obj  ──generate──▶  diagrams/mechanical.svg
 ```
 
-Edit the model, re-export, re-run the generator. CI fails if the drawing and the OBJ disagree. Do not hand-edit the OBJ. It is 56 MB of triangles and nothing downstream of it can be reconciled with a parametric change.
+Edit the model, re-export, re-run the generator. CI fails if the drawing and the OBJ disagree. Do not hand-edit the OBJ. It is 54 MB of triangles and nothing downstream of it can be reconciled with a parametric change.
 
 **Envelope: 116.2 × 73.2 × 28.3 mm.** Two shells parted at 11.4 mm from the base, with the seam picked out in oxblood. The Pi enters from the rear like a cartridge; the sample cartridge from the front, on the same centreline as the dish.
 
@@ -749,12 +749,12 @@ Edit the model, re-export, re-run the generator. CI fails if the drawing and the
 | Sample slot | 34.0 × 3.0, 4.2 deep | Front face |
 | Compute bay | 72 × 16, 3.2 deep | Rear face |
 | USB-C | 9.0 × 3.2 | Right face, power only |
-| Vents | 15 slots, 3.0 deep | Front face. **Must be blind, see below** |
+| Vents | 15 slots, 1.6 deep | Front face. **Must be blind, see below** |
 | Fasteners | 2 × Ø4.0 slotted | Front face, lower shell |
 
 ### Constraints not expressed in the model
 
-**1. The vents must be blind pockets.** They're 3.0 mm deep into a 73 mm body, so they are pockets in the model. Keep them that way. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate stops working. Verify with the light-tightness test in §8, not by eye.
+**1. The vents must be blind pockets.** They are cut 1.6 mm into a 2.4 mm wall, leaving 0.8 mm of material behind them. The 3.0 this section used to specify was safe in a solid appearance model and is 0.6 mm past the inside face of that wall. Keep them that way. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate stops working. Verify with the light-tightness test in §9, not by eye.
 
 **2. The pad is reserved, not fitted.** It is a flat printed marking sized for the optional fingerprint sensor, which the base build doesn't use. The PIN does identity (§4). It is deliberately not a recess: an unpopulated pocket on the deck is a place for blood to collect.
 
@@ -771,12 +771,15 @@ Edit the model, re-export, re-run the generator. CI fails if the drawing and the
 | Aperture tube | PETG black | 0.12 | 4 | 100% | Paint interior matte black |
 | Cartridge | PETG **white** | 0.15 | 3 | 100% | **Ironing ON**, only the white patch surface matters |
 | Display bezel | PETG black | 0.12 | 4 | 100% | Front face down. Fitted to your screen, see below |
+| Slot baffle | PETG black | 0.16 | 4 | 40% | Flat on its largest face |
+| Bay blank | PETG black | 0.16 | 4 | 40% | Lip down. Fit AFTER provisioning, then seal |
+| Window jig | any | 0.2 | 3 | 20% | Cutting template, not a device part |
 
-`tools/gen_printables.py` emits every part in this table except the shells, already at these settings, see `models/print/MANIFEST.md`, which is generated alongside the STLs and carries orientation, quantities and every derived dimension. `PRINTING.md` is the runbook: plate order, what to check off each part, and the post-processing that is not optional.
+`tools/gen_printables.py` emits every part in this table, the shells included, already at these settings, see `models/print/MANIFEST.md`, which is generated alongside the STLs and carries orientation, quantities and every derived dimension. `PRINTING.md` is the runbook: plate order, what to check off each part, and the post-processing that is not optional.
 
 PETG, not PLA, PLA creeps under screw preload and softens in a hot car. The oxblood elements (seam, ring, bezel, ticks) are a second filament or a paint fill; the model separates them as distinct objects with their own materials, so a multi-material printer can take them straight.
 
-**Note:** `models/instrument.mtl` is exported alongside the OBJ by `tools/export_model.py` and carries the viewer's own colours. Material names also ride on the objects themselves (`shell`, `oxblood`, `trim_oxblood`, `glass`, `pad`, `etch_floor`, `steel`, `cavity`), so you can substitute your own filament colours without losing the separation.
+**Note:** `models/instrument.mtl` is exported alongside the OBJ by `tools/export_model.py` and carries the viewer's own colours. Material names also ride on the objects themselves (`shell`, `oxblood`, `trim_oxblood`, `glass`, `pad`, `etch_floor`, `steel`, `cavity`, `cavity_bore`, `screen`, `silkscreen`, `silkscreen_mark`), so you can substitute your own filament colours without losing the separation.
 
 ---
 
@@ -1356,7 +1359,7 @@ A sequence of checks, not a schedule, with the parts in front of you this is a w
 | 5 | **Spectrum of dye vs. your blood** | 415 nm separates them cleanly. This is the "it works" moment |
 | 6 | 600 s time series, both classes | Blood starts decorrelated and arrests; dye never had speckle. Judge on what G5/G6 measure, early D, late D, the drop and its direction, not on a curve fit |
 | 7 | **Spoof panel**, the reader is done | ROC generated, thresholds set, documented. **This is the result the whole design rests on** |
-| 8 | ATECC608B configured, zones locked, PIN counter live | `atecc_config.py verify --behaviour` passes every line BEFORE `lock-data`; `se_atecc.py --probe` answers; eleven wrong PINs wipe a device you can afford to wipe |
+| 8 | ATECC608B configured, zones locked, PIN counter live | `atecc_config.py verify --behaviour` passes every line BEFORE `lock-data`; `se_atecc.py --probe` answers; ten wrong PINs wipe a device you can afford to wipe |
 | 9 | Firmware installed, `run_tests.py` green on the Pi | 46 suites pass on the device itself, not just your laptop |
 | 10 | Provisioned, and the backup written down | `provision.py` re-reads its own seed; you have the words on paper |
 | 10a | Chamber enrolled (optional) | `provision.py enroll-chamber`. The seed re-wraps and still reopens. Back up `chamber.npz` beside the words |

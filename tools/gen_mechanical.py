@@ -62,7 +62,12 @@ L, HT, D = hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]
 
 dl, dh = ext('recess_floor_etch')
 DISH_C = ((dl[0]+dh[0])/2, (dl[2]+dh[2])/2); DISH_R = (dh[0]-dl[0])/2
-DECK_Y = ext('shell_deck')[1][1]; RECESS_Y = dl[1]
+# The surface a caliper touches, which is the outer skin -- not the top of the
+# inner deck slab 0.82 mm below it. Measuring the deck happened to print the
+# right dish depth for the wrong reason, and would have gone on printing a
+# wrong one the moment either slab moved.
+DECK_Y = max(ext('shell_skin')[1][1], ext('shell_deck')[1][1])
+RECESS_Y = dl[1]
 
 rl, rh = ext('ring')
 RING_C = ((rl[0]+rh[0])/2, (rl[2]+rh[2])/2)
@@ -162,7 +167,7 @@ A(f'<rect x="{tx(pl[0]):.1f}" y="{tz(pl[2]):.1f}" width="{(ph[0]-pl[0])*S:.1f}" 
   f'rx="{2*S:.1f}" fill="none" stroke="{MUT}" stroke-width="0.8" stroke-dasharray="4 3"/>')
 # buttons
 for i, (bx, bz, bd) in enumerate(BTN):
-    c = RED if i == 3 else DIM
+    c = RED if i == len(BTN) - 1 else DIM
     A(f'<circle cx="{tx(bx):.1f}" cy="{tz(bz):.1f}" r="{bd/2*S:.1f}" fill="#0E0F12" stroke="{c}" stroke-width="1.0"/>')
 # front slot dashed through top
 A(f'<rect x="{tx(sl[0]):.1f}" y="{tz(sl[2]):.1f}" width="{(sh[0]-sl[0])*S:.1f}" height="{(sh[2]-sl[2])*S:.1f}" '
@@ -195,9 +200,23 @@ for i, (ax, ay, txt) in enumerate(top_leads):
 # actually stops a build working is the consumable reaching the read spot, and
 # it spans two frames: the slot is on the front face, the well has to land
 # under the ring. That relationship was wrong once already.
-CART_L, CART_W, CART_T = 45.0, 14.0, 2.4      # BUILD.md section 8
+# Imported, not transcribed. This sheet carried its own 45 mm copy of a part
+# that is 51 mm -- BUILD.md section 8 and gen_printables.py both say 51, and
+# the MANIFEST gen_printables writes says in as many words that the 51 mm
+# cartridge replaced a 45 mm one. A drawing is only worth reading if its
+# numbers come from the thing being drawn.
+import gen_enclosure as _enc                    # noqa: E402
+import gen_printables as _gp                    # noqa: E402
+# The pitch a builder prints at, not one inferred by dividing a bounding box.
+VENT_PITCH = _enc.VENT_PITCH
+CART_L, CART_W, CART_T = _gp.CART_L, _gp.CART_W, _gp.CART_T
 TRAVEL = hi[2] - RING_C[1]                     # front face to read spot
-PROUD = CART_L - TRAVEL
+# The WELL is what has to reach the read spot, and it sits WELL_FROM_TIP back
+# from the tip -- so insertion is travel plus that offset, and what stands
+# proud is the rest. Measuring from the tip overstated the grip by exactly
+# WELL_FROM_TIP and left the guard below unable to fire on the real part.
+INSERTION = TRAVEL + _gp.WELL_FROM_TIP
+PROUD = CART_L - INSERTION
 
 if PROUD < 8.0:
     raise SystemExit(
@@ -209,16 +228,16 @@ if PROUD < 8.0:
 S2 = 3.0
 CX, CY = 858, 214
 A(f'<text x="{CX}" y="{CY-30}" font-size="10" letter-spacing="3" fill="{MUT}">CARTRIDGE FIT</text>')
-xf = CX + TRAVEL*S2                                     # front face
+xf = CX + INSERTION*S2                                  # front face
 A(f'<line x1="{xf:.1f}" y1="{CY-14:.1f}" x2="{xf:.1f}" y2="{CY+100:.1f}" stroke="{DIM}" stroke-width="1.2"/>')
 A(f'<text x="{xf+5:.1f}" y="{CY+112:.1f}" font-size="8.5" fill="{MUT}">front face</text>')
 A(f'<rect x="{CX:.1f}" y="{CY:.1f}" width="{CART_L*S2:.1f}" height="{CART_W*S2:.1f}" '
   f'rx="1.5" fill="#141312" stroke="{STEEL}" stroke-width="0.9"/>')
 A(f'<rect x="{xf:.1f}" y="{CY:.1f}" width="{PROUD*S2:.1f}" height="{CART_W*S2:.1f}" '
   f'rx="1.5" fill="none" stroke="{RED}" stroke-width="0.9"/>')
-A(f'<circle cx="{CX+5*S2:.1f}" cy="{CY+CART_W*S2/2:.1f}" r="{2.0*S2:.1f}" fill="#2A0C12" stroke="{RED}" stroke-width="1"/>')
+A(f'<circle cx="{CX+_gp.WELL_FROM_TIP*S2:.1f}" cy="{CY+CART_W*S2/2:.1f}" r="{2.0*S2:.1f}" fill="#2A0C12" stroke="{RED}" stroke-width="1"/>')
 A(f'<text x="{CX:.1f}" y="{CY-6:.1f}" font-size="8.5" fill="{MUT}">well, under the ring</text>')
-dim_h(CX, xf, CY+CART_W*S2+24, f'travel {TRAVEL:.1f}')
+dim_h(CX, xf, CY+CART_W*S2+24, f'inserted {INSERTION:.1f}')
 dim_h(xf, CX+CART_L*S2, CY+CART_W*S2+50, f'{PROUD:.1f} proud')
 A(f'<text x="{CX:.1f}" y="{CY+CART_W*S2+92:.1f}" font-size="8.5" fill="{MUT}">'
   f'{CART_L:.0f} × {CART_W:.0f} × {CART_T:.1f} overall</text>')
@@ -229,7 +248,7 @@ A(f'<text x="{CX:.1f}" y="{CY+CART_W*S2+106:.1f}" font-size="8.5" fill="{MUT}">'
 LGY = tz(hi[2]) + 26
 A(f'<text x="{tx(lo[0]):.1f}" y="{LGY:.0f}" font-size="9.5" fill="{MUT}">'
   f'display {gh[0]-gl[0]:.1f} × {gh[2]-gl[2]:.1f}'
-  f'  ·  buttons Ø{BTN[0][2]:.1f}, <tspan fill="{RED}">CONFIRM Ø{BTN[3][2]:.1f}</tspan>'
+  f'  ·  buttons Ø{BTN[0][2]:.1f}, <tspan fill="{RED}">CONFIRM Ø{BTN[-1][2]:.1f}</tspan>'
   f'  ·  pad {ph[0]-pl[0]:.1f} × {ph[2]-pl[2]:.1f} <tspan fill="{MUT}">(reserved, print flat)</tspan></text>')
 
 # ================= FRONT ===============================================
@@ -242,7 +261,11 @@ A(f'<rect x="{tx(lo[0]):.1f}" y="{fy(seh[1]):.1f}" width="{L*S:.1f}" height="{(s
 A(f'<rect x="{tx(sl[0]):.1f}" y="{fy(sh[1]):.1f}" width="{(sh[0]-sl[0])*S:.1f}" height="{(sh[1]-sl[1])*S:.1f}" '
   f'fill="#000" stroke="{RED}" stroke-width="0.9"/>')
 for i in range(N_VENT):
-    vx = vl[0] + (vh[0]-vl[0]) * (i + 0.22) / N_VENT
+    # Stepped by the real pitch, from the first vent's own width. Dividing the
+    # GROUP bounding box into N equal parts gives 1.533 where the pitch is
+    # 1.6, so the outermost vent was drawn 0.8 mm from where it is -- on a
+    # sheet headed "every dimension read from instrument.obj".
+    vx = vl[0] + i * VENT_PITCH
     A(f'<rect x="{tx(vx):.1f}" y="{fy(vh[1]):.1f}" width="{0.6*S:.1f}" height="{(vh[1]-vl[1])*S:.1f}" fill="#08080A" stroke="{MUT}" stroke-width="0.3"/>')
 for a, b in FAST:
     A(f'<circle cx="{tx((a[0]+b[0])/2):.1f}" cy="{fy((a[1]+b[1])/2):.1f}" r="{(b[0]-a[0])/2*S:.1f}" fill="#16171A" stroke="{STEEL}" stroke-width="0.8"/>')
@@ -278,7 +301,7 @@ NY = RY + HT*S + 56
 A(f'<line x1="46" y1="{NY-18:.0f}" x2="{W-46}" y2="{NY-18:.0f}" stroke="#22242A" stroke-width="1"/>')
 A(f'<text x="46" y="{NY:.0f}" font-size="10" letter-spacing="3" fill="{MUT}">THREE CHOICES THAT LOOK COSMETIC AND ARE NOT</text>')
 notes = [
-    ('Vents must be blind pockets.', f'{N_VENT} slots on the front face, {vh[2]-vl[2]:.1f} deep. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate fails. Print them blind and verify with the light-tightness test.'),
+    ('Vents must be blind pockets.', f'{N_VENT} slots on the front face, {_enc.VENT_DEPTH:.1f} deep. If any becomes a through-hole, ambient light reaches the optical chamber and the 415 nm gate fails. Print them blind and verify with the light-tightness test.'),
     ('The pad is reserved, not fitted.', f'{ph[0]-pl[0]:.1f} × {ph[2]-pl[2]:.1f} printed marking sizing the optional fingerprint sensor. Deliberately flat, not a pocket: an unpopulated recess on the deck collects blood. The base build leaves it blank — the PIN does identity.'),
     ('The dish is the reader, not a dial.', 'The ring is a bezel, not a control. Nothing rotates. The cartridge enters through the front slot and sits under the dish.'),
 ]

@@ -64,18 +64,27 @@ async function run() {
   for (let i = 0; i < 200 && !stage._object; i++) await new Promise(r => setTimeout(r, 50));
   if (!stage._object) throw new Error('model never set an object');
 
+  const MTL_NAME = '__MTL_NAME__';
   const mod = await import('three/addons/exporters/OBJExporter.js');
   const mats = stage._nameParts();
   const base = stage._basename || 'instrument';
-  const obj = 'mtllib ' + base + '.mtl\\n' + new mod.OBJExporter().parse(stage._object);
+  // mtllib has to name the file this run actually writes. Hardcoding the
+  // stage's basename made `--out /tmp/foo.obj` emit foo.obj pointing at
+  // instrument.mtl, beside a foo.mtl nothing referenced.
+  const obj = 'mtllib ' + MTL_NAME + '\\n' + new mod.OBJExporter().parse(stage._object);
 
+  // The MTL half of this used to be a second, hand-copied implementation of
+  // three-d-stage's own writer, which is exactly how the two drift. Call the
+  // stage's converter so the colour space cannot differ between the file the
+  // download button produces and the file this tool commits.
+  const srgb = (v) => stage._srgb8(v);
   let mtl = '# Exported by three-d-stage\\n';
   for (const m of mats) {
     const c = m.color || {r:0.8,g:0.8,b:0.8};
     const rough = typeof m.roughness === 'number' ? m.roughness : 0.5;
     const opacity = typeof m.opacity === 'number' ? m.opacity : 1;
     mtl += 'newmtl ' + m.name + '\\n';
-    mtl += 'Kd ' + c.r.toFixed(4) + ' ' + c.g.toFixed(4) + ' ' + c.b.toFixed(4) + '\\n';
+    mtl += 'Kd ' + srgb(c.r) + ' ' + srgb(c.g) + ' ' + srgb(c.b) + '\\n';
     mtl += 'Ks 0.2000 0.2000 0.2000\\nNs ' + Math.round((1-rough)*200) + '\\n';
     mtl += 'd ' + opacity.toFixed(4) + '\\n\\n';
   }
@@ -109,7 +118,8 @@ def main() -> int:
     work = Path(tempfile.mkdtemp(prefix="cell-chrome-"))
     atexit.register(shutil.rmtree, work, True)
     atexit.register((VIEWER / "__export.html").unlink, True)
-    (VIEWER / "__export.html").write_text(EXPORT_HTML)
+    (VIEWER / "__export.html").write_text(
+        EXPORT_HTML.replace("__MTL_NAME__", Path(args.out).with_suffix(".mtl").name))
     captured: dict[str, bytes] = {}
     done = threading.Event()
     status = {"msg": "timed out"}

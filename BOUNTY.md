@@ -10,7 +10,7 @@ deliberately does not.
 
 ## Cost
 
-**~$98 in hardware, ~$31 in consumables.** `BOM.csv` lists every part with
+**~$97 in hardware, ~$31 in consumables.** `BOM.csv` lists every part with
 sourcing. The bounty is worth more than the build.
 
 ## Build it

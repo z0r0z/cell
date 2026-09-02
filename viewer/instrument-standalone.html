@@ -86023,6 +86023,12 @@ export { GLTFExporter };
       }
     }
 
+    _srgb8(v) {
+      const u = v <= 0.0031308 ? v * 12.92
+                               : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+      return Math.min(1, Math.max(0, u)).toFixed(4);
+    }
+
     async _exportObj() {
       if (!this._object) return;
       const mod = await import('three/addons/exporters/OBJExporter.js');
@@ -86036,8 +86042,13 @@ export { GLTFExporter };
         const rough = typeof m.roughness === 'number' ? m.roughness : 0.5;
         const opacity = typeof m.opacity === 'number' ? m.opacity : 1;
         mtl += 'newmtl ' + m.name + '\n';
+        // THREE.Color holds LINEAR components under colour management; MTL's
+        // Kd is conventionally sRGB. Written straight through, the shell's
+        // 0x1a1917 left here as 0.0103 instead of 0.102 and every material
+        // arrived in other tools about ten times too dark.
         mtl +=
-          'Kd ' + c.r.toFixed(4) + ' ' + c.g.toFixed(4) + ' ' + c.b.toFixed(4) + '\n';
+          'Kd ' + this._srgb8(c.r) + ' ' + this._srgb8(c.g) + ' '
+          + this._srgb8(c.b) + '\n';
         mtl += 'Ks 0.2000 0.2000 0.2000\n';
         mtl += 'Ns ' + Math.round((1 - rough) * 200) + '\n';
         mtl += 'd ' + opacity.toFixed(4) + '\n\n';
@@ -86425,6 +86436,10 @@ const etchMat = new THREE.MeshPhysicalMaterial({
 const cavityMat = new THREE.MeshPhysicalMaterial({
   name: 'cavity', color: 0x050505, roughness: 0.95, metalness: 0.0,
   envMapIntensity: 0.06,
+  // Biased HARDER than steelMat's -2. Most cavities protrude and never need
+  // this, but the fastener slot is coplanar with both the shell face and the
+  // screw head it is cut into, and it has to win against both.
+  polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
 });
 // The port bore is the one cavity surface seen from INSIDE, so it needs the
 // back faces of its open cylinder. Its own material rather than a side flag
@@ -86448,7 +86463,7 @@ const markMat = new THREE.MeshPhysicalMaterial({
 // Ink sits ON the deck, exactly coplanar with it. Depth-offset rather than
 // floated: lifting it even a hundredth would raise the model's envelope,
 // which gen_enclosure.py cross-checks against the printed shells.
-for (const m of [printMat, markMat]) {
+for (const m of [printMat, markMat, steelMat]) {
   m.polygonOffset = true;
   m.polygonOffsetFactor = -2;
   m.polygonOffsetUnits = -2;
@@ -86526,7 +86541,16 @@ const RCX = X(86), RCY = Y(31);
 // The window is on the BOM and in BUILD.md 8; until now the model had nothing
 // there and the read spot rendered as painted-on floor.
 const PORT_R = 9.8 / 2, GLASS_R = 10.2 / 2, GLASS_REBATE = 0.6, GLASS_T = 0.5;
-const DISH_FLOOR = 25.502, PART_LINE = 11.4;
+// The dish is 2.0 deep, because gen_enclosure.py's DISH_DEPTH is 2.0 and that
+// number is load-bearing: check_stack() derives the optical skirt and the
+// chamber ceiling from it. This constant used to be 25.502 -- the top of the
+// shell_upper slab plus a z-fight offset, i.e. wherever the slab stack
+// happened to end -- which made the RENDERED dish 2.818 deep and the PRINTED
+// one 2.0. Two models of one instrument, 0.82 mm apart, with nothing
+// comparing them; gen_enclosure.check_viewer_envelope now does.
+const DECK_TOP_Z = 28.32;               // restated as DECK_TOP below
+const DISH_DEPTH = 2.0;
+const DISH_FLOOR = DECK_TOP_Z - DISH_DEPTH, PART_LINE = 11.4;
 const REBATE_FLOOR = DISH_FLOOR - GLASS_REBATE;
 
 // lower shell, parting seam, upper shell
@@ -86535,9 +86559,16 @@ plate.add(slab(roundedPath(THREE.Shape, 114.4, 71.4, 2.7), 11.0, 11.4, 0, oxbloo
 const upper = roundedPath(THREE.Shape, 115, 72, 3);
 upper.holes.push(circleHole(PORT_R + 0.05, RCX, RCY));   // sleeved below, so slightly clear
 plate.add(slab(upper, PART_LINE, 25.5, 0, shellMat, 'shell_upper'));
+// Two slabs, because the dish has a FLOOR. The deck is solid across its whole
+// footprint up to DISH_FLOOR -- only the sensor port passes through -- and is
+// holed for the dish above that. One slab holed all the way through is what
+// left the recess bottoming out on shell_upper.
 const deck = roundedPath(THREE.Shape, 115, 72, 3);
-deck.holes.push(circleHole(24, RCX, RCY));
-plate.add(slab(deck, 25.5, 27.5, 0, shellMat, 'shell_deck'));
+deck.holes.push(circleHole(PORT_R + 0.05, RCX, RCY));
+plate.add(slab(deck, 25.5, DISH_FLOOR, 0, shellMat, 'shell_deck'));
+const deckDish = roundedPath(THREE.Shape, 115, 72, 3);
+deckDish.holes.push(circleHole(24, RCX, RCY));
+plate.add(slab(deckDish, DISH_FLOOR, 27.5, 0, shellMat, 'shell_deck_dish'));
 
 // The skin's 0.4 bevel is thicker than half its own 0.5 slab, so ExtrudeGeometry
 // clamps the depth and the chamfer adds its full thickness on top: the deck's
@@ -86545,7 +86576,7 @@ plate.add(slab(deck, 25.5, 27.5, 0, shellMat, 'shell_deck'));
 // ENV_Z is pinned to that 28.32, so the number stays — but everything that
 // sits ON the deck has to be placed against it. Four things were not, and had
 // been quietly buried inside the shell ever since.
-const DECK_TOP = 28.32;
+const DECK_TOP = DECK_TOP_Z;
 const skin = roundedPath(THREE.Shape, 115, 72, 3);
 skin.holes.push(circleHole(24, RCX, RCY));
 skin.holes.push(roundedPath(THREE.Path, 50, 38, 1.2, X(32), Y(43)));   // display pocket 7→57, 24→62
@@ -86677,7 +86708,13 @@ for (let i = 0; i < 15; i++) {
 // recessed fasteners, front face
 for (const fx of [12, 110]) {
   const s = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 1.2, 32), steelMat);
-  s.position.set(X(fx), -35.55, 5.6);
+  // Front face COPLANAR with the shell's, not 0.45 mm behind it. The head is
+  // 1.2 deep and the face is at -36.6, so the centre is -36.0; at -35.55 the
+  // whole head sat inside solid shell and only its slot ever rendered -- two
+  // black slots on a blank face, with no screw. Coplanar and depth-offset
+  // rather than floated, because protruding would push the model's envelope
+  // past the 73.2 that gen_enclosure.py checks against the printed shells.
+  s.position.set(X(fx), -36.0, 5.6);
   s.name = 'fastener_' + fx;
   plate.add(s);
   const slot = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.4, 0.5), cavityMat);
@@ -86690,7 +86727,13 @@ for (const fx of [12, 110]) {
 plate.add(box(34, 4.2, 3, X(86), -(36 + 0.05 - 2.1), 14.9, cavityMat, 'front_slot'));
 plate.add(box(72, 3.2, 16, 0, 36 - 1.55, 14, cavityMat, 'rear_bay'));
 const usb = new THREE.Mesh(new THREE.CapsuleGeometry(1.6, 5.8, 8, 24), cavityMat);
-usb.position.set(55.9, 0, 14);
+// 55.95, so the capsule's +X extreme is 57.55 against a right face at 57.5.
+// At 55.9 it reached exactly 57.5 and was tangent to the wall: the aperture
+// was entirely inside solid shell, the end face rendered blank, and the
+// mechanical drawing dimensioned a USB-C opening that the render did not
+// have. The 0.05 protrusion is what front_slot and rear_bay already use, and
+// it stays inside the +/-58.1 envelope.
+usb.position.set(55.95, 0, 14);
 usb.name = 'usb_c';
 plate.add(usb);
 
@@ -86859,7 +86902,8 @@ if (callout) {
       'A fingertip on the ring for the touch tier; a cartridge under it for blood. The ring is a bezel, not a control — nothing rotates.']],
     ['port_', ['Sensor port', OD(PORT_R * 2) + ' through the dish',
       'The optical path down to the chamber. Matte black, so the read spot returns nothing of its own.']],
-    ['recess_floor_etch', ['Sample dish', OD(23.6 * 2) + ', 2.0 deep',
+    ['recess_floor_etch', ['Sample dish',
+      OD(23.6 * 2) + ', ' + D(DECK_TOP - DISH_FLOOR) + ' deep',
       'The etched macrocycle is a porphyrin. Haemoglobin carries an iron atom at the centre of one, and the 415 nm Soret band that ring produces is what the chemistry gate looks for.']],
     ['index_', ['Index ring', '60 ticks, every fifth in steel',
       'Decorative. The dish is a reader, not a dial.']],
@@ -86917,12 +86961,21 @@ if (callout) {
   const ndc = new THREE.Vector2();
   const el = stage;
 
+  // Meshes a click passes straight through to whatever is behind them.
+  const PICK_THROUGH = new Set(['display_glass']);
+
   const hit = (ev) => {
     const r = el.getBoundingClientRect();
     ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1,
             -((ev.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, cam);
-    return ray.intersectObject(model, true)[0] || null;
+    // The 0.24 mm cover glass sits in front of the panel and is larger than
+    // it in both axes, so every ray reaching the display from outside hit the
+    // glass first and resolved to the 'display_' entry. That made 'screen' —
+    // "this screen is the defence, everything else assumes you read it", the
+    // one caption this whole module exists to deliver — unreachable.
+    const hits = ray.intersectObject(model, true);
+    return hits.find((h) => !PICK_THROUGH.has(h.object.name)) || hits[0] || null;
   };
 
   const clear = () => {

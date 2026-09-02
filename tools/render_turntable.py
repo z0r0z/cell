@@ -86,7 +86,14 @@ async function run() {
   // full-resolution PNG per frame is what filled the disk last time.
   renderer.setPixelRatio(SS);
   renderer.setSize(SIZE, SIZE, false);
-  cam.aspect = 1; cam.updateProjectionMatrix();
+  // model.js's pose() composes the PAGE off-centre — a 10%% view offset, so the
+  // instrument sits left of the caption column. The turntable is square and
+  // centred, and this stage is not that page: without clearing the offset
+  // every frame is rendered 10%% off-centre and clipped on one side.
+  // render_social_card.py does the same thing for the same reason.
+  cam.aspect = 1;
+  cam.clearViewOffset();
+  cam.updateProjectionMatrix();
 
   // Bake an opaque background. The viewer paints its backdrop in CSS, which a
   // canvas grab does not capture — leaving an alpha channel that ffmpeg

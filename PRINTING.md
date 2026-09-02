@@ -19,20 +19,28 @@ The generator validates every mesh, runs the fit checks, and exits non-zero
 instead of handing your slicer something it would have to guess at. CI runs the
 same command and fails if the committed STLs are not what it produces.
 
-Ten parts. Nothing needs supports.
+Eleven parts. Nothing needs supports.
 
 ## 1. What you need
 
 | | |
 |---|---|
-| Printer | Anything with a 120 × 80 mm bed that can hold PETG temperatures |
-| Black PETG | ~90 g. Shells, optics, bezel |
+| Printer | Anything with a 130 × 90 mm bed that can hold PETG temperatures |
+| Temperatures | 240 °C nozzle, 80 °C bed. Fix on one pair and hold it for the whole cartridge batch |
+| Black PETG | ~90 g. Shells, optics, bezel, bay blank |
 | White PETG | ~60 g. Cartridges. A *different spool*, not "light grey" |
 | Matte black paint | Acrylic or model paint, for the optical bores |
-| M2.5 heat-set inserts | 6, plus a soldering iron with an insert tip |
+| M2.5 heat-set inserts | 6, Ø3.5 knurled OD, plus a soldering iron with an insert tip |
+| M2.5 × 16 screws | 6. They enter from the base and thread into the inserts in the upper shell |
 
 **PETG, not PLA.** PLA creeps under screw preload and softens in a hot car. The
 bosses lose their grip and the optical chamber stops being light-tight.
+
+**Dry the white spool before the batch.** Four hours at 65 °C. PETG is
+hygroscopic, and wet PETG's signature failure is a hazy, stringy top surface —
+which is the surface every reading in this device is normalised against. A
+builder who fails the Stage 1 check below and goes hunting through flow and
+temperature will not find it there.
 
 **The white spool is a measuring instrument.** Every cartridge carries the white
 reference patch that every reading is normalised against. Print the whole batch
@@ -56,8 +64,9 @@ temperature. Every gate in the device is normalised against this surface.
 
 ### Stage 2: the cartridge batch
 
-Plate 20 of them, plus one `cartridge_reference.stl` and one
-`cartridge_null.stl`. That is [BUILD.md §15](BUILD.md) milestone 3. It is a
+Plate them, plus one `cartridge_reference.stl` and one
+`cartridge_null.stl`. Twenty-two at 51 × 14 mm is three plates on a
+130 × 90 bed, so run the plates back to back on the one spool. That is [BUILD.md §15](BUILD.md) milestone 3. It is a
 measurement and not a stockpile: read the white patch on all 20 and require
 **under 3% spread after normalisation**. Cartridges that do not agree with each
 other will not agree with themselves next month. Fix the printer here.
@@ -77,11 +86,16 @@ fine" and "works" are different things. See post-processing below.
 ### Stage 4: the shells
 
 `shell_lower.stl` and `shell_upper.stl`, part line down, seam at a corner. These
-two are most of the filament and most of the hours. Babysit the first layer.
+two are most of the filament and most of the hours. Babysit the first layer,
+and on smooth PEI or glass put a glue-stick layer down first — PETG bonds to a
+bare sheet hard enough to take a piece of it away with the part. Keep part
+cooling low: the shells carry the screw preload PETG was chosen for, and fan
+speed is what costs you layer adhesion.
 
 **Check before continuing:** the tongue on the lower shell enters the groove in
 the upper without forcing, and the two close with no visible gap at the part
-line. There is 0.15 mm of clearance designed in. If it is tight, your printer is
+line. There is 0.15 mm of clearance designed in, on the sides as well as over
+the top, with a 0.4 mm lead-in on the tongue so the joint starts itself. If it is tight, your printer is
 running wide and the cartridge slot will be tight too.
 
 ### Stage 5: the bezel, last
@@ -104,6 +118,13 @@ wrong number is a failed run instead of a wasted print.
 `window_jig.stl`, any filament, whenever. It is a cutting template for the PET
 windows and no part of the instrument.
 
+### And last of all: the bay blank
+
+`bay_blank.stl`, black PETG, lip down so the 1.6 mm lip is not a ledge printed
+into mid-air. It closes the rear compute bay, and it goes on **after
+provisioning** — the bay is how you reach the Pi and its microSD during a
+build. Fit it, then seal it.
+
 ## 3. Post-processing
 
 Four steps. The first two are load-bearing.
@@ -114,9 +135,11 @@ reflects enough at grazing incidence to put stray light on the sensor, and stray
 light is indistinguishable from a bright sample. Thin acrylic paint, two coats,
 kept out of the bore's clear path.
 
-**Fit the six heat-set inserts.** Ø3.6 × 6 holes in the lower shell, M2.5
+**Fit the six heat-set inserts.** Ø3.6 × 6 holes in the **upper** shell, M2.5
 inserts, soldering iron at ~230 °C, pressed in square and flush. Skewed inserts
-are the usual reason an enclosure will not close.
+are the usual reason an enclosure will not close. The screws come up from the
+base through the lower shell and thread into these, so the heads finish
+underneath and the display face stays unbroken.
 
 **Cut and tape the PET windows.** Use the jig: 12 × 10 mm rectangles from 0.1 mm
 film, one per cartridge. Tape one long edge to the cartridge body with 3M 300LSE
@@ -132,7 +155,8 @@ gate 1 on the bright side.
 
 * [ ] 20 cartridges agree with each other within 3% after normalisation
 * [ ] All optical bores are matte black inside
-* [ ] Six inserts in, square and flush
+* [ ] Six inserts in the upper shell, square and flush, and six M2.5 × 16
+  screws reaching them from the base
 * [ ] Shells close on the tongue and groove with no gap at the part line
 * [ ] A cartridge slides to the first detent, then past it, without forcing
 * [ ] Chamber light-tight: clear channel under 0.5% of LEDs-on at 10,000 lux

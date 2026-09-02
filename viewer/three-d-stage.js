@@ -553,6 +553,12 @@
       }
     }
 
+    _srgb8(v) {
+      const u = v <= 0.0031308 ? v * 12.92
+                               : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+      return Math.min(1, Math.max(0, u)).toFixed(4);
+    }
+
     async _exportObj() {
       if (!this._object) return;
       const mod = await import('three/addons/exporters/OBJExporter.js');
@@ -566,8 +572,13 @@
         const rough = typeof m.roughness === 'number' ? m.roughness : 0.5;
         const opacity = typeof m.opacity === 'number' ? m.opacity : 1;
         mtl += 'newmtl ' + m.name + '\n';
+        // THREE.Color holds LINEAR components under colour management; MTL's
+        // Kd is conventionally sRGB. Written straight through, the shell's
+        // 0x1a1917 left here as 0.0103 instead of 0.102 and every material
+        // arrived in other tools about ten times too dark.
         mtl +=
-          'Kd ' + c.r.toFixed(4) + ' ' + c.g.toFixed(4) + ' ' + c.b.toFixed(4) + '\n';
+          'Kd ' + this._srgb8(c.r) + ' ' + this._srgb8(c.g) + ' '
+          + this._srgb8(c.b) + '\n';
         mtl += 'Ks 0.2000 0.2000 0.2000\n';
         mtl += 'Ns ' + Math.round((1 - rough) * 200) + '\n';
         mtl += 'd ' + opacity.toFixed(4) + '\n\n';

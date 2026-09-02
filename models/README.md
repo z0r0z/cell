@@ -1,7 +1,7 @@
 # Enclosure model
 
-`instrument.obj`: 103 named objects with materials, 116.2 × 73.2 × 28.3 mm.
-~53 MB, tracked with Git LFS (see `.gitattributes`).
+`instrument.obj`: 104 named objects with materials, 116.2 × 73.2 × 28.3 mm.
+~54 MB, tracked with Git LFS (see `.gitattributes`).
 
 The object and vertex counts are printed in the corner of
 `diagrams/mechanical.svg`, which is generated from this file. Trust that copy
@@ -25,15 +25,17 @@ After any model change, re-export and then:
 python tools/gen_mechanical.py
 ```
 
-**Do not hand-edit the OBJ.** It is 53 MB of triangles, and nothing downstream
+**Do not hand-edit the OBJ.** It is 54 MB of triangles, and nothing downstream
 of a hand edit can be reconciled with a parametric change.
 
 `instrument.mtl` is written by `tools/export_model.py` in the same pass as the
 OBJ, from the viewer's own materials, so the two stay in step. Material names
 also ride on the objects themselves (`shell`, `oxblood`, `trim_oxblood`,
-`glass`, `pad`, `etch_floor`, `steel`, `cavity`, `screen`, `silkscreen`,
-`silkscreen_mark`), so the separation survives if you drop the MTL and assign
-your own.
+`glass`, `pad`, `etch_floor`, `steel`, `cavity`, `cavity_bore`, `screen`,
+`silkscreen`, `silkscreen_mark`), so the separation survives if you drop the
+MTL and assign your own. Twelve, not eleven: `cavity_bore` is the inward-facing
+material on `port_sleeve`, and it is the one the OBJ cannot carry faithfully,
+because a back-faced material is a thing the format has no way to say.
 
 ## Coordinate convention: centre-origin
 
@@ -52,8 +54,9 @@ silent 58 mm error that will not look wrong on screen.
 
 `models/print/` holds the parts that are *not* enclosure: the cartridge, the
 pre-flight REFERENCE and NULL bodies, the aperture tube, the optical head, the
-slot baffle, the display bezel, the window jig, and both enclosure shells.
-`python3 tools/gen_printables.py` builds all ten, validates each one, and
+slot baffle, the display bezel, the rear bay blank, the window jig, and both
+enclosure shells.
+`python3 tools/gen_printables.py` builds all eleven, validates each one, and
 regenerates `models/print/MANIFEST.md` from the same constants. The manifest
 cannot describe a part the STLs no longer are.
 
@@ -106,8 +109,9 @@ the slot and the ring share a centreline:
 | `ring` / read spot | +28.50 | +5.00 |
 | Front face | — | +36.60 |
 
-Cartridge travel front face to read spot is **31.6 mm**, which sets the 45 mm
-cartridge length in `BUILD.md` §8. It leaves 13.4 mm proud of the slot to grip.
+Cartridge travel front face to read spot is **31.6 mm**, which sets the 51 mm
+cartridge length in `BUILD.md` §8. The WELL has to reach the read spot and sits
+10.5 mm back from the tip, so 42.1 mm goes in and 8.9 mm stands proud to grip.
 If you move the dish, re-derive the cartridge length from this number.
 
 ## The sensor port

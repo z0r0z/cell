@@ -85,13 +85,17 @@ def lathe(profile, n=96, cx=0.0, cy=0.0):
         r1, z1 = profile[(i + 1) % m]
         for k in range(n):
             a0 = TAU * k / n
-            a1 = TAU * (k + 1) / n
+            a1 = TAU * ((k + 1) % n) / n
             p00 = (cx + r0 * math.cos(a0), cy + r0 * math.sin(a0), z0)
             p01 = (cx + r0 * math.cos(a1), cy + r0 * math.sin(a1), z0)
             p10 = (cx + r1 * math.cos(a0), cy + r1 * math.sin(a0), z1)
             p11 = (cx + r1 * math.cos(a1), cy + r1 * math.sin(a1), z1)
             tris += quad(p00, p10, p11, p01)
-    return [t for t in tris if _area2(t) > 1e-18]
+    # snap() here, not only in tube(): at k = n-1 the wrap angle is TAU, and
+    # cos(TAU) != cos(0) in float64, so the surface of revolution never closed
+    # on itself. Eight boundary edges at any segment count, and lathe() is a
+    # public name whose docstring promises a finished surface.
+    return snap([t for t in tris if _area2(t) > 1e-18])
 
 
 def _area2(t):
@@ -108,6 +112,10 @@ def tube(cx, cy, z0, z1, r_out, r_in, n=96, flange_r=None, flange_h=0.0):
     One lathed shell -- no stacked solids, so no doubled faces where a flange
     meets the barrel.
     """
+    if flange_r and flange_h <= 0:
+        raise ValueError("tube(): flange_r=%r with flange_h=%r -- a flange with "
+                         "no height is dropped silently, which is never what "
+                         "the caller meant" % (flange_r, flange_h))
     if flange_r:
         prof = [(r_in, z0), (flange_r, z0), (flange_r, z0 + flange_h),
                 (r_out, z0 + flange_h), (r_out, z1), (r_in, z1)]

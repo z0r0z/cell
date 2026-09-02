@@ -1,4 +1,4 @@
-# The enclosure model is ~56 MB. Track with Git LFS:
+# The enclosure model is ~54 MB. Track with Git LFS:
 #   git lfs install && git lfs track "*.obj"
 *.obj filter=lfs diff=lfs merge=lfs -text
 *.mtl filter=lfs diff=lfs merge=lfs -text

@@ -55,6 +55,7 @@ PORT_D = 9.8                         # ring ID: the sensor port through the dish
 RING_OD = 14.4
 DISPLAY_X, DISPLAY_Y = -25.5, -7.0
 DISPLAY_W, DISPLAY_H = 49.7, 37.7
+DISPLAY_R = 1.2                      # window corner radius; the bezel matches it
 BUTTON_Y = 23.0
 BUTTONS = [(-44.5, 5.8), (-33.5, 5.8), (-22.5, 5.8), (-5.5, 8.6)]
 SLOT_X, SLOT_W, SLOT_H = 28.5, 34.0, 3.0
@@ -65,6 +66,7 @@ USB_W, USB_H, USB_Z = 9.0, 3.2, 14.0
 VENT_N, VENT_W, VENT_H = 15, 0.6, 2.6
 VENT_X0, VENT_PITCH, VENT_Z = -23.5, 1.6, 14.9
 FASTENER_X, FASTENER_Z, FASTENER_D = (-45.5, 52.5), 5.6, 4.0
+FASTENER_DEPTH = 1.2                 # blind: viewer/model.js draws it 1.2 deep
 
 # --- DERIVED: the inside, which BUILD.md does not dimension ----------------
 WALL = 2.4                  # 6 perimeters at 0.4
@@ -73,22 +75,69 @@ FLOOR = 2.0
 CEIL = 2.0
 LIP_W = 1.2                 # tongue on the lower shell, groove in the upper
 LIP_H = 2.0
+LIP_LEAD = 0.4              # chamfer on the tongue's top edge, to start the joint
+PART_CLEAR = 0.15           # tongue to groove, on the SIDES as well as over the top
 BOSS_OD, INSERT_D, INSERT_DEPTH = 6.0, 3.6, 6.0     # M2.5 heat-set insert
 SCREW_CLEAR, SCREW_HEAD = 2.8, 4.8
+SCREW_CB_DEPTH = 2.4        # head sunk into the base, so the case still sits flat
+SCREW_RELIEF = 2.0          # past the insert, so a long screw cannot bottom out
+# The screw enters from the BASE and threads up into an insert in the UPPER
+# shell. That is the only direction that works. The insert has to be in the
+# half the screw does not pass through, and a screw entering the deck would
+# have to span the whole 17.5 mm interior and would put six heads on the
+# display face. Length follows from the stack, and check_fit() proves it.
+SCREW_LEN = 16.0            # M2.5 x 16
 # Six insert bosses, not eight. The two that would sit mid-span at the rear
 # stood inside the Pi's 65 x 30 footprint -- the fit check catches it if they
 # come back. The corner pair at the rear clears the board because the board is
 # narrower than the body. Six here plus the two front fasteners is the eight
 # the BOM buys.
-BOSSES = [(-50, 30), (-20, 30), (20, 30), (50, 30), (-50, -30), (50, -30)]
+#
+# Every boss now carries a pillar in the UPPER shell as well, so a boss is no
+# longer a stub on the floor -- it is a column through the whole interior, and
+# it has to miss everything on the way. The front-middle one was at (20, 30),
+# inside the 11.5 .. 45.5 that the cartridge slot sweeps, and its pillar cut
+# straight through the cartridge's path.
+BOSSES = [(-50, 30), (-20, 30), (5, 30), (50, 30), (-50, -30), (50, -30)]
 CHAMBER_R = 25.0            # light-tight skirt around the dish
-CHAMBER_DROP = 12.0
-PI_W, PI_SLOT, PI_RAIL_Z = 65.0, 1.8, 7.0           # Pi Zero 2 W slides in
+# 11.2, not 12.0. At 12.0 the skirt hung to 12.32 and the tallest part on the
+# board reached 12.7, so the two overlapped by 0.38 mm. The check that should
+# have caught it measured headroom from the middle of the board instead of its
+# top face. The skirt still hangs past the cartridge plane at 13.4, which is
+# what closes the chamber.
+CHAMBER_DROP = 11.2
+# 7.1, not 7.0: the board enters through the rear bay, whose floor is at 6.0,
+# so the underside of the board has to start above that. check_stack() proves
+# the whole column -- bay floor, board, headroom, skirt -- still fits.
+PI_W, PI_SLOT, PI_RAIL_Z = 65.0, 1.8, 7.1           # Pi Zero 2 W slides in
 PI_DEPTH = 30.0
+PI_CLEAR = 0.2              # per side, board edge to the back of the groove
+PI_ENGAGE = 1.2             # how far the rail lip reaches over the board
 GLASS_D, GLASS_REBATE = 10.2, 0.6                   # the 10 mm ring window
 PI_HEADROOM = 4.8           # tallest part on a Pi Zero, under the skirt at 12.3
 DISPLAY_POST = [(-38, -22), (-13, -22), (-38, 8), (-13, 8)]
+# How far the ledge reaches IN past the window edge. It does two jobs: it is
+# what the printed bezel lands on, and it is what the four display posts hang
+# from. Running it OUTWARD from the window edge, which is what it used to do,
+# put every millimetre of it behind solid deck -- so the bezel had nothing to
+# rest on and dropped through, and the posts touched nothing and came out of
+# the slicer as four loose pins standing in the window.
+DISPLAY_LEDGE_W = 4.5
 PITCH = 0.5
+
+# The cartridge is gen_printables.py's part, but the shells have to let it
+# through, so its section is needed here too. gen_printables asserts these
+# against its own constants on import: the two cannot drift apart in silence.
+CART_W, CART_T = 14.0, 2.4
+
+# How far back the cartridge slot has to be cut through the optical-chamber
+# skirt. Derived, not guessed: the skirt's inner arc comes nearest the front at
+# the cartridge's EDGES, not on its centreline, and a cut sized for the
+# centreline left a 0.11 mm sliver of skirt standing in the path of both edges
+# for the full height of the slot.
+SKIRT_CUT_BACK = (DISH_Y
+                  + math.sqrt((CHAMBER_R - WALL) ** 2 - (CART_W / 2) ** 2)
+                  - 0.5)
 
 _TO_VIEWER = "X -> X, Y(depth) -> Z, Z(height) -> Y"
 
@@ -121,6 +170,22 @@ def ring(d_out, d_in, cx=0.0, cy=0.0):
     return lambda x, y: max(o(x, y), -i(x, y))
 
 
+def _span(x0, x1, dy, cy):
+    """A rectangle from x0 to x1 in either order, dy deep, centred cy."""
+    lo, hi = (x0, x1) if x0 < x1 else (x1, x0)
+    return rect(hi - lo, dy, (lo + hi) / 2, cy)
+
+
+def _bore_y(x, z, y0, y1, r):
+    """A cylindrical bore along Y (depth) -- the axis circ() cannot express."""
+    lo, hi = (y0, y1) if y0 < y1 else (y1, y0)
+
+    def f(p):
+        px, py, pz = p
+        return max(math.hypot(px - x, pz - z) - r, py - hi, lo - py)
+    return f
+
+
 def inset(w, h, r, d):
     """The envelope profile shrunk by d -- the inside of a wall d thick."""
     return rrect(w - 2 * d, h - 2 * d, max(r - d, 0.05), 0, 0)
@@ -129,6 +194,12 @@ def inset(w, h, r, d):
 OUTER = rrect(ENV_X, ENV_Y, CORNER_R)
 INNER = inset(ENV_X, ENV_Y, CORNER_R, WALL)
 LIP = inset(ENV_X, ENV_Y, CORNER_R, WALL - LIP_W)
+# The groove is cut on LIP and the tongue PART_CLEAR narrower. Cutting both
+# from the same profile is what left the joint 0.15 mm of clearance over the
+# top of the tongue and 0.000 mm on either side of it -- an interference fit
+# around a 358 mm perimeter, which is a shell that will not close.
+TONGUE = inset(ENV_X, ENV_Y, CORNER_R, WALL - LIP_W + PART_CLEAR)
+TONGUE_LEAD = inset(ENV_X, ENV_Y, CORNER_R, WALL - LIP_W + PART_CLEAR + LIP_LEAD)
 
 
 # --------------------------------------------------------------------------
@@ -158,24 +229,41 @@ class Shell:
         self._live = []
 
     def solid(self, prof, z0, z1):
-        self.ops.append((True, prof, z0, z1))
+        self.ops.append((True, prof, z0, z1, None))
         return self
 
     def hole(self, prof, z0, z1):
-        self.ops.append((False, prof, z0, z1))
+        self.ops.append((False, prof, z0, z1, None))
+        return self
+
+    def hole3(self, field):
+        """Subtract a full 3-D field, for a feature whose axis is not Z.
+
+        Every prism op above extrudes a 2-D profile along Z, which is right
+        for the vents, the slot, the bay and the USB cutout. It is wrong for
+        anything bored into a vertical face: circ() extruded along Z is a
+        VERTICAL bore, and using it for the front-face fasteners cut two Ø4
+        slots clean through the front wall of the lower shell.
+        """
+        self.ops.append((False, None, None, None, field))
         return self
 
     def __call__(self, p):
         x, y, z = p
         if self._key != (x, y):
             self._key = (x, y)
-            self._live = [(a, d, (z0 + z1) / 2, (z1 - z0) / 2)
-                          for a, d, z0, z1 in
-                          ((a, pr(x, y), z0, z1) for a, pr, z0, z1 in self.ops)
-                          if d < self.NEAR]
+            live = []
+            for a, pr, z0, z1, fld in self.ops:
+                if fld is not None:
+                    live.append((a, None, None, None, fld))
+                    continue
+                d = pr(x, y)
+                if d < self.NEAR:
+                    live.append((a, d, (z0 + z1) / 2, (z1 - z0) / 2, None))
+            self._live = live
         d = 1e9
-        for add, d2, zc, zh in self._live:
-            v = max(d2, abs(z - zc) - zh)
+        for add, d2, zc, zh, fld in self._live:
+            v = fld(p) if fld is not None else max(d2, abs(z - zc) - zh)
             d = min(d, v) if add else max(d, -v)
         return d
 
@@ -190,13 +278,20 @@ def shell_lower():
     s = Shell()
     s.solid(OUTER, 0.0, PART_LINE)
     s.hole(INNER, FLOOR, PART_LINE + 1.0)                 # open at the top
-    s.solid(lambda x, y: max(LIP(x, y), -INNER(x, y)),    # tongue
+    s.solid(lambda x, y: max(TONGUE(x, y), -INNER(x, y)),   # tongue
             PART_LINE, PART_LINE + LIP_H)
+    # Lead-in: the top LIP_LEAD of the tongue is stepped in again, so the
+    # joint starts itself instead of having to be aligned to a tenth before
+    # it will begin to close.
+    s.hole(lambda x, y: -TONGUE_LEAD(x, y),
+           PART_LINE + LIP_H - LIP_LEAD, PART_LINE + LIP_H + 1.0)
 
+    # Screw columns. The head sinks into the BASE and the screw passes clean
+    # through this shell into an insert in the upper one -- see SCREW_LEN.
     for bx, by in BOSSES:
         s.solid(circ(BOSS_OD, bx, by), FLOOR - 0.6, PART_LINE - 0.6)
-        s.hole(circ(INSERT_D, bx, by),
-               PART_LINE - 0.6 - INSERT_DEPTH, PART_LINE + 1.0)
+        s.hole(circ(SCREW_CLEAR, bx, by), -1.0, PART_LINE + 1.0)
+        s.hole(circ(SCREW_HEAD, bx, by), -1.0, SCREW_CB_DEPTH)
 
     # rear bay, lower half: the Pi enters here and the opening spans the part line
     s.hole(rect(BAY_W, WALL * 4, 0, -(ENV_Y / 2 - WALL)),
@@ -206,15 +301,32 @@ def shell_lower():
     # hangs to 12.3 and the cartridge reads at 14.9, so a board at that height
     # would be inside the chamber. 30 mm of depth and 5 mm of headroom under
     # the skirt is what the two constraints leave.
-    for sx in (-PI_W / 2 - 1.2, PI_W / 2 + 1.2):
-        s.solid(rect(2.4, PI_DEPTH, sx, -(ENV_Y / 2 - WALL - PI_DEPTH / 2)),
+    # The groove has to be NARROWER than the rail and biased outboard, or the
+    # lip that retains the board never reaches over it. Cut 3.0 wide out of a
+    # 2.4 rail, the groove floor and the lip both landed on the same 32.5 as
+    # the board's own edge: 0.005 mm of engagement, and no lateral position in
+    # which both edges are captured at once. The board fell out of its rails.
+    rail_y = -(ENV_Y / 2 - WALL - PI_DEPTH / 2)
+    groove_out = PI_W / 2 + PI_CLEAR            # board edge reaches here
+    lip_in = groove_out - PI_ENGAGE             # lip reaches this far inboard
+    rail_out = groove_out + 2.2
+    for sgn in (-1.0, 1.0):
+        s.solid(_span(sgn * lip_in, sgn * rail_out, PI_DEPTH, rail_y),
                 PI_RAIL_Z - 2.4, PI_RAIL_Z + 2.4)
-        s.hole(rect(3.0, PI_DEPTH + 2, sx + (1.2 if sx < 0 else -1.2),
-                    -(ENV_Y / 2 - WALL - PI_DEPTH / 2)),
+        s.hole(_span(sgn * (lip_in - 2.0), sgn * groove_out,
+                     PI_DEPTH + 2, rail_y),
                PI_RAIL_Z - PI_SLOT / 2, PI_RAIL_Z + PI_SLOT / 2)
 
-    for fx in FASTENER_X:                                  # front fasteners
-        s.hole(circ(FASTENER_D, fx, ENV_Y / 2 - WALL / 2), FASTENER_Z - 3, FASTENER_Z + 3)
+    # Front-face fasteners: BLIND pockets, Ø4.0 x 1.2 deep, which is exactly
+    # what viewer/model.js draws. They are cosmetic, and the geometry says so
+    # -- the pocket and anything that could be threaded behind it are both in
+    # THIS shell, so there is nothing here for a screw to clamp. Cut as a
+    # vertical circ() they came out as two Ø4 slots straight through the front
+    # wall: a clear path for ambient light into the body, in the one
+    # instrument where that breaks a gate.
+    for fx in FASTENER_X:
+        s.hole3(_bore_y(fx, FASTENER_Z, ENV_Y / 2 - FASTENER_DEPTH,
+                        ENV_Y / 2 + 1.0, FASTENER_D / 2))
     return s, ((-ENV_X / 2 - 1, -ENV_Y / 2 - 1, -1),
                (ENV_X / 2 + 1, ENV_Y / 2 + 1, PART_LINE + LIP_H + 1))
 
@@ -226,7 +338,9 @@ def shell_upper():
     top = ENV_Z
     s.solid(OUTER, PART_LINE, top)
     s.hole(INNER, PART_LINE - 1.0, top - CEIL)             # hollow
-    s.hole(LIP, PART_LINE - 1.0, PART_LINE + LIP_H + 0.15)  # groove for the tongue
+    # Groove for the tongue, cut on LIP while the tongue is cut PART_CLEAR
+    # narrower, so the joint has clearance on the sides and not only over the top.
+    s.hole(LIP, PART_LINE - 1.0, PART_LINE + LIP_H + PART_CLEAR)
 
     # The dish needs a floor of its own. A 2.0 recess in a 2.0 ceiling leaves
     # nothing between the dish and the interior -- the recess IS the cavity
@@ -242,10 +356,18 @@ def shell_upper():
            top - DISH_DEPTH - GLASS_REBATE, top - DISH_DEPTH + 0.01)
 
     # display window, with a ledge inside for the module to seat against
-    s.hole(rrect(DISPLAY_W, DISPLAY_H, 1.2, DISPLAY_X, DISPLAY_Y), top - CEIL - 1.0, top + 1.0)
-    s.solid(lambda x, y: max(rrect(DISPLAY_W + 4, DISPLAY_H + 4, 1.2, DISPLAY_X, DISPLAY_Y)(x, y),
-                             -rrect(DISPLAY_W, DISPLAY_H, 1.2, DISPLAY_X, DISPLAY_Y)(x, y)),
-            top - CEIL - 1.2, top - CEIL)
+    s.hole(rrect(DISPLAY_W, DISPLAY_H, DISPLAY_R, DISPLAY_X, DISPLAY_Y),
+           top - CEIL - 1.0, top + 1.0)
+    # The ledge has to reach INWARD of the window edge or the bezel has
+    # nothing to land on. Running it from the window edge outward -- which is
+    # what an annulus from DISPLAY_W to DISPLAY_W + 4 does -- puts all of it
+    # behind solid deck: the bezel drops through the window into the case, and
+    # the four posts below hang off nothing.
+    s.solid(lambda x, y: max(
+        rrect(DISPLAY_W + 4, DISPLAY_H + 4, DISPLAY_R, DISPLAY_X, DISPLAY_Y)(x, y),
+        -rrect(DISPLAY_W - 2 * DISPLAY_LEDGE_W, DISPLAY_H - 2 * DISPLAY_LEDGE_W,
+               DISPLAY_R, DISPLAY_X, DISPLAY_Y)(x, y)),
+        top - CEIL - 1.2, top - CEIL)
     for px, py in DISPLAY_POST:
         s.solid(circ(4.0, px, py), top - CEIL - 6.0, top - CEIL)
         s.hole(circ(1.8, px, py), top - CEIL - 6.2, top - CEIL + 0.01)
@@ -271,10 +393,17 @@ def shell_upper():
         s.hole(rect(VENT_W, VENT_DEPTH * 2, vx, ENV_Y / 2),
                VENT_Z - VENT_H / 2, VENT_Z + VENT_H / 2)
 
-    # screw clearance and head counterbore, over the lower shell's bosses
+    # Insert pillars, hanging from the deck underside down to the part line.
+    # Without these the upper shell had NO material at any of the six screw
+    # positions: the Ø4.8 head counterbore was cut in open cavity, the Ø2.8
+    # clearance came out as six through-holes in the display face, and a screw
+    # would have had to span 17.5 mm of air to reach an insert it could not
+    # engage anyway. The insert lives here; the screw comes up from the base.
     for bx, by in BOSSES:
-        s.hole(circ(SCREW_CLEAR, bx, by), PART_LINE - 1.0, top + 1.0)
-        s.hole(circ(SCREW_HEAD, bx, by), PART_LINE - 1.0, PART_LINE + 2.4)
+        s.solid(circ(BOSS_OD, bx, by), PART_LINE, top - CEIL)
+        s.hole(circ(INSERT_D, bx, by), PART_LINE - 1.0, PART_LINE + INSERT_DEPTH)
+        s.hole(circ(SCREW_CLEAR, bx, by), PART_LINE + INSERT_DEPTH,
+               PART_LINE + INSERT_DEPTH + SCREW_RELIEF)
 
     # optical chamber: a skirt from the deck underside down past the cartridge
     # plane, so the only light that reaches the head comes through the port
@@ -284,7 +413,9 @@ def shell_upper():
     # The cartridge crosses the skirt on its way to the read spot, so the slot
     # is cut through the skirt as well as through the outer wall -- from the
     # face at +36.6 back past the skirt's front arc at +30.0.
-    s.hole(rect(SLOT_W, 12.0, SLOT_X, ENV_Y / 2 - 4.0),
+    s.hole(_span(SLOT_X - SLOT_W / 2, SLOT_X + SLOT_W / 2,
+                 (ENV_Y / 2 + 1.0) - SKIRT_CUT_BACK,
+                 (SKIRT_CUT_BACK + ENV_Y / 2 + 1.0) / 2),
            SLOT_Z - SLOT_H / 2 - 0.3, SLOT_Z + SLOT_H / 2 + 0.3)
 
     return s, ((-ENV_X / 2 - 1, -ENV_Y / 2 - 1, PART_LINE - 1),
@@ -339,13 +470,23 @@ def check_viewer_envelope():
         return None
     lo = [float("inf")] * 3
     hi = [float("-inf")] * 3
+    # The dish floor, tracked separately. A bounding box cannot see it, which
+    # is how the RENDERED dish came to be 2.818 deep while the PRINTED one is
+    # DISH_DEPTH -- two models of one instrument, 0.82 mm apart, each
+    # internally consistent, with every job green.
+    dish_top = float("-inf")
+    obj_name = None
     with open(obj) as fh:
         for line in fh:
-            if line.startswith("v "):
+            if line.startswith("o "):
+                obj_name = line.split(None, 1)[1].strip()
+            elif line.startswith("v "):
                 p = [float(v) for v in line.split()[1:4]]
                 for k in range(3):
                     lo[k] = min(lo[k], p[k])
                     hi[k] = max(hi[k], p[k])
+                if obj_name == "recess_floor_etch":
+                    dish_top = max(dish_top, p[1])
     if lo[0] > hi[0]:
         return None                       # no vertices; not an OBJ we can read
     # viewer (x, y=height, z=depth) -> this file's (X, Y=depth, Z=height)
@@ -362,7 +503,50 @@ def check_viewer_envelope():
                           % b for b in bad)
             + "\n  Change the parametric source, re-run tools/export_model.py, "
               "and bring ENV_X/ENV_Y/ENV_Z here into step.")
+    if dish_top > float("-inf"):
+        depth = hi[1] - dish_top          # outer surface down to the dish floor
+        if abs(depth - DISH_DEPTH) > PITCH:
+            raise SystemExit(
+                "the rendered dish and the printed dish are different depths:\n"
+                "  instrument.obj %.3f mm, gen_enclosure DISH_DEPTH %.3f mm\n"
+                "  The recess is where the sample sits and where the ring "
+                "window seats, so this is not cosmetic. Move model.js's "
+                "DISH_FLOOR or this DISH_DEPTH, re-run tools/export_model.py, "
+                "and make them one number." % (depth, DISH_DEPTH))
     return got
+
+
+def check_stack():
+    """The vertical column, which several constants have to agree on at once.
+
+    Nothing here is measured off a mesh; it is arithmetic between constants,
+    and it is checked because the arithmetic was wrong in two places at the
+    same time. The board sat 0.38 mm inside the optical chamber's skirt, and
+    the optical head was specified 3.5 mm taller than the chamber it lives in.
+    Both were invisible: no check compared these numbers to each other.
+    """
+    fails = []
+    bay_floor = BAY_Z - BAY_H / 2
+    board_lo = PI_RAIL_Z - PI_SLOT / 2
+    board_hi = PI_RAIL_Z + PI_SLOT / 2
+    skirt_under = ENV_Z - DISH_DEPTH - CEIL - CHAMBER_DROP
+    if board_lo < bay_floor + 0.1:
+        fails.append("the board sits at %.2f but enters through a bay whose "
+                     "floor is at %.2f" % (board_lo, bay_floor))
+    if board_hi + PI_HEADROOM > skirt_under - 0.1:
+        fails.append("board top %.2f plus %.1f of headroom reaches %.2f, into "
+                     "the chamber skirt at %.2f"
+                     % (board_hi, PI_HEADROOM, board_hi + PI_HEADROOM, skirt_under))
+    if skirt_under > SLOT_Z - SLOT_H / 2:
+        fails.append("the skirt stops at %.2f, above the cartridge plane at "
+                     "%.2f -- the chamber is not closed"
+                     % (skirt_under, SLOT_Z - SLOT_H / 2))
+    if fails:
+        raise SystemExit("stack check failed:\n  " + "\n  ".join(fails))
+    return dict(sample_plane=SLOT_Z - SLOT_H / 2 + CART_T,
+                chamber_ceiling=ENV_Z - DISH_DEPTH - CEIL,
+                chamber_bore=2 * (CHAMBER_R - WALL),
+                skirt_under=skirt_under)
 
 
 def check_fit(lower, upper):
@@ -382,10 +566,16 @@ def check_fit(lower, upper):
     # The cartridge runs from the front face to the read spot. Probed across
     # its full 14 mm width and 2.4 mm thickness, not down its centreline -- a
     # centreline probe slips through a slot a hundredth of a millimetre wide.
-    for cx in (SLOT_X - 6.5, SLOT_X, SLOT_X + 6.5):
-        for cz in (SLOT_Z - 1.0, SLOT_Z, SLOT_Z + 1.0):
-            for t in range(0, 65):
-                y = ENV_Y / 2 - t * 0.5
+    # The SECTION and the STEP both fell short of what that sentence claims:
+    # +-6.5 by +-1.0 is 13.0 x 2.0, so the probe ran 0.5 mm inside the part's
+    # own edges, and a 0.5 mm step walks over anything thinner than itself.
+    # The skirt's inner arc dips 0.11 mm into the path at both cartridge
+    # edges, which is invisible to either.
+    for cx in (SLOT_X - CART_W / 2, SLOT_X - CART_W / 4, SLOT_X,
+               SLOT_X + CART_W / 4, SLOT_X + CART_W / 2):
+        for cz in (SLOT_Z - CART_T / 2, SLOT_Z, SLOT_Z + CART_T / 2):
+            for t in range(0, 641):
+                y = ENV_Y / 2 - t * 0.05
                 if y < DISH_Y:
                     break
                 if solid(upper, (cx, y, cz)):
@@ -403,14 +593,23 @@ def check_fit(lower, upper):
     # plus the headroom its tallest parts need. Sampled at 1 mm, because the
     # thing most likely to be in the way is the 2.4 mm skirt wall, and a
     # coarser sweep steps straight over it.
+    # The x sweep said 1 mm and stepped 4, and stopped 0.5 mm short of the
+    # board's own +-32.5 edges. Headroom is measured from the board's TOP
+    # face: taken from the rail centreline it loses PI_SLOT/2 and hid a
+    # 0.38 mm overlap with the skirt. The slab and the component headroom are
+    # two corridors, not one -- the rail lips are SUPPOSED to overhang the
+    # board's edges, and that overhang is the whole retention.
     bay = []
-    for xi in range(-32, 33, 4):
+    board_hw, comp_hw = PI_W / 2, PI_W / 2 - PI_ENGAGE
+    slab = (-PI_SLOT / 2 + 0.1, 0.0, PI_SLOT / 2 - 0.1)
+    head = (PI_SLOT / 2 + 0.1, PI_SLOT / 2 + PI_HEADROOM)
+    for xi in [x_ / 2.0 for x_ in range(-2 * int(board_hw), 2 * int(board_hw) + 1)]:
         for t in range(0, 31):
             y = -(ENV_Y / 2 - WALL) + t
-            for dz in (1.0, PI_HEADROOM):
+            for dz in (slab if abs(xi) > comp_hw else slab + head):
                 for f, nm in ((lower, "lower"), (upper, "upper")):
                     if solid(f, (float(xi), y, PI_RAIL_Z + dz)):
-                        bay.append("%s shell at (%d, %+.0f, %.1f)"
+                        bay.append("%s shell at (%.1f, %+.0f, %.1f)"
                                    % (nm, xi, y, PI_RAIL_Z + dz))
     if bay:
         fails.append("Pi bay fouled: " + bay[0]
@@ -430,25 +629,107 @@ def check_fit(lower, upper):
                 fails.append("sensor port blocked at z=%.1f" % z)
                 break
 
-    # tongue and groove: no point may be solid in both shells at once
-    clash = 0
-    for i in range(72):
-        a = TAU_STEP * i
-        x = (ENV_X / 2 - WALL / 2) * math.cos(a)
-        y = (ENV_Y / 2 - WALL / 2) * math.sin(a)
+    # Tongue and groove. Two things were wrong here, and between them they
+    # made the check unable to fire at all.
+    #
+    # It walked an ELLIPSE inscribed in a rounded rectangle. That is not the
+    # wall: 68 of its 72 samples sat in open cavity, the 45 degree one 11.6 mm
+    # inside the outer surface, and all four CORNERS -- where a tongue offset
+    # around a corner radius is likeliest to bind -- were never visited. At
+    # the four points where it did meet the wall the field was exactly
+    # -0.000, which is not < 0. So march each ray out to the tongue's own
+    # profile instead.
+    #
+    # And "solid in both shells" is not how this joint fails. Coincident faces
+    # are never solid in both, so a ZERO-clearance fit passes -- which is what
+    # the tongue and the groove had, both cut from the same LIP profile onto
+    # the identical coordinate. Measure the gap, and require one.
+    clash, tight = 0, []
+    for x, y in _seam_points(180):
         for t in range(0, 9):
             z = PART_LINE + t * 0.25
             if solid(lower, (x, y, z)) and solid(upper, (x, y, z)):
                 clash += 1
+        gap = _lateral_gap(lower, upper, x, y, PART_LINE + LIP_H / 2)
+        if gap is not None and gap < PART_CLEAR - 0.03:
+            tight.append((x, y, gap))
     if clash:
         fails.append("shells interfere at the part line in %d places" % clash)
+    if tight:
+        x, y, g = min(tight, key=lambda t: t[2])
+        fails.append("part line has %.3f mm of side clearance at (%+.1f, %+.1f)"
+                     ", want %.2f -- %d of 180 samples tight"
+                     % (g, x, y, PART_CLEAR, len(tight)))
+
+    # Every front-face fastener pocket must stay blind. Cut on the wrong axis
+    # these were Ø4 slots straight through the wall, and one clear path for
+    # ambient light into the body is the whole 415 nm gate.
+    for fx in FASTENER_X:
+        if not solid(lower, (fx, ENV_Y / 2 - WALL + 0.2, FASTENER_Z)):
+            fails.append("front fastener at x=%+.1f went through the wall" % fx)
+
+    # The screw has to reach its insert, and the insert has to be in the half
+    # the screw does not pass through. Six screws were being cut into an upper
+    # shell with no material at any of the six positions: the head counterbore
+    # sat in open cavity, and the clearance came out as six through-holes in
+    # the display face.
+    off = BOSS_OD / 2 - 0.4
+    for bx, by in BOSSES:
+        if not solid(lower, (bx + off, by, FLOOR + 1.0)):
+            fails.append("no screw column in the lower shell at (%+.0f, %+.0f)"
+                         % (bx, by))
+        if not solid(upper, (bx + off, by, PART_LINE + INSERT_DEPTH / 2)):
+            fails.append("no insert pillar in the upper shell at (%+.0f, %+.0f)"
+                         % (bx, by))
+        if not solid(upper, (bx, by, ENV_Z - 0.2)):
+            fails.append("the screw at (%+.0f, %+.0f) breaks through the deck"
+                         % (bx, by))
+    reach = PART_LINE + INSERT_DEPTH - SCREW_CB_DEPTH
+    if SCREW_LEN < reach:
+        fails.append("M2.5 x %.0f cannot reach the insert: %.1f mm of stack "
+                     "above the head" % (SCREW_LEN, reach))
 
     if fails:
         raise SystemExit("fit check failed:\n  " + "\n  ".join(fails))
     return True
 
 
-TAU_STEP = 2 * math.pi / 72
+def _seam_points(n):
+    """n points on the tongue's own profile, corners included."""
+    pts = []
+    for i in range(n):
+        a = TAU * i / n
+        dx, dy = math.cos(a), math.sin(a)
+        lo, hi = 0.0, ENV_X
+        for _ in range(60):                    # bisect out to the isocontour
+            mid = (lo + hi) / 2
+            if TONGUE(dx * mid, dy * mid) < 0:
+                lo = mid
+            else:
+                hi = mid
+        pts.append((dx * lo, dy * lo))
+    return pts
+
+
+def _lateral_gap(lower, upper, x, y, z):
+    """Outward gap from the tongue's face to the groove wall at (x, y)."""
+    r = math.hypot(x, y)
+    if r < 1e-9:
+        return None
+    ux, uy = x / r, y / r
+    out_at = None
+    for k in range(401):                       # sweep outward across the seam
+        d = -1.0 + k * 0.01
+        px, py = x + ux * d, y + uy * d
+        if out_at is None and lower((px, py, z)) >= 0:
+            out_at = d
+        if out_at is not None and upper((px, py, z)) < 0:
+            return d - out_at
+    return None
+
+
+TAU = 2 * math.pi
+TAU_STEP = TAU / 72
 
 
 SETTINGS = "PETG black, 0.16 mm, 4 perim, 25%, seam at a corner"
@@ -471,6 +752,7 @@ def generate(verbose=True):
         if verbose:
             print("%-20s %7d tris  %9.1f mm3  %8.1f kB"
                   % (name, len(tris), vol, os.path.getsize(path) / 1024))
+    check_stack()
     check_fit(fields["shell_lower"], fields["shell_upper"])
     env = check_envelope(meshes)
     viewer_env = check_viewer_envelope()
