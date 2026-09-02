@@ -125,6 +125,34 @@ into mid-air. It closes the rear compute bay, and it goes on **after
 provisioning** — the bay is how you reach the Pi and its microSD during a
 build. Fit it, then seal it.
 
+## 2b. Choosing a finish
+
+The accent is the only part of this instrument you are meant to choose. It is
+carried by four features: the parting seam, the raised ring around the sensor
+port, the CONFIRM collar and display bezel, and the 60 index ticks. On a
+printed device it is a second filament or a paint fill, not a coating. Nothing
+structural changes. The STLs are identical whichever you pick, so this is a
+spool decision made at Stage 4 and not a geometry decision made at Stage 0.
+
+| Finish | Accent | Ring / trim | Gloss | Reads as |
+|---|---|---|---|---|
+| `oxblood` **(default)** | deep red | `#55161d` / `#5f151d` | high | The shipped instrument. Every drawing and render in this repository is this one |
+| `deep` | near-black maroon | `#2e1013` / `#3a141a` | low | The same colour held back. Red only resolves at a grazing angle |
+| `bone` | warm off-white | `#8e877a` / `#9a9284` | low | Ossuary. The etched dish carries the character on its own |
+| `brass` | dark antique brass | `#6b5220` / `#7a5f2a` | high | Alchemical instrument rather than ritual object |
+| `nickel` | brushed nickel | `#6f6a63` / `#7d776f` | high | Utility. The only colour left is the etched dish |
+
+**Gloss matters as much as colour.** The ring surrounds a black bore, so a
+high-gloss accent catches a hard highlight and the port reads as a lit
+aperture; a satin one reads as a machined bezel. If you are painting rather
+than printing the accent, that is a choice between a gloss and a satin clear
+coat over the same pigment.
+
+To see one before you commit a spool, open the viewer with the finish named:
+`cell.wei.is/?finish=bone`. The default is `oxblood` with no parameter, and the
+parameter changes nothing that gets exported or printed. The STLs, the
+drawing and the manifest are the same in every finish.
+
 ## 3. Post-processing
 
 Four steps. The first two are load-bearing.

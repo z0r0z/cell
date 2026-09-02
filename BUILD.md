@@ -777,7 +777,7 @@ Edit the model, re-export, re-run the generator. CI fails if the drawing and the
 
 `tools/gen_printables.py` emits every part in this table, the shells included, already at these settings, see `models/print/MANIFEST.md`, which is generated alongside the STLs and carries orientation, quantities and every derived dimension. `PRINTING.md` is the runbook: plate order, what to check off each part, and the post-processing that is not optional.
 
-PETG, not PLA, PLA creeps under screw preload and softens in a hot car. The oxblood elements (seam, ring, bezel, ticks) are a second filament or a paint fill; the model separates them as distinct objects with their own materials, so a multi-material printer can take them straight.
+PETG, not PLA, PLA creeps under screw preload and softens in a hot car. The accent elements (seam, ring, bezel, ticks) are a second filament or a paint fill; the model separates them as distinct objects with their own materials, so a multi-material printer can take them straight. Oxblood is the default and the one every drawing here shows, but the accent is a choice: `PRINTING.md` section 2b lists the five supported finishes with their hex values, and `viewer/model.js`'s `FINISHES` table is the same set, previewable at `cell.wei.is/?finish=bone`. No geometry changes with the finish, so the STLs and the manifest do not either.
 
 **Note:** `models/instrument.mtl` is exported alongside the OBJ by `tools/export_model.py` and carries the viewer's own colours. Material names also ride on the objects themselves (`shell`, `oxblood`, `trim_oxblood`, `glass`, `pad`, `etch_floor`, `steel`, `cavity`, `cavity_bore`, `screen`, `silkscreen`, `silkscreen_mark`), so you can substitute your own filament colours without losing the separation.
 

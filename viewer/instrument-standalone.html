@@ -86258,11 +86258,50 @@ const shellMat = new THREE.MeshPhysicalMaterial({
   roughnessMap: rough, clearcoat: 0.14, clearcoatRoughness: 0.42,
   envMapIntensity: 1.0,
 });
+// FINISHES — the accent, and the only part of this instrument anyone is meant
+// to choose. Two materials carry it: `ring` is the parting seam and the raised
+// annulus around the sensor port; `trim` is the CONFIRM collar, the edge
+// break, the display bezel and the 60 index ticks. Everything else — shell,
+// steel, glass, the etched dish — is the same in every finish.
+//
+// On a printed device the accent is a second filament or a paint fill
+// (BUILD.md section 10), so these are buyable colours, not screen-only themes.
+// PRINTING.md carries the same table with the filament each one wants.
+//
+// `metalness` is doing as much work here as the colour. Oxblood at 0.92 takes
+// a hard specular on a ring that surrounds a black bore; the softer finishes
+// drop it deliberately so the ring reads as a machined bezel rather than a
+// lit aperture.
+const FINISHES = {
+  oxblood: { ring: 0x55161d, trim: 0x5f151d, ringRough: 0.38, trimRough: 0.22,
+             ringMetal: 0.92, trimMetal: 0.95 },
+  deep:    { ring: 0x2e1013, trim: 0x3a141a, ringRough: 0.46, trimRough: 0.42,
+             ringMetal: 0.55, trimMetal: 0.60 },
+  bone:    { ring: 0x8e877a, trim: 0x9a9284, ringRough: 0.42, trimRough: 0.40,
+             ringMetal: 0.35, trimMetal: 0.40 },
+  brass:   { ring: 0x6b5220, trim: 0x7a5f2a, ringRough: 0.34, trimRough: 0.30,
+             ringMetal: 0.90, trimMetal: 0.92 },
+  nickel:  { ring: 0x6f6a63, trim: 0x7d776f, ringRough: 0.26, trimRough: 0.24,
+             ringMetal: 0.95, trimMetal: 0.95 },
+};
+// Oxblood is the default and stays the default: it is what the drawing, the
+// social card and every committed render show. `?finish=bone` and the others
+// are for looking, and change nothing that is exported.
+const DEFAULT_FINISH = 'oxblood';
+const FINISH = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get('finish');
+    return (q && Object.hasOwn(FINISHES, q)) ? q : DEFAULT_FINISH;
+  } catch { return DEFAULT_FINISH; }
+})();
+const ACCENT = FINISHES[FINISH];
+
 // The collar, the bezel and the edge break all finish flush with the deck, so
 // their top faces are exactly coplanar with the skin's. Depth-offset them, or
 // the two surfaces stipple against each other wherever they meet.
 const trimMat = new THREE.MeshPhysicalMaterial({
-  name: 'trim_oxblood', color: 0x5f151d, roughness: 0.22, metalness: 0.95,
+  name: 'trim_oxblood', color: ACCENT.trim, roughness: ACCENT.trimRough,
+  metalness: ACCENT.trimMetal,
   envMapIntensity: 1.1,
   polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
 });
@@ -86271,7 +86310,8 @@ const steelMat = new THREE.MeshPhysicalMaterial({
   envMapIntensity: 0.55,
 });
 const oxbloodMat = new THREE.MeshPhysicalMaterial({
-  name: 'oxblood', color: 0x55161d, roughness: 0.38, metalness: 0.92,
+  name: 'oxblood', color: ACCENT.ring, roughness: ACCENT.ringRough,
+  metalness: ACCENT.ringMetal,
   envMapIntensity: 0.4, side: THREE.DoubleSide,
 });
 /** Demo signing screen — a reflective panel graphic, not an emissive display. */
