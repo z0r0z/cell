@@ -100,7 +100,12 @@ def parse_path(path: str) -> list[int]:
             raise BadPath(f"empty element in path {path!r}")
         hard = p[-1] in ("'", "h", "H")
         num = p[:-1] if hard else p
-        if not num.isdigit():
+        # ASCII digits only. `str.isdigit` is true for Arabic-Indic digits and
+        # for superscripts, so "m/\u0663" parsed as index 3 -- a path string
+        # that renders as something other than the index it derives -- and
+        # "m/\u00b2" escaped as a bare ValueError from int(), past every caller
+        # that catches BadPath.
+        if not (num.isascii() and num.isdigit()):
             raise BadPath(f"bad path element {p!r} in {path!r}")
         i = int(num)
         if i >= HARDENED:
@@ -205,24 +210,50 @@ class ExtendedKey:
     def child(self, index: int) -> "ExtendedKey":
         if not 0 <= index < 2**32:
             raise BadPath(f"index {index} out of range")
+        # Depth is one byte on the wire. Without a ceiling, the 256th child of
+        # a master is a perfectly usable key object that serialize() then
+        # refuses with a bare "bytes must be in range(0, 256)" -- a key that
+        # signs and cannot be exported.
+        if self.depth >= 255:
+            raise BadPath(
+                "BIP-32 depth is a single byte; this node is already at 255 "
+                "and a deeper key could not be serialised")
         hardened = index >= HARDENED
         if hardened and self.seckey is None:
             raise BadPath(
                 f"cannot derive hardened index {index - HARDENED}h from a "
                 f"public key. This is the property that makes an account xpub "
                 f"safe to publish.")
-        data = ((b"\x00" + self.seckey) if hardened else self.pubkey) \
-            + index.to_bytes(4, "big")
-        h = hmac.new(self.chain_code, data, hashlib.sha512).digest()
-        tweak, cc = h[:32], h[32:]
-        if int.from_bytes(tweak, "big") >= ec.N:
-            raise BadPath("derived tweak >= N; use the next index (BIP-32 §2)")
-        if self.seckey is not None:
-            sk = ec.tweak_seckey_add(self.seckey, tweak)
-            pub = ec.pubkey_compressed(sk)
-        else:
-            sk, pub = None, ec.tweak_pubkey_add(self.pubkey, tweak)
-        return ExtendedKey(cc, pub, sk, self.depth + 1, self.fingerprint(), index)
+        # BIP-32 §2: if the tweak is >= n, or the resulting key is zero, the
+        # index is INVALID and derivation proceeds with the next one. Both
+        # conditions have probability about 2^-128, so this loop runs once in
+        # every life that will ever be lived -- but a seed that does hit it is
+        # restorable on any wallet that follows the spec, and used to be
+        # permanently stuck on this one. The skip stays inside the same
+        # domain: a hardened index yields the next hardened index.
+        limit = 2**32 if hardened else HARDENED
+        while True:
+            data = ((b"\x00" + self.seckey) if hardened else self.pubkey) \
+                + index.to_bytes(4, "big")
+            h = hmac.new(self.chain_code, data, hashlib.sha512).digest()
+            tweak, cc = h[:32], h[32:]
+            try:
+                if int.from_bytes(tweak, "big") >= ec.N:
+                    raise ec.BadKey("derived tweak >= N")
+                if self.seckey is not None:
+                    sk = ec.tweak_seckey_add(self.seckey, tweak)
+                    pub = ec.pubkey_compressed(sk)
+                else:
+                    sk, pub = None, ec.tweak_pubkey_add(self.pubkey, tweak)
+            except ec.BadKey:
+                index += 1
+                if index >= limit:
+                    raise BadPath(
+                        "no valid child index remains in this range "
+                        "(BIP-32 §2)") from None
+                continue
+            return ExtendedKey(cc, pub, sk, self.depth + 1,
+                               self.fingerprint(), index)
 
     def derive(self, path: str | list[int]) -> "ExtendedKey":
         node = self
@@ -360,6 +391,13 @@ def _selftest() -> int:
     checks.append(("owns() rejects garbage rather than raising",
                    not acct.owns(b"\x02" + b"\xff" * 32, [0, 0])))
 
+    def _raises_badpath(fn) -> bool:
+        try:
+            fn()
+        except BadPath:
+            return True
+        return False
+
     # Path parsing.
     checks.append(("parses apostrophe and h",
                    parse_path("m/84'/0h/0H/1/9") == [HARDENED + 84, HARDENED,
@@ -367,6 +405,31 @@ def _selftest() -> int:
     checks.append(("parses the empty path", parse_path("m") == []))
     checks.append(("formats back", format_path(parse_path("m/84h/0h/0h/0/5"))
                    == "m/84h/0h/0h/0/5"))
+    # An index whose child key is invalid is skipped, not refused: BIP-32 §2
+    # says proceed with the next i, and a seed that hits it (about 2^-128)
+    # would otherwise be restorable everywhere except here. The condition
+    # cannot be reached with real inputs, so it is forced.
+    real_tweak = ec.tweak_seckey_add
+    calls = {"n": 0}
+
+    def _first_is_invalid(sk, tweak):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ec.BadKey("forced: derived tweak >= N")
+        return real_tweak(sk, tweak)
+
+    ec.tweak_seckey_add = _first_is_invalid
+    try:
+        skipped = acct.child(7)
+    finally:
+        ec.tweak_seckey_add = real_tweak
+    checks.append(("an invalid child index moves to the next one, not an error",
+                   skipped.index == 8 and skipped.pubkey == acct.child(8).pubkey))
+    checks.append(("depth stops at the byte the format gives it",
+                   _raises_badpath(lambda: ExtendedKey(
+                       acct.chain_code, acct.pubkey, acct.seckey,
+                       255, acct.parent_fp, 0).child(0))))
+
     for bad in ("m/84x", "m//0", "m/-1", "m/2147483648"):
         try:
             parse_path(bad)

@@ -11,6 +11,7 @@ Run standalone, or through firmware/run_tests.py.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import sys
@@ -20,6 +21,12 @@ import lms
 
 def _load_rfc_vectors(path: pathlib.Path):
     """Pull Test Case 2's HSS public key and signature out of the RFC text.
+
+    Kept as the way the committed fixture is REGENERATED, not as the way the
+    test reads it:
+
+        python3 -c "import pathlib,json,test_lms as t; \
+            p,s,m = t._load_rfc_vectors(pathlib.Path('rfc8554.txt'))"
 
     The hex is laid out as an optional label followed by 16-byte groups, with
     comments after '#'. Anything that is not a hex group on a labelled or
@@ -66,13 +73,20 @@ def rfc_vectors() -> bool:
     have to pass, which exercises the OTS chains, the checksum and the Merkle
     path against values we did not produce.
     """
-    rfc = pathlib.Path("/tmp/rfc8554.txt")
-    if not rfc.exists():
-        print("  RFC 8554 text not present, skipping vector check")
-        print("  fetch: curl -o /tmp/rfc8554.txt https://www.rfc-editor.org/rfc/rfc8554.txt")
-        return True
-
-    pub_blob, sig_blob, msg = _load_rfc_vectors(rfc)
+    # Read from the repository, not from /tmp. This used to look for a file
+    # nothing in the tree or in CI ever created, and return True when it was
+    # absent -- so lms.py's claim to be "checked against the RFC 8554 vectors,
+    # not only against itself" was true on nobody's machine. The vectors were
+    # extracted once by _load_rfc_vectors (which is still how the fixture is
+    # regenerated) and committed beside this file.
+    fixture = pathlib.Path(__file__).resolve().parent / "vectors" / "rfc8554_tc2.json"
+    if not fixture.exists():                                    # pragma: no cover
+        print(f"  {fixture} is missing — this check cannot pass without it")
+        return False
+    v = json.loads(fixture.read_text())
+    pub_blob = bytes.fromhex(v["publicKey"])
+    sig_blob = bytes.fromhex(v["signature"])
+    msg = bytes.fromhex(v["message"])
     ok = True
     # HSS public key: u32(levels) || LMS public key
     levels = int.from_bytes(pub_blob[:4], "big")

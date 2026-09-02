@@ -118,7 +118,16 @@ def point_mul(p, k: int):
     scalars and every edge case the formulas have, so the fast path cannot
     drift from the slow one silently.
     """
-    if p is None or k == 0:
+    if p is None:
+        return None
+    # Reduced first, exactly as point_mul_g does. The loop below reads bits
+    # with `(k >> i) & 1` while sizing itself with `k.bit_length()`, and those
+    # two disagree about a negative scalar: bit_length gives the MAGNITUDE and
+    # the shift gives two's complement, so point_mul(G, -1) answered G rather
+    # than -G. No caller passes one today, but this is a public entry point
+    # and a wrong point here is a wrong signature, not an exception.
+    k %= N
+    if k == 0:
         return None
     # Most-significant bit first, so the running total is the only thing that
     # ever doubles and the addend stays the affine input -- no inversion
@@ -312,11 +321,19 @@ def tweak_pubkey_add(pub: bytes, t: bytes) -> bytes:
 
 
 def _rfc6979_k(msg32: bytes, d: int, extra: bytes = b"") -> int:
-    """HMAC-DRBG per RFC 6979 section 3.2, SHA-256.
+    """HMAC-DRBG per RFC 6979 section 3.2, SHA-256, as libsecp256k1 spells it.
 
     `extra` is RFC 6979 section 3.6's optional k'. Bitcoin Core uses it to
     grind for a low-R signature; we use it only to retry, which is the same
     mechanism and keeps the nonce a pure function of (key, message, attempt).
+
+    ONE DELIBERATE DIVERGENCE FROM THE RFC, and it is the one every Bitcoin
+    implementation makes. RFC 6979 feeds the DRBG `bits2octets(h1)`, which is
+    `h1 mod q`; libsecp256k1 feeds the 32 message bytes unreduced, and so does
+    this. The two differ only for a digest >= N -- about one in 2^128 -- and
+    matching libsecp256k1 is what makes `test_consensus.py`'s differential
+    against it byte-exact. Reducing here would be RFC-correct and would put
+    this device's signatures out of step with the software that mines them.
     """
     x = d.to_bytes(32, "big")
     h1 = msg32
@@ -426,18 +443,32 @@ def der_encode(r: int, s: int) -> bytes:
 
 
 def der_decode(sig: bytes) -> tuple[int, int]:
+    """The inverse of `der_encode`, and as strict as it is.
+
+    Every length is bounds-checked before it is used as an index -- a declared
+    length longer than the buffer used to raise IndexError, which is outside
+    this function's declared contract -- and the two canonical forms are
+    enforced, so that no two byte strings decode to one signature.
+    """
     if len(sig) < 8 or sig[0] != 0x30 or sig[1] != len(sig) - 2:
         raise ValueError("not a DER sequence")
     if sig[2] != 0x02:
         raise ValueError("no r integer")
     rlen = sig[3]
+    if rlen == 0 or 6 + rlen > len(sig):
+        raise ValueError("bad r length")
     if sig[4 + rlen] != 0x02:
         raise ValueError("no s integer")
     slen = sig[5 + rlen]
-    if 6 + rlen + slen != len(sig):
+    if slen == 0 or 6 + rlen + slen != len(sig):
         raise ValueError("DER length mismatch")
-    return (int.from_bytes(sig[4:4 + rlen], "big"),
-            int.from_bytes(sig[6 + rlen:6 + rlen + slen], "big"))
+    r_b, s_b = sig[4:4 + rlen], sig[6 + rlen:6 + rlen + slen]
+    for name, b in (("r", r_b), ("s", s_b)):
+        if b[0] & 0x80:
+            raise ValueError(f"negative DER integer for {name}")
+        if b[0] == 0 and len(b) > 1 and not (b[1] & 0x80):
+            raise ValueError(f"non-minimal DER integer for {name}")
+    return int.from_bytes(r_b, "big"), int.from_bytes(s_b, "big")
 
 
 # --------------------------------------------------------------------------

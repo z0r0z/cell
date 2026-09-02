@@ -137,8 +137,15 @@ def _ots_private(seed: bytes, I: bytes, q: int, p: int) -> list[bytes]:
     Pseudorandom generation, RFC 8554 Appendix A: the whole tree comes from one
     secret, so the device stores a seed rather than 2^h private keys. On device
     that seed comes from the secure element, and never leaves it.
+
+    The order is the RFC's, `H(I || u32(q) || u16(i) || u8(0xff) || SEED)`,
+    which this used to cite while computing `H(SEED || I || ...)`. Nothing
+    interoperates on it -- only the Merkle root is ever published -- but the
+    RFC's order also puts the 32-byte secret in the SHA-256 SUFFIX rather than
+    the prefix, which is the stronger of the two positions. Changing it
+    changes every tree, so it is done before any root is provisioned.
     """
-    return [H(seed + I + _u32(q) + _u16(i) + b"\xff").digest() for i in range(p)]
+    return [H(I + _u32(q) + _u16(i) + b"\xff" + seed).digest() for i in range(p)]
 
 
 def _ots_public(x: list[bytes], I: bytes, q: int, w: int) -> bytes:
@@ -259,6 +266,12 @@ class PrivateKey:
         return PublicKey(_H_LMS[self.h], self.ots_type, self.I, self._nodes[1])
 
     def sign(self, message: bytes, q: int, C: bytes | None = None) -> bytes:
+        # Lower bound as well as upper. `q` comes from the ATECC's monotonic
+        # counter, and a negative one used to leave through _u32 as an
+        # OverflowError -- outside this module's declared LMSError contract,
+        # so a caller catching LMSError would not have caught it.
+        if q < 0:
+            raise OutOfLeaves(f"leaf index {q} is negative")
         if q >= (1 << self.h):
             raise OutOfLeaves(f"leaf {q} is beyond a height-{self.h} tree "
                               f"({1 << self.h} signatures)")

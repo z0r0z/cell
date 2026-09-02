@@ -206,8 +206,11 @@ def _selftest() -> int:
     checks.append(("wrong word count rejected",
                    not validate(" ".join(vectors[0][1].split()[:11]))))
 
-    # Normalisation: extra whitespace and case must not change the seed, and
-    # NFKD must be applied before hashing.
+    # Normalisation: extra whitespace must not change the seed, and NFKD must
+    # be applied before hashing. NOT case: `normalise` deliberately does not
+    # lowercase, and `mnemonic_to_entropy` refuses "ABANDON ..." outright,
+    # because a wordlist lookup that quietly accepts a different spelling is
+    # one more way for two devices to disagree about what a backup means.
     checks.append(("whitespace normalised",
                    to_seed("  " + vectors[0][1].replace(" ", "   ") + " ")
                    == to_seed(vectors[0][1])))
