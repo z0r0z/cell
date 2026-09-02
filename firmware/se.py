@@ -305,8 +305,18 @@ def _selftest() -> int:
     checks.append(("kdf is deterministic", kdf_of(se4, b"a") == kdf_of(se4, b"a")))
     checks.append(("kdf differs per device",
                    kdf_of(se4, b"a") != kdf_of(SoftSE(pin="123456"), b"a")))
-    checks.append(("wipe destroys the wrapping key",
-                   kdf_of(SoftSE(pin="123456"), b"x") != k_before))
+    # THE SAME DEVICE, the same context. Deriving from a brand-new SoftSE
+    # under a different context could not have matched whatever `se3` held,
+    # so this passed for a wipe() that left the secret entirely intact -- it
+    # was a second copy of "kdf differs per device", two lines up.
+    se6 = SoftSE(pin="123456", secret=b"\x11" * 32)
+    k6 = kdf_of(se6, b"ctx")
+    se6.wipe()
+    se6._st.wiped = False               # keep it usable, to ask it the question
+    se6._st.pin_authorised = True
+    checks.append(("wipe destroys the wrapping key", se6.kdf(b"ctx") != k6))
+    checks.append(("...and k_before was a real derivation to begin with",
+                   len(k_before) == 32))
 
     # Counter must advance, for attestation anti-replay.
     se5 = SoftSE()

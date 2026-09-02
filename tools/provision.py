@@ -79,8 +79,39 @@ def _soft_secret(directory: Path) -> bytes:
     return secret
 
 
-def _se(args):
-    """The real chip if we are on the device, the stub if we are not."""
+def _write_blob(path: Path, data: bytes) -> None:
+    """Replace the seed store atomically.
+
+    A plain write_bytes truncates first, so a power cut, a full card or a
+    yanked reader mid-write leaves a short blob and a device that no longer
+    opens — at the one step whose whole point is that the seed survives it.
+    Write beside it, flush to the platter, then rename: on POSIX the rename is
+    atomic, so what is on the card is either all of the old blob or all of the
+    new one.
+    """
+    tmp = path.with_suffix(path.suffix + ".new")
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    d = os.open(str(path.parent), os.O_RDONLY)
+    try:
+        os.fsync(d)                     # the directory entry, not just the file
+    finally:
+        os.close(d)
+
+
+def _se(args, *, provisioning: bool = False):
+    """The real chip if we are on the device, the stub if we are not.
+
+    `provisioning=True` waives the data-zone lock check, and only that. The
+    documented order in BUILD.md section 12 is write config -> lock-config ->
+    provision -> lock-data, because the PIN and attestation slots are
+    WriteConfig = Never once the data zone locks; a constructor that demanded
+    both locks refused every chip at exactly the step that has to write them.
+    """
     if args.soft:
         print("! Using the SOFTWARE secure element. This is for rehearsal on a")
         print("! laptop only — it is not a security boundary, and a seed")
@@ -90,7 +121,7 @@ def _se(args):
                       secret=_soft_secret(Path(where)))
     try:
         from se_atecc import ATECC608B
-        return ATECC608B()
+        return ATECC608B(require_data_lock=not provisioning)
     except Exception as e:                                      # noqa: BLE001
         print(f"No usable ATECC608B: {e}\n")
         print("Re-run with --soft to rehearse without one, understanding that")
@@ -196,7 +227,7 @@ def _refuse_if_present(args) -> None:
 
 def cmd_new(args) -> int:
     _refuse_if_present(args)
-    se = _se(args)
+    se = _se(args, provisioning=True)
     print("Generating a new seed.")
     strength = 32 if args.words == 24 else 16
     mnemonic = bip39.entropy_to_mnemonic(_entropy(strength, se))
@@ -212,7 +243,7 @@ def cmd_new(args) -> int:
 
 def cmd_import(args) -> int:
     _refuse_if_present(args)
-    se = _se(args)
+    se = _se(args, provisioning=True)
     print("Restoring from an existing BIP-39 mnemonic.")
     mnemonic = input("  words: ").strip()
     if not bip39.validate(mnemonic):
@@ -248,16 +279,18 @@ def _write(mnemonic: str, se, args) -> int:
     prov = wallet.provision(mnemonic, se, args.pin, network=args.network,
                             duress_pin=args.duress_pin, decoy=decoy)
 
-    (out / BLOB).write_bytes(prov.seed_pair.pack())
-    (out / BLOB).chmod(0o600)
-    _save(out, prov, args.network)
-
-    # Prove the round trip before declaring success. Provisioning a device that
-    # cannot reopen its own seed is the worst possible outcome here, and it is
-    # cheap to rule out. This goes through verify_pin because the chip answers
-    # the KDF only after one, and only once per one — the same path signing
-    # takes, so what is proven here is what will happen later.
-    stored = duress.SeedPair.unpack((out / BLOB).read_bytes())
+    # VERIFY, THEN WRITE. Writing first meant a device that failed the round
+    # trip was left holding an unopenable seed.blob and an accounts.json, and
+    # _refuse_if_present then blocked re-provisioning without --force -- on a
+    # path where the owner has already been shown their words and quizzed on
+    # them. cmd_enroll_chamber gets this order right; this did not.
+    #
+    # The round trip goes through verify_pin because the chip answers the KDF
+    # only after one, and only once per one — the same path signing takes, so
+    # what is proven here is what will happen later. It runs against the
+    # packed-and-unpacked bytes, not against the in-memory object, so the
+    # serialisation is covered too.
+    stored = duress.SeedPair.unpack(prov.seed_pair.pack())
     if not _reopens(se, stored, args.pin, mnemonic, "the seed"):
         return 1
     if args.duress_pin:
@@ -265,6 +298,9 @@ def _write(mnemonic: str, se, args) -> int:
         # PIN that silently opens the real wallet is worse than none at all.
         if not _reopens(se, stored, args.duress_pin, decoy, "the decoy seed"):
             return 1
+
+    _write_blob(out / BLOB, prov.seed_pair.pack())
+    _save(out, prov, args.network)
 
     print(f"Written to {out}/")
     print(f"  {BLOB:<14} encrypted, {len(prov.seed_pair.pack())} bytes, "
@@ -727,8 +763,7 @@ def cmd_enroll_chamber(args) -> int:
         return 1
 
     optical_puf.save_helper(helper, str(helper_path))
-    (d / BLOB).write_bytes(prov2.seed_pair.pack())
-    (d / BLOB).chmod(0o600)
+    _write_blob(d / BLOB, prov2.seed_pair.pack())
 
     b = optical_puf.budget(helper.m, helper.t)
     print(f"\nEnrolled from {len(reads)} reads.")

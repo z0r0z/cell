@@ -113,13 +113,19 @@ class FakeATECC:
     def __init__(self, pin: str = PIN, duress_pin: str | None = DPIN,
                  locked: bool = True):
         self.serial = b"\x01\x23" + bytes([0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF]) + b"\xEE"
-        self.slots = {SLOT_WRAP: os.urandom(32),
-                      SLOT_ATTEST: os.urandom(32),
-                      SLOT_WRAP_DURESS: os.urandom(32),
-                      SLOT_BASELINE: bytes(32),
-                      SLOT_BASELINE_DURESS: bytes(32)}
+        # An un-provisioned data zone, which is the state a real chip is in
+        # when set_pin runs. Pre-loading the wrapping, attestation and
+        # baseline slots with plausible values baked in the favourable
+        # assumption and hid the fact that nothing ever wrote them: three of
+        # these are now written by set_pin, and the baselines with them.
+        self.slots: dict[int, bytes] = {}
         self.counters = {0: 0, 1: 0}
         self.locked = locked
+        # Tracked separately, because the one window in which the slots are
+        # writable is config-locked and data-unlocked. Modelling both zones
+        # with one flag is why the provisioning order in BUILD.md section 12
+        # could not be rehearsed here at all.
+        self.data_locked = locked
         self.hmac_calls = 0
         self.checkmac_calls: list[int] = []
         self.writes: list[int] = []
@@ -127,10 +133,7 @@ class FakeATECC:
         # Which slot a successful CheckMac last authorised. Cleared by any
         # subsequent CheckMac, as the real part clears TempKey.
         self.authorised: int | None = None
-        # Provisioning writes both PIN slots before the data zone is locked.
-        self.slots[SLOT_PIN] = pin_key(pin, self.serial)
-        self.slots[SLOT_PIN_DURESS] = pin_key(
-            duress_pin or os.urandom(32).hex(), self.serial)
+        self.pin, self.duress_pin = pin, duress_pin
 
     def _hmac(self, slot, message):
         return hmac.new(self.slots[slot], bytes(message), hashlib.sha256).digest()
@@ -153,7 +156,8 @@ class FakeATECC:
         if zone not in (LOCK_ZONE_CONFIG, LOCK_ZONE_DATA):
             raise AssertionError(f"atcab_is_locked got zone {zone}, which is "
                                  f"not a LOCK_ZONE_* value")
-        is_locked.value = 1 if self.locked else 0
+        is_locked.value = 1 if (self.locked if zone == LOCK_ZONE_CONFIG
+                                else self.data_locked) else 0
         return _Status.ATCA_SUCCESS
 
     def atcab_read_serial_number(self, serial_number):
@@ -188,7 +192,10 @@ class FakeATECC:
         if zone != ATCA_ZONE_DATA:
             raise AssertionError(f"atcab_write_zone got zone {zone}, expected "
                                  f"ATCA_ZONE_DATA ({ATCA_ZONE_DATA})")
-        if self.locked and slot in ENCRYPTED_WRITE:
+        # data_locked, not locked: WriteConfig = Encrypt only bites once the
+        # DATA zone is locked, and the provisioning window is exactly the one
+        # where it does not.
+        if self.data_locked and slot in ENCRYPTED_WRITE:
             # WriteConfig = Encrypt. A clear write is exactly the rollback the
             # baseline slots exist to prevent.
             return _Status.ATCA_EXECUTION_ERROR
@@ -364,7 +371,21 @@ def checkmac_conformance() -> list[tuple[str, bool]]:
 
 
 def device(pin: str = PIN, duress_pin: str | None = DPIN, locked: bool = True):
+    """A provisioned chip, provisioned the way the runbook provisions one.
+
+    The slots are written by set_pin through the real driver, in the real
+    window -- config locked, data not yet -- rather than reached into from
+    here. That is what makes the suite able to notice a slot nothing writes:
+    while the fake pre-loaded the wrapping and attestation secrets, a
+    provisioning path that never wrote them looked identical to one that did.
+    """
     fake = FakeATECC(pin=pin, duress_pin=duress_pin, locked=locked)
+    if locked:
+        fake.data_locked = False
+        ATECC608B(lib=fake, require_data_lock=False).set_pin(pin, duress_pin)
+        fake.data_locked = True
+        fake.writes.clear()
+        fake.counters = {0: 0, 1: 0}
     return ATECC608B(lib=fake), fake
 
 
@@ -410,7 +431,20 @@ def main() -> int:
     check("a wrong PIN is rejected", se.verify_pin("00000000") is PinResult.NONE)
     check("...and it cost an attempt", se.attempts_remaining() == MAX_PIN_ATTEMPTS - 1)
     check("...spent on the chip's counter", fake.counters[COUNTER_PIN] == before + 1)
-    check("...before the comparison ran, not after", fake.checkmac_calls)
+    # Order, not merely "a CheckMac happened". The old form was a truthiness
+    # test on a list that verify_pin always fills, so a driver that spent the
+    # counter AFTER the comparison -- the exact rollback this part is in the
+    # bill of materials to prevent -- passed it.
+    se_o, fake_o = device()
+    order: list[str] = []
+    _inc, _cm = fake_o.atcab_counter_increment, fake_o.atcab_checkmac
+    fake_o.atcab_counter_increment = (
+        lambda *a, _f=_inc: (order.append("count"), _f(*a))[1])
+    fake_o.atcab_checkmac = (
+        lambda *a, _f=_cm: (order.append("checkmac"), _f(*a))[1])
+    se_o.verify_pin("00000000")
+    check("...before the comparison ran, not after",
+          order[:1] == ["count"] and "checkmac" in order)
 
     # The counter is spent first, so a power cut mid-attempt still costs one.
     # Modelled by dropping the driver and rebuilding it against the same chip.
@@ -593,8 +627,12 @@ def main() -> int:
 
     # The attestation key must NOT be reachable from either wrapping slot, or
     # a wipe would silently change the device's identity as well as its key.
+    # Compared secret against SECRET. `pub` is the x-only public half, so
+    # comparing a 32-byte HMAC to it could never be equal: setting the
+    # attestation slot to the wrapping slot's own secret still passed.
     check("the attestation key is not the wrapping key",
-          unlock(se, ctx=b"CELL/attest/v1") != pub)
+          se._hmac(SLOT_ATTEST, b"CELL/attest/v1")
+          != unlock(se, ctx=b"CELL/attest/v1"))
 
     # ---- the secrets stay in the chip -----------------------------------
     print("\n what cannot be read back")
@@ -627,10 +665,36 @@ def main() -> int:
     for label, ok in conf:
         check(label, ok)
 
+    # Every slot the device depends on is written BY the provisioning path,
+    # not assumed to be there. The wrapping and attestation secrets used to be
+    # pre-loaded by the fake, so a set_pin that wrote neither looked exactly
+    # like one that wrote both -- and on a real chip slot 1 is
+    # WriteConfig = Never, so whatever the erased zone held was permanent.
+    print("\n provisioning writes every slot the device needs")
+    fresh = FakeATECC()
+    fresh.data_locked = False
+    ATECC608B(lib=fresh, require_data_lock=False).set_pin(PIN, DPIN)
+    for slot, what in ((SLOT_WRAP, "the wrapping key"),
+                       (SLOT_ATTEST, "the attestation key"),
+                       (SLOT_PIN, "the PIN slot"),
+                       (SLOT_PIN_DURESS, "the duress PIN slot"),
+                       (SLOT_WRAP_DURESS, "the duress wrapping key"),
+                       (SLOT_BASELINE, "the attempt baseline"),
+                       (SLOT_BASELINE_DURESS, "the duress attempt baseline")):
+        check(f"set_pin writes {what}", slot in fresh.slots)
+    check("...and the two device secrets are not the same value",
+          fresh.slots[SLOT_WRAP] != fresh.slots[SLOT_ATTEST]
+          != fresh.slots[SLOT_WRAP_DURESS])
+    check("two devices do not share a wrapping key",
+          fresh.slots[SLOT_WRAP] != device()[1].slots[SLOT_WRAP])
+    check("the baselines start where the counters do",
+          fresh.slots[SLOT_BASELINE] == bytes(32)
+          == fresh.slots[SLOT_BASELINE_DURESS])
+
     # ---- what this file does not prove ---------------------------------
     print("\n the honest limits")
     check("the fake holds slot secrets in memory; the chip does not",
-          FakeATECC().slots[SLOT_WRAP] is not None)
+          device()[1].slots[SLOT_WRAP] is not None)
     print("      ^ so none of the above is evidence about the silicon.")
     print("      The CheckMac digest in particular is transcribed from the")
     print("      datasheet and is confirmed only by")

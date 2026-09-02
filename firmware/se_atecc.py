@@ -256,8 +256,18 @@ class ATECC608B(SecureElement):
 
     IS_SECURE = True
 
-    def __init__(self, bus: int = 1, address: int = I2C_ADDRESS, lib=None):
+    def __init__(self, bus: int = 1, address: int = I2C_ADDRESS, lib=None,
+                 require_data_lock: bool = True):
         """`lib` overrides cryptoauthlib, so the logic can be tested.
+
+        `require_data_lock=False` is for PROVISIONING ONLY, and it exists
+        because the documented runbook could not otherwise execute: `set_pin`
+        has to run before the data zone locks (slots 1, 2 and 4 are
+        WriteConfig = Never afterwards), and this constructor demanded both
+        locks, so `provision.py new` on a config-locked chip refused the chip
+        it was there to provision. Locking data first instead makes those
+        slots permanently unwritable. Every other entry point keeps the hard
+        requirement.
 
         The chip cannot be attached to CI, but the arithmetic around it can be:
         the attempt budget, the baseline that survives a power cut, the
@@ -280,21 +290,27 @@ class ATECC608B(SecureElement):
         # signer.unlock holds it from the PIN step to the unwrap step — so this
         # adds no exposure that was not there. See _authorise().
         self._auth: tuple[PinResult, bytes] | None = None
-        self.assert_locked()
+        self.assert_locked(require_data_lock)
         self._serial = self._read_serial()
 
     # ---- configuration ----
 
-    def assert_locked(self) -> None:
+    def assert_locked(self, require_data_lock: bool = True) -> None:
         """Refuse to use a chip whose zones are still writable.
 
         An unlocked chip is a chip whose slots can be read or replaced. Running
         against one gives every appearance of security and none of it, so this
         is a hard failure rather than a warning.
+
+        The config zone is never optional. The data zone is waived only for
+        the provisioning window, which is the one moment the slots HAVE to be
+        writable — see __init__.
         """
         cal = self._cal
-        for zone, name in ((LOCK_ZONE_CONFIG, "config"),
-                           (LOCK_ZONE_DATA, "data")):
+        zones = [(LOCK_ZONE_CONFIG, "config")]
+        if require_data_lock:
+            zones.append((LOCK_ZONE_DATA, "data"))
+        for zone, name in zones:
             locked = cal.AtcaReference(0)
             if cal.atcab_is_locked(zone, locked) != cal.Status.ATCA_SUCCESS:
                 raise DeviceError(f"could not read the {name} zone lock state")
@@ -433,6 +449,29 @@ class ATECC608B(SecureElement):
         unreachable = os.urandom(32).hex()
         self._write_slot(SLOT_PIN_DURESS,
                          pin_key(duress_pin or unreachable, self._serial))
+
+        # AND THE SLOTS NOTHING ELSE EVER WROTE. This was the only slot-secret
+        # writer in the tree and it wrote two of the five: slots 0, 1 and 5
+        # kept whatever the un-provisioned data zone happened to hold, and
+        # slot 1 is WriteConfig = Never, so after lock-data its contents were
+        # permanent. A wrapping key that is the same on every device is not a
+        # key that never leaves the chip, and an attestation key that is the
+        # same on every device is one identity for every CELL ever built.
+        cal = self._cal
+        for slot in (SLOT_WRAP, SLOT_ATTEST, SLOT_WRAP_DURESS):
+            rand = bytearray(32)
+            if cal.atcab_random(rand) != cal.Status.ATCA_SUCCESS:
+                raise DeviceError(
+                    f"could not draw a secret for slot {slot} from the chip")
+            self._write_slot(slot, bytes(rand))
+
+        # The attempt baselines start at zero, which is where the counters
+        # start. _baseline() refuses a baseline ABOVE the counter as tamper,
+        # so an un-provisioned slot reading anything higher would make the
+        # device unbootable and — the slots being WriteConfig = Encrypt after
+        # lock-data — unrecoverable.
+        for slot in (SLOT_BASELINE, SLOT_BASELINE_DURESS):
+            self._write_slot(slot, bytes(32))
 
     # ---- keys ----
 

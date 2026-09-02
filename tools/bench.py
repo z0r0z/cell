@@ -75,7 +75,15 @@ def cmd_atecc(args) -> int:
         print(f"  no usable chip: {e}")
         return 1
 
-    check("the chip answers and both zones are locked", True)
+    # A literal True would record a PASS for something never measured. Ask
+    # the chip, through the check the constructor already made.
+    both_locked = True
+    try:
+        se.assert_locked()
+    except Exception as e:                                      # noqa: BLE001
+        both_locked = False
+    check("the chip answers and both zones are locked", both_locked,
+          "" if both_locked else str(e))
     start = se.attempts_remaining()
     check("it reports a PIN budget", start > 0, f"{start} attempts remaining")
 
@@ -84,11 +92,17 @@ def cmd_atecc(args) -> int:
     # derive once per candidate PIN and let AES-GCM's tag tell them when they
     # guessed right. That is slot 0's ReqAuth binding, and this is the only
     # honest way to ask whether it is really there.
-    denied = False
-    try:
-        se.kdf(signer.unwrap_context(args.pin))
-    except (PinLockout, DeviceError):
-        denied = True
+    # ASK THE CHIP, not the driver. se.kdf raises PinLockout from a firmware
+    # `if self._auth is None` before a single I2C command leaves the Pi, so
+    # this used to report PASS on any chip at all -- including exactly the
+    # misconfigured one it exists to stop. The HMAC command is issued
+    # directly, the way atecc_config's behaviour probe does it.
+    from se_atecc import SHA_MODE_TARGET_TEMPKEY, SLOT_WRAP
+    out = bytearray(32)
+    probe = b"CELL/bench/unauthorised-derive"
+    denied = se._cal.atcab_sha_hmac(probe, len(probe), SLOT_WRAP, out,
+                                    SHA_MODE_TARGET_TEMPKEY) \
+        != se._cal.Status.ATCA_SUCCESS
     check("the wrapping key CANNOT be derived without a PIN", denied,
           "" if denied else
           "SLOT 0 IS NOT BOUND TO THE PIN SLOT. The attempt counter does not "
@@ -121,12 +135,23 @@ def cmd_atecc(args) -> int:
 
     before = se.counter()
     se.verify_pin("0" * len(args.pin) if args.pin != "0" * len(args.pin) else "1" * len(args.pin))
-    check("a wrong PIN spends an attempt", se.attempts_remaining() < start)
+    # Against the full budget, for the same reason as the check above it:
+    # `start` was read before the correct PIN restored the budget, so on any
+    # chip that had ever seen a wrong PIN this compared 9 against a smaller
+    # number and reported a failure for correct behaviour.
+    check("a wrong PIN spends an attempt",
+          se.attempts_remaining() == MAX_PIN_ATTEMPTS - 1,
+          f"{se.attempts_remaining()} of {MAX_PIN_ATTEMPTS}")
     check("the operation counter only moves forward", se.counter() >= before)
 
     print("\n  spending the rest of the budget — the chip should wipe\n")
     wiped = False
-    for i in range(start + 2):
+    # MAX_PIN_ATTEMPTS + 2, not start + 2: the budget in front of us is the
+    # restored one. Sizing the loop from `start` left a chip that began this
+    # run part-spent with attempts still remaining when the loop gave up --
+    # reported as "the counter is not enforcing a limit", the loudest possible
+    # false alarm, on a chip that was fine and is now half-spent.
+    for i in range(MAX_PIN_ATTEMPTS + 2):
         try:
             if se.verify_pin("9" * len(args.pin)):
                 break
@@ -481,6 +506,40 @@ def cmd_selftest(args) -> int:
     ok &= good
     print(f"  {'a correct PIN restores the full budget':<52}"
           f"{'PASS' if good else 'FAIL'}")
+
+    # And the same mistake one line further down. A chip that arrives
+    # part-spent restores to the FULL budget, so the wrong PIN after it leaves
+    # MAX - 1 -- which is greater than the `start` this used to compare
+    # against, and reported a failure on a correct chip.
+    se2 = SoftSE(pin="12345678")
+    for _ in range(3):
+        se2.verify_pin("00000000")                  # arrives part-spent
+    start = se2.attempts_remaining()
+    se2.verify_pin("12345678")
+    se2.verify_pin("00000000")
+    good = (start < MAX_PIN_ATTEMPTS - 1
+            and se2.attempts_remaining() == MAX_PIN_ATTEMPTS - 1
+            and not se2.attempts_remaining() < start)
+    ok &= good
+    print(f"  {'a wrong PIN is judged against the restored budget':<52}"
+          f"{'PASS' if good else 'FAIL'}")
+
+    # The wipe loop has to be sized from the restored budget too, or it gives
+    # up with attempts still remaining and calls that "no limit enforced".
+    se3 = SoftSE(pin="12345678")
+    for _ in range(4):
+        se3.verify_pin("00000000")
+    se3.verify_pin("12345678")
+    wiped = False
+    for _ in range(MAX_PIN_ATTEMPTS + 2):
+        try:
+            se3.verify_pin("99999999")
+        except Exception:                                       # noqa: BLE001
+            wiped = True
+            break
+    ok &= wiped
+    print(f"  {'the wipe loop is sized from the full budget':<52}"
+          f"{'PASS' if wiped else 'FAIL'}")
 
     print("\n" + ("PASS" if ok else "FAIL"))
     print("\nThe checks that need the parts are still open — see VALIDATION.md.")

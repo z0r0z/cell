@@ -218,13 +218,17 @@ def main() -> int:
     bursts.mkdir()
     for i in range(3):
         np.save(bursts / f"read_{i}.npy", _burst(seed=i, drift=0.01 * i))
+    blob_before = (d / tool.BLOB).read_bytes()
     r = run("enroll-chamber", "--dir", str(d), "--pin", PIN, "--soft",
             "--network", NETWORK, "--from", str(bursts))
     check("enroll-chamber runs on the rehearsal path",
           r.returncode == 0, (r.stdout + r.stderr)[-220:])
     check("...and writes the helper beside the seed", (d / tool.CHAMBER).exists())
+    # Against what was there BEFORE. `!= b""` passed if enrolment had written
+    # nothing at all, which is the failure this step exists to catch: the
+    # helper on disk and the blob still wrapped under the old key.
     check("...and re-wraps the seed store",
-          (d / tool.BLOB).read_bytes() != b"")
+          (d / tool.BLOB).read_bytes() not in (b"", blob_before))
 
     dev2 = app.load_device(str(d), console=True)
     check("the enrolled device boots and wires a chamber reader",

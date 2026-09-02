@@ -291,7 +291,15 @@ COUNTER_OPS = 1
 def _policy() -> list[SlotPolicy]:
     wrap_sc, wrap_kc = _secret_key(req_auth=SLOT_PIN, limited_use=True,
                                    write_config=WRITE_ALWAYS)
-    dwrap_sc, dwrap_kc = _secret_key(req_auth=SLOT_PIN_DURESS,
+    # limited_use here too. The config zone is READABLE on a locked chip --
+    # that is how `dump` and `verify` work -- so a metered slot 0 beside an
+    # unmetered slot 5 says, in two bytes anyone can read, which of the two
+    # wallets is the real one and therefore which PIN is the duress one. It
+    # also showed at runtime: the metered derive advances Counter0 a second
+    # time, so a normal unlock and a duress unlock left different numbers of
+    # attempts remaining, and signer.py prints that number on the next wrong
+    # PIN.
+    dwrap_sc, dwrap_kc = _secret_key(req_auth=SLOT_PIN_DURESS, limited_use=True,
                                      write_config=WRITE_ALWAYS)
     att_sc, att_kc = _secret_key()
     pin_sc, pin_kc = _secret_key()
@@ -470,9 +478,13 @@ def invariants(cfg: bytes) -> list[tuple[str, bool]]:
     want("the two baseline slots differ only in their write key",
          replace(sc[SLOT_BASELINE], write_key=0)
          == replace(sc[SLOT_BASELINE_DURESS], write_key=0))
+    # SlotConfig as well as KeyConfig. Comparing only the KeyConfig is how a
+    # limited_use bit set on one wrapping slot and not the other survived: it
+    # lives in the SlotConfig, and this invariant never looked there.
     want("the two wrapping slots differ only in their auth key",
          replace(kc[SLOT_WRAP], auth_key=0, req_auth=False)
-         == replace(kc[SLOT_WRAP_DURESS], auth_key=0, req_auth=False))
+         == replace(kc[SLOT_WRAP_DURESS], auth_key=0, req_auth=False)
+         and sc[SLOT_WRAP] == sc[SLOT_WRAP_DURESS])
 
     # Nothing left as scratch space.
     want("slots 7-15 are unusable",
@@ -754,8 +766,13 @@ def _behaviour(cal, cfg: bytes) -> bool:
                 lambda: cal.atcab_write_zone(ATCA_ZONE_DATA, SLOT_BASELINE,
                                              0, 0, bytes(32), 32))
     else:
+        # Say it plainly rather than appending a True. This probe is only
+        # meaningful after the data zone locks, and cmd_lock's gate runs
+        # BEFORE that -- so the row that read PASS here had measured nothing,
+        # in the one gate the comments call "the only one worth locking on".
         rows.append(("the baseline refuses a clear write "
-                     "(skipped -- data zone still unlocked)", True))
+                     "-- NOT TESTED, the data zone is still unlocked and "
+                     "WriteConfig=Encrypt does not bite until it is", True))
 
     for label, good in rows:
         print(f"  {label:<62}{'PASS' if good else 'FAIL'}")
@@ -804,6 +821,19 @@ def cmd_lock(args, zone: str) -> int:
         print(f"the {zone} zone lock failed")
         return 1
     print(f"{zone} zone locked. Permanently.")
+
+    # And again, AFTER the lock, because that is the only moment the
+    # encrypted-write probe means anything: before it, WriteConfig=Encrypt
+    # does not bite and the check above could only report "not tested". It is
+    # too late to refuse, so it is reported loudly instead -- an operator who
+    # sees this has a chip to set aside, not a chip to ship.
+    if zone == "data" and not args.skip_behaviour:
+        print("\n behaviour, now that the zone is locked\n")
+        if not _behaviour(cal, read_config(cal)):
+            print("\nTHIS CHIP DOES NOT ENFORCE ITS OWN CONFIG. The zone is "
+                  "locked and that\ncannot be undone. Do not provision this "
+                  "chip; fit another and start again.")
+            return 1
     return 0
 
 
