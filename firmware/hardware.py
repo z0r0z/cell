@@ -313,7 +313,27 @@ class RealSensorHead(SensorHead):
                           "AwbEnable": False, "NoiseReductionMode": 0}))
 
     def close(self):
-        self.cam.stop()
+        """Release everything, not just the stream.
+
+        Picamera2.stop() stops the stream and keeps the camera ACQUIRED; only
+        close() releases it. So a head that was stopped rather than closed
+        made the next RealSensorHead() on the same boot fail to open the
+        camera -- which, in the signing flow, is the chamber read that follows
+        a gate: the owner has already bled, and the advice on screen ("try
+        again") would have failed identically until a power cycle.
+        """
+        try:
+            self.cam.close()
+        finally:
+            for pin in (self.led2, self.ir, self.laser, self.cart):
+                try:
+                    pin.deinit()
+                except Exception:                               # noqa: BLE001
+                    pass
+            try:
+                self._i2c.deinit()
+            except Exception:                                   # noqa: BLE001
+                pass
 
 
 class RealTouchSensor(TouchSensor):

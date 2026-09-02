@@ -216,7 +216,12 @@ class ST7789Display:
 
     def set_offsets(self, x: int, y: int) -> None:
         """Re-open the panel at a different origin. Used by bench.py."""
-        self._panel._offset_left, self._panel._offset_top = x, y
+        # _X_START / _Y_START are what adafruit_rgb_display packs into the
+        # window command. `_offset_left` / `_offset_top` exist nowhere in the
+        # library, so setting them moved nothing and bench.py's origin hunt
+        # reported that no offset helped -- on a panel whose bottom row is
+        # where the tier disclosure sits.
+        self._panel._X_START, self._panel._Y_START = x, y
 
     def clear(self) -> None:
         self._panel.image(self._Image.new("RGB", (WIDTH, HEIGHT), BLACK))

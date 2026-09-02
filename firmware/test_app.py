@@ -70,8 +70,13 @@ class Recorder(ConsoleDisplay):
         self.screens: list[list[str]] = []
 
     def show(self, lines, highlight=None):
-        super().show(lines, highlight)
+        # Recorded BEFORE the paint. ConsoleDisplay.show raises on a screen
+        # that does not fit, so appending afterwards meant an oversized screen
+        # was never recorded -- and the "no screen anywhere overflowed" sweep
+        # at the end of this suite was checking a list that could not, by
+        # construction, contain an offender.
         self.screens.append(list(lines))
+        super().show(lines, highlight)
 
     def text(self) -> str:
         return "\n".join("\n".join(s) for s in self.screens)
@@ -95,6 +100,10 @@ def make_device(*, presses, frames, gate=None, policy=None, prov=None, se=None,
                    buttons=fake_buttons, camera=FakeCamera(frames),
                    run_gate=gate or default_gate, policy=policy or Policy(),
                    fw_hash=FW, cal_hash=CAL, network=network,
+                   # The device's own default is time.sleep, which is what
+                   # gives the output QR its frame time. The suite has no
+                   # camera to give it to.
+                   sleep=lambda _s: None,
                    clock=fake_buttons.now)
     return d, order
 
@@ -217,7 +226,8 @@ def main() -> int:
         check(f"refuses {label}", survived)
         check(f"...with a screen, not a traceback ({label[:28]})",
               survived and dev.display.screens
-              and any(len(ln) <= ops.DISPLAY_COLS for ln in dev.display.screens[-1]))
+              and all(len(ln) <= ops.DISPLAY_COLS
+                      for ln in dev.display.screens[-1]))
 
     # An incomplete transfer must be reported, not hung on.
     dev, _ = make_device(presses=[CONFIRM, CONFIRM], frames=frames[:-1])

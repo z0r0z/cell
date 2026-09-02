@@ -56,6 +56,15 @@ class Buttons(Protocol):
     def poll(self) -> str | None:
         """The next press, or None. Never blocks."""
 
+    def peek(self) -> str | None:
+        """The next press WITHOUT consuming it. Never blocks.
+
+        Separate from `poll` because a screen that is watching for one
+        particular button must not swallow the others on its way past. The
+        scan screen wants BACK and nothing else; if it polled, a CONFIRM the
+        owner pressed a moment early would vanish rather than queue.
+        """
+
     def wait(self, timeout: float | None = None) -> str | None:
         """Block for the next press."""
 
@@ -79,6 +88,9 @@ class FakeButtons:
             return None
         self._t += self.delay
         return self.script.pop(0)
+
+    def peek(self) -> str | None:
+        return self.script[0] if self.script else None
 
     def wait(self, timeout: float | None = None) -> str | None:
         return self.poll()
@@ -119,6 +131,9 @@ class GPIOButtons:
 
     def poll(self) -> str | None:
         return self._queue.pop(0)[0] if self._queue else None
+
+    def peek(self) -> str | None:
+        return self._queue[0][0] if self._queue else None
 
     def wait(self, timeout: float | None = None) -> str | None:
         deadline = None if timeout is None else time.monotonic() + timeout

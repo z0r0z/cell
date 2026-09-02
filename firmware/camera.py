@@ -96,22 +96,34 @@ class USBCamera:
                 # A decoder that throws on a garbage frame must not take the
                 # device down mid-transfer. Drop the frame and keep looking.
                 continue
-            if data:
-                yield data
+            # A read that decoded nothing is still a tick. Yielding None
+            # rather than looping is what lets scan() reach its deadline and
+            # its BACK check: a camera pointed at a blank wall never decodes,
+            # and a loop that only yields on success never comes back.
+            yield data if data else None
 
     def close(self) -> None:
         self._cap.release()
 
 
+class ScanCancelled(Exception):
+    """The owner pressed BACK during a scan. Not a failure, a decision."""
+
+
 def scan(camera: Camera, display=None, timeout_s: float = SCAN_TIMEOUT_S,
          clock: Callable[[], float] = time.monotonic,
-         on_progress: Callable[[str], None] | None = None) -> bytes:
+         on_progress: Callable[[str], None] | None = None,
+         buttons=None) -> bytes:
     """Collect one complete transfer, or raise.
 
     Progress is reported because an animated transfer that is missing one
     frame looks identical to one that is not working at all, and the owner
     needs to know which — the fix for the first is to keep the camera still,
     and for the second it is to start again.
+
+    BACK IS A REAL BUTTON HERE. Both screens say "BACK to stop", and until
+    `buttons` was passed nothing polled one: the only way out of a scan that
+    was not going to complete was the power switch.
     """
     collector = qr.Collector()
     deadline = clock() + timeout_s
@@ -120,6 +132,13 @@ def scan(camera: Camera, display=None, timeout_s: float = SCAN_TIMEOUT_S,
             raise CameraError(
                 f"gave up after {timeout_s:.0f}s with {collector.progress()}; "
                 f"missing {collector.missing}")
+        # peek, not poll: this screen is watching for BACK, and consuming a
+        # CONFIRM pressed a moment early would make it disappear.
+        if buttons is not None and buttons.peek() == "BACK":
+            buttons.poll()
+            raise ScanCancelled()
+        if frame is None:
+            continue                    # a read that carried no code
         try:
             payload = collector.feed(frame)
         except qr.BadFrame as e:

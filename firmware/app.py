@@ -43,12 +43,14 @@ from typing import Callable
 
 import addresses
 import bip32
+import duress
 import buttons as btn
 import camera as cam
 import eth
 import ops
 import psbt as psbtmod
 import qr
+import seedstore
 import signer
 import wallet
 from display import Display
@@ -88,7 +90,13 @@ class Device:
     # device has always derived, and a device that DID enrol cannot be
     # downgraded by dropping it, because its seed will not open.
     read_chamber: "Callable[[], bytes] | None" = None
-    sleep: Callable[[float], None] = lambda _s: None
+    # The real one. It used to default to a no-op, which is a test
+    # convenience: load_device never overrode it, so on the device the SIGNED
+    # screen was painted and replaced in the same instant and cam.emit ran its
+    # animated output QR with no frame time at all -- flashing the signed
+    # transaction past the receiving camera faster than it could latch a
+    # frame, on the airgap's only way out.
+    sleep: Callable[[float], None] = time.sleep
     # Injected so the tests can drive the confirmation guard, which measures
     # how long a screen has been up before it will accept consent. Faking the
     # clock is how that guard gets tested; weakening it would be how it stops
@@ -169,7 +177,10 @@ class Device:
         self._screen("SCAN", ["  Hold the transaction QR in", "  front of the camera.",
                               "", "  BACK to stop"])
         try:
-            payload = cam.scan(self.camera, display=self.display)
+            payload = cam.scan(self.camera, display=self.display,
+                               buttons=self.buttons)
+        except cam.ScanCancelled:
+            raise Abort() from None
         except cam.CameraError as e:
             self._fail("scan failed", str(e))
             return "scan-failed"
@@ -201,9 +212,15 @@ class Device:
                            clock=self.clock)
 
     def sign_psbt(self, payload: bytes) -> str:
-        confirmed = {"ok": False}
+        # "asked" as well as "ok". A signer.Refused raised BEFORE the
+        # confirmation screen -- an unrenderable operation, a policy refusal,
+        # a screen that does not fit -- also leaves "ok" False, and reporting
+        # that as CANCELLED tells the owner they declined something they were
+        # never shown, with no reason on screen to act on.
+        confirmed = {"asked": False, "ok": False}
 
         def confirm_cb(lines: list[str]) -> bool:
+            confirmed["asked"] = True
             confirmed["ok"] = self._confirm_screen(lines)
             return confirmed["ok"]
 
@@ -216,11 +233,12 @@ class Device:
                 payload, self.prov, self.se, self.policy, self.fw_hash,
                 self.cal_hash, confirm_cb, gate_cb, self._pin,
                 network=self.network, read_chamber=self.read_chamber)
-        except (psbtmod.BadPSBT, WalletError, ValueError) as e:
+        except (psbtmod.BadPSBT, WalletError, ops.UnrenderableOperation,
+                seedstore.SeedStoreError, duress.NoBlobOpened, ValueError) as e:
             self._fail("refused", str(e))
             return "refused"
         except signer.Refused as e:
-            if not confirmed["ok"]:
+            if confirmed["asked"] and not confirmed["ok"]:
                 raise Abort() from None
             self._fail("refused", str(e))
             return "refused"
@@ -246,9 +264,10 @@ class Device:
             self._fail("refused", str(e))
             return "refused"
 
-        confirmed = {"ok": False}
+        confirmed = {"asked": False, "ok": False}
 
         def confirm_cb(lines: list[str]) -> bool:
+            confirmed["asked"] = True
             confirmed["ok"] = self._confirm_screen(lines)
             return confirmed["ok"]
 
@@ -261,11 +280,13 @@ class Device:
                 tx, self.prov, self.se, self.policy, self.fw_hash,
                 self.cal_hash, confirm_cb, gate_cb, self._pin,
                 read_chamber=self.read_chamber)
-        except (WalletError, eth.BadEthTransaction, ValueError) as e:
+        except (WalletError, eth.BadEthTransaction,
+                ops.UnrenderableOperation, seedstore.SeedStoreError,
+                duress.NoBlobOpened, ValueError) as e:
             self._fail("refused", str(e))
             return "refused"
         except signer.Refused as e:
-            if not confirmed["ok"]:
+            if confirmed["asked"] and not confirmed["ok"]:
                 raise Abort() from None
             self._fail("refused", str(e))
             return "refused"
@@ -355,7 +376,10 @@ def classify(payload: bytes) -> str:
         return "psbt"
     try:
         doc = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        # RecursionError as well: the camera is the whole input surface, and
+        # `[` repeated a few hundred thousand times is a payload anybody can
+        # hold up to it. json's decoder recurses on nesting.
         return "unknown"
     return "eth" if isinstance(doc, dict) and doc.get("type") == "cell-eth-tx" \
         else "unknown"
@@ -370,7 +394,12 @@ def parse_eth_request(payload: bytes) -> eth.EthTransaction:
     same reasoning as `ops.parse`: a field the device does not understand is a
     field it cannot display, and therefore one the owner cannot consent to.
     """
-    doc = json.loads(payload.decode("utf-8"))
+    try:
+        doc = json.loads(payload.decode("utf-8"))
+    except RecursionError:
+        raise ValueError(
+            "the request is nested too deeply to parse. This device signs a "
+            "flat object with the fields below and nothing else.") from None
     # JSON's top level is not necessarily an object: `4` and `[]` are both
     # valid documents, and iterating them raises TypeError, which is not in
     # the set app.sign_eth catches -- so a refusal became an "internal error"
