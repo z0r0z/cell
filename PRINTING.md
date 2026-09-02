@@ -142,6 +142,13 @@ spool decision made at Stage 4 and not a geometry decision made at Stage 0.
 | `brass` | dark antique brass | `#6b5220` / `#7a5f2a` | high | Alchemical instrument rather than ritual object |
 | `nickel` | brushed nickel | `#6f6a63` / `#7d776f` | high | Utility. The only colour left is the etched dish |
 
+The finish also sets the colour of the `BLOOD` word on the signing screen, so
+a device reads as one object rather than a coloured case around a red display.
+That word keeps its distance from the grey a `TOUCH` reading renders in,
+whichever finish you pick: the difference between those two words is the
+difference between a gate that took blood and one that did not, and no finish
+is allowed to blur it.
+
 **Gloss matters as much as colour.** The ring surrounds a black bore, so a
 high-gloss accent catches a hard highlight and the port reads as a lit
 aperture; a satin one reads as a machined bezel. If you are painting rather

@@ -37,6 +37,14 @@ MTL and assign your own. Twelve, not eleven: `cavity_bore` is the inward-facing
 material on `port_sleeve`, and it is the one the OBJ cannot carry faithfully,
 because a back-faced material is a thing the format has no way to say.
 
+The two accent materials, `oxblood` and `trim_oxblood`, are the only ones a
+builder is meant to choose. `model.js`'s `FINISHES` table names five, and
+`PRINTING.md` section 2b carries the same set as filament colours. Oxblood is
+the default, and the export is byte-identical in every finish that does not
+change it: the OBJ carries no colour at all, and the MTL is written from
+whichever finish is loaded, which for every committed artefact is the default.
+Nothing here needs regenerating when a finish is added.
+
 ## Coordinate convention: centre-origin
 
 | Axis | Range | Meaning |

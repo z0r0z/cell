@@ -192,17 +192,27 @@ const shellMat = new THREE.MeshPhysicalMaterial({
 // a hard specular on a ring that surrounds a black bore; the softer finishes
 // drop it deliberately so the ring reads as a machined bezel rather than a
 // lit aperture.
+//
+// `tierInk` is the accent as it appears ON THE SCREEN, on the BLOOD tier word.
+// It is not simply the ring colour: the ring is a lit metal surface and the
+// word is ink on a dark panel, so the shell colours go illegible there. Two
+// constraints set it. It has to clear the panel it sits on, which rules out
+// `deep`'s near-black; and it has to stay obviously unlike the header grey
+// #565f65 that the TOUCH tier renders in, because the difference between the
+// two words is the difference between a gate that took blood and one that did
+// not. That is a semantic signal, not decoration, and it survives every
+// finish.
 const FINISHES = {
   oxblood: { ring: 0x55161d, trim: 0x5f151d, ringRough: 0.38, trimRough: 0.22,
-             ringMetal: 0.92, trimMetal: 0.95 },
+             ringMetal: 0.92, trimMetal: 0.95, tierInk: '#8c2434' },
   deep:    { ring: 0x2e1013, trim: 0x3a141a, ringRough: 0.46, trimRough: 0.42,
-             ringMetal: 0.55, trimMetal: 0.60 },
+             ringMetal: 0.55, trimMetal: 0.60, tierInk: '#7d2231' },
   bone:    { ring: 0x8e877a, trim: 0x9a9284, ringRough: 0.42, trimRough: 0.40,
-             ringMetal: 0.35, trimMetal: 0.40 },
+             ringMetal: 0.35, trimMetal: 0.40, tierInk: '#c2b9a6' },
   brass:   { ring: 0x6b5220, trim: 0x7a5f2a, ringRough: 0.34, trimRough: 0.30,
-             ringMetal: 0.90, trimMetal: 0.92 },
+             ringMetal: 0.90, trimMetal: 0.92, tierInk: '#b08a3c' },
   nickel:  { ring: 0x6f6a63, trim: 0x7d776f, ringRough: 0.26, trimRough: 0.24,
-             ringMetal: 0.95, trimMetal: 0.95 },
+             ringMetal: 0.95, trimMetal: 0.95, tierInk: '#bcc2c8' },
 };
 // Oxblood is the default and stays the default: it is what the drawing, the
 // social card and every committed render show. `?finish=bone` and the others
@@ -252,7 +262,7 @@ function screenTexture() {
   g.fillText(step, w - M - stepW, M + 36);
   const tier = 'BLOOD';                       // 'TOUCH' renders in header grey
   const tierW = g.measureText(tier).width;
-  g.fillStyle = tier === 'BLOOD' ? '#8c2434' : '#565f65';
+  g.fillStyle = tier === 'BLOOD' ? ACCENT.tierInk : '#565f65';
   g.fillText(tier, w - M - stepW - 46 - tierW, M + 36);
   g.fillStyle = '#2e3337';
   g.fillRect(M, M + 66, w - 2 * M, 3);
@@ -294,7 +304,10 @@ function screenTexture() {
   g.font = '500 32px ui-monospace, SFMono-Regular, Menlo, monospace';
   g.fillText('0.00012  ·  8 sat/vB', M + 150, 540);
 
-  g.fillStyle = '#8c2434';
+  // The hold-to-confirm bar is the screen's other accent surface, so it takes
+  // the finish too. Left as a literal it was the one place a bone or nickel
+  // device still bled red.
+  g.fillStyle = ACCENT.tierInk;
   g.fillRect(M, 606, 236, 6);
   g.fillStyle = '#23272b';
   g.fillRect(M + 236, 606, w - 2 * M - 236, 6);
