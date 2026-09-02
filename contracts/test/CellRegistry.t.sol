@@ -53,7 +53,7 @@ contract CellRegistryTest is Test {
     function test_AdmitsBloodAttestation() public {
         vm.prank(user);
         reg.redeem(rec, purpose);
-        assertTrue(reg.allowlisted(user));
+        assertTrue(reg.allowlisted(user, purpose));
         (, uint64 last, , ) = reg.signers(user);
         assertEq(last, 7);
     }
@@ -111,6 +111,45 @@ contract CellRegistryTest is Test {
         vm.prank(stranger);
         vm.expectRevert(CellRegistry.NotRegistered.selector);
         reg.redeem(rec, purpose);
+    }
+
+    /// Admission is per purpose. A record redeemed for round 1 said nothing
+    /// about round 2, and one bool per address said it did.
+    function test_AdmissionIsPerPurpose() public {
+        vm.prank(user);
+        reg.redeem(rec, purpose);
+        assertTrue(reg.allowlisted(user, purpose));
+        assertFalse(reg.allowlisted(user, keccak256("cell-allowlist-round-2")));
+    }
+
+    /// The direction the beacon suite could not test. `redeem` takes an
+    /// arbitrary purpose word, so without a tag of its own a caller redeems a
+    /// fifteen-second proof of life as a blood-tier allowlist entry.
+    function test_RejectsABeaconRecordAsAnAllowlistEntry() public {
+        string memory j = vm.readFile("test/registry_vectors.json");
+        bytes memory beaconBlood = vm.parseJsonBytes(j, ".beaconBlood");
+        uint64 epoch = uint64(vm.parseJsonUint(j, ".beaconEpoch"));
+        // Computed before expectRevert is armed: arguments are evaluated after
+        // it, and a view call that returns would consume the expectation.
+        bytes32 bp = reg.beaconPurpose(epoch);
+        vm.prank(user);
+        vm.expectRevert(CellRegistry.WrongDigest.selector);
+        reg.redeem(beaconBlood, bp);
+    }
+
+    /// A tier outside the two the record format defines is not a loud
+    /// mistake: 0 silently removes the gate, 3 makes every redeem revert.
+    function test_RefusesATierThatIsNotATier() public {
+        vm.startPrank(DEPLOYER);
+        vm.expectRevert(CellRegistry.BadTier.selector);
+        reg.setRequiredTier(0);
+        vm.expectRevert(CellRegistry.BadTier.selector);
+        reg.setRequiredTier(3);
+        vm.expectRevert(CellRegistry.BadTier.selector);
+        reg.setBeaconTier(0);
+        reg.setRequiredTier(A.TIER_TOUCH);              // in range, accepted
+        vm.stopPrank();
+        assertEq(uint256(reg.requiredTier()), uint256(A.TIER_TOUCH));
     }
 
     function test_GasCost() public {

@@ -46,13 +46,26 @@ contract CellRegistry {
     bytes32 public constant BEACON_TAG =
         0x1209952fe8f5fbf2317b2ccbee619112556d6d6da583fe56b957dbd0906767d9;
 
+    /// @dev keccak256("CELL/redeem-v1"). The other half of that separation,
+    /// and the half that was missing. `redeem` takes an ARBITRARY purpose word
+    /// from its caller, so without a tag of its own a caller could simply pass
+    /// `beaconPurpose(epoch)` and redeem a proof of life -- fifteen seconds of
+    /// a fingertip -- as an allowlist entry that is supposed to cost a drop of
+    /// blood. Tagging makes the two namespaces disjoint by construction.
+    bytes32 public constant REDEEM_TAG =
+        0x439f3e546440388c849fc333d144961e4f120e8b1febe763de650ad601a2d8b7;
+
     mapping(address => Signer) public signers;
     mapping(bytes32 => bool)   public allowedFirmware;
     mapping(bytes32 => bool)   public allowedCalibration;
-    mapping(address => bool)   public allowlisted;
+    /// @dev Keyed by purpose as well as by address. One bool per address
+    /// cannot say WHICH round admitted somebody, so a record redeemed for
+    /// round 1 read as admission to round 2 as well.
+    mapping(address => mapping(bytes32 => bool)) public allowlisted;
 
     event Registered(address indexed who, bytes32 pubkey);
-    event Admitted(address indexed who, uint8 tier, uint64 counter);
+    event Admitted(address indexed who, bytes32 indexed purpose, uint8 tier,
+                   uint64 counter);
     event Alive(address indexed who, uint64 indexed epoch, uint8 tier, uint64 counter);
 
     error NotAdmin();
@@ -65,6 +78,7 @@ contract CellRegistry {
     error CalibrationNotAllowed();
     error TierTooLow();
     error EpochNotCurrent();
+    error BadTier();
 
     constructor() {
         admin = msg.sender;
@@ -77,8 +91,20 @@ contract CellRegistry {
 
     function allowFirmware(bytes32 h, bool ok) external onlyAdmin { allowedFirmware[h] = ok; }
     function allowCalibration(bytes32 h, bool ok) external onlyAdmin { allowedCalibration[h] = ok; }
-    function setRequiredTier(uint8 t) external onlyAdmin { requiredTier = t; }
-    function setBeaconTier(uint8 t) external onlyAdmin { beaconTier = t; }
+    /// @dev Bounded on purpose. `setRequiredTier(0)` is not a loud mistake --
+    /// `r.tier < 0` is never true, so it silently removes the tier gate
+    /// altogether. `setBeaconTier(3)` is worse: no record can reach it, every
+    /// heartbeat reverts, and every CellDormancy reading this registry arms
+    /// itself against an owner who is alive and beaconing.
+    function setRequiredTier(uint8 t) external onlyAdmin {
+        if (t != A.TIER_TOUCH && t != A.TIER_BLOOD) revert BadTier();
+        requiredTier = t;
+    }
+
+    function setBeaconTier(uint8 t) external onlyAdmin {
+        if (t != A.TIER_TOUCH && t != A.TIER_BLOOD) revert BadTier();
+        beaconTier = t;
+    }
 
     /// @notice Record a device's attestation key, once, the way you record an
     /// xpub. Rotation is deliberately absent: the key is generated in the
@@ -102,17 +128,24 @@ contract CellRegistry {
         return keccak256(abi.encode(block.chainid, address(this), claimant, purpose));
     }
 
-    /// @notice Verify a record and admit the caller.
+    /// @notice The purpose word an allowlist record is bound to. Tagged, so
+    /// that no caller-chosen `purpose` can be spelled to collide with
+    /// `beaconPurpose`. firmware/beacon.py builds the same thing.
+    function redeemPurpose(bytes32 purpose) public pure returns (bytes32) {
+        return keccak256(abi.encode(REDEEM_TAG, purpose));
+    }
+
+    /// @notice Verify a record and admit the caller for one purpose.
     function redeem(bytes calldata record, bytes32 purpose) external {
         Signer storage sg = signers[msg.sender];
         if (!sg.registered) revert NotRegistered();
 
-        (bool ok, A.Record memory r) =
-            A.check(record, sg.pubkey, actionDigest(msg.sender, purpose));
+        bytes32 want = actionDigest(msg.sender, redeemPurpose(purpose));
+        (bool ok, A.Record memory r) = A.check(record, sg.pubkey, want);
         if (!ok) {
             // Separate the two so a caller can tell a forged signature from a
             // record that is genuine but bound to something else.
-            if (A.parse(record).sighash != actionDigest(msg.sender, purpose)) revert WrongDigest();
+            if (A.parse(record).sighash != want) revert WrongDigest();
             revert BadSignature();
         }
         if (r.tier < requiredTier) revert TierTooLow();
@@ -121,8 +154,8 @@ contract CellRegistry {
         if (!allowedCalibration[r.calHash]) revert CalibrationNotAllowed();
 
         sg.lastCounter = r.counter;
-        allowlisted[msg.sender] = true;
-        emit Admitted(msg.sender, r.tier, r.counter);
+        allowlisted[msg.sender][purpose] = true;
+        emit Admitted(msg.sender, purpose, r.tier, r.counter);
     }
 
     // ----------------------------------------------------------------------

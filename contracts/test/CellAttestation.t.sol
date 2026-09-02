@@ -59,10 +59,13 @@ contract CellAttestationTest is Test {
     /// Flipping any byte of the body changes the digest, so the signature
     /// must stop verifying. Covers every field at once.
     function test_RejectsTamperedBody() public view {
-        for (uint256 i = 0; i < A.RECORD_LEN; i += 7) {
+        // Every byte, not every seventh. The stride skipped 6 in 7 of the
+        // body, and its guard was both dead (i is never 4 or 5 on a stride of
+        // 7) and placed AFTER the flip it was meant to skip.
+        for (uint256 i = 0; i < A.RECORD_LEN; i++) {
+            if (i < 6) continue;        // magic/version/tier revert, tested below
             bytes memory b = record;
             b[i] = bytes1(uint8(b[i]) ^ 0x01);
-            if (i < 4 || i == 4 || i == 5) continue;   // magic/version/tier revert, tested below
             (bool ok, ) = this.checkExt(b, pubkey, sighash);
             assertFalse(ok, "tampered body must not verify");
         }

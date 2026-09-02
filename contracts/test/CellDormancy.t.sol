@@ -266,9 +266,18 @@ contract CellDormancyTest is Test {
         dead.startClaim();
     }
 
-    function test_RefusesAPeriodShorterThanOneBeacon() public {
+    /// A beacon is redeemable only inside its own epoch, so an owner who
+    /// beacons in every period can still be silent for one second short of two
+    /// of them. A floor of one period fires on exactly that owner, and the
+    /// old test only ever probed EPOCH_SECONDS - 1, so it never saw it.
+    function test_RefusesAPeriodShorterThanTwoBeacons() public {
         vm.expectRevert(CellDormancy.BadConfiguration.selector);
         new CellDormancy(reg, user, HEIR, EPOCH_SECONDS - 1, CHALLENGE);
+        vm.expectRevert(CellDormancy.BadConfiguration.selector);
+        new CellDormancy(reg, user, HEIR, EPOCH_SECONDS, CHALLENGE);
+        vm.expectRevert(CellDormancy.BadConfiguration.selector);
+        new CellDormancy(reg, user, HEIR, 2 * EPOCH_SECONDS - 1, CHALLENGE);
+        new CellDormancy(reg, user, HEIR, 2 * EPOCH_SECONDS, CHALLENGE);
         vm.expectRevert(CellDormancy.BadConfiguration.selector);
         new CellDormancy(reg, user, user, DORMANCY, CHALLENGE);
         vm.expectRevert(CellDormancy.BadConfiguration.selector);

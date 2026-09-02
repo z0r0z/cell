@@ -84,6 +84,21 @@ def epoch_dates(epoch: int, period_days: int = DEFAULT_PERIOD_DAYS) -> tuple[dat
     return start, start + timedelta(days=period_days - 1)
 
 
+# keccak256("CELL/redeem-v1"). The other half of the separation above.
+# `CellRegistry.redeem` takes an ARBITRARY purpose word from its caller, so
+# without a tag of its own the caller can simply spell a beacon purpose and
+# redeem a proof of life as an allowlist entry. The tag makes the two
+# namespaces disjoint by construction rather than by convention.
+REDEEM_TAG = keccak256(b"CELL/redeem-v1")
+
+
+def redeem_purpose(word: bytes) -> bytes:
+    """keccak(abi.encode(bytes32 tag, bytes32 word)), as CellRegistry does."""
+    if len(word) != 32:
+        raise BadBeacon("a purpose word is 32 bytes")
+    return keccak256(REDEEM_TAG + word)
+
+
 def purpose(epoch: int) -> bytes:
     """keccak(abi.encode(bytes32 tag, uint256 epoch)), as the registry computes it."""
     if not 0 <= epoch <= eip712.UINT256_MAX:
@@ -107,8 +122,18 @@ class Beacon:
             raise BadBeacon(
                 "chain id 0 is every chain at once. A proof of life addressed "
                 "to every chain is redeemable on all of them.")
-        if self.period_days <= 0:
-            raise BadBeacon("a period is at least one day")
+        if self.period_days != DEFAULT_PERIOD_DAYS:
+            # The digest commits to the EPOCH and to nothing else, while the
+            # screen shows dates computed from the period. So a non-default
+            # period moves the date the owner reads without moving the number
+            # the chain checks: fifteen seconds of a fingertip under today's
+            # date, redeemable decades away. CellRegistry.EPOCH_SECONDS is a
+            # constant precisely because both sides have to already know it.
+            raise BadBeacon(
+                f"a beacon period is {DEFAULT_PERIOD_DAYS} days, fixed by "
+                f"CellRegistry.EPOCH_SECONDS. A {self.period_days}-day period "
+                f"shows the owner dates the chain does not mean, and the "
+                f"digest does not commit to it.")
         # eip712 raises its own type for a bad address. A caller holding a
         # Beacon should have one exception to catch, not two, so it is
         # re-raised rather than allowed to leak the other module's.
@@ -118,6 +143,8 @@ class Beacon:
                 eip712._address_bytes(addr)
             except eip712.BadTypedData as e:
                 raise BadBeacon(f"{role}: {e}") from None
+            if eip712._is_zero_address(addr):
+                raise BadBeacon(f"the {role} address is the zero address")
         if self.registry.lower() == self.claimant.lower():
             raise BadBeacon("the registry and the claimant are the same address")
         epoch_dates(self.epoch, self.period_days)       # refuses a negative one

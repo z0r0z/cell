@@ -59,9 +59,14 @@ contract CellDormancy {
                 uint64 _dormancyPeriod, uint64 _challengeWindow) {
         if (_owner == address(0) || _beneficiary == address(0)
             || _owner == _beneficiary) revert BadConfiguration();
-        // A dormancy period shorter than one beacon period would fire on an
-        // owner who is alive and simply between beacons.
-        if (_dormancyPeriod < _registry.EPOCH_SECONDS()) revert BadConfiguration();
+        // TWO beacon periods, not one. `heartbeat` accepts a beacon only while
+        // its epoch is the current one, so an owner who beacons in every
+        // single period can still legitimately be silent for one second short
+        // of 2 * EPOCH_SECONDS -- the first second of epoch N to the last
+        // second of epoch N+1. A one-period floor therefore fires on exactly
+        // the owner this check exists to protect: alive, compliant, and
+        // between beacons.
+        if (_dormancyPeriod < 2 * _registry.EPOCH_SECONDS()) revert BadConfiguration();
         if (_challengeWindow == 0) revert BadConfiguration();
         registry = _registry;
         owner = _owner;

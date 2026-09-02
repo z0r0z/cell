@@ -218,7 +218,17 @@ class Provisioning:
         # And the xpub filed under our fingerprint has to be one this seed
         # actually produced. Otherwise a coordinator could register a quorum
         # that merely claims to include us.
-        want = {a.xpub for a in self.accounts if a.network == ms.network}
+        # Compared on the key material, not on the string. xpub, zpub and
+        # tpub are three spellings of the same extended key, differing only in
+        # four version bytes that say which script type and network a wallet
+        # meant -- so a coordinator that hands back a different spelling of
+        # OUR OWN key is not quoting a key we do not derive.
+        def _material(x: str):
+            n = ExtendedKey.deserialize(x)
+            return (n.chain_code, n.pubkey)
+
+        want = {_material(a.xpub)
+                for a in self.accounts if a.network == ms.network}
         if not want:
             # The commonest way to land here is a forgotten --network, not a
             # bad xpub. Saying "this seed does not derive that xpub" sends
@@ -229,7 +239,13 @@ class Provisioning:
                 f"{', '.join(sorted({a.network for a in self.accounts})) or 'nothing'}. "
                 f"Register the quorum on the network this device is on.")
         for c in ours:
-            if c.xpub not in want:
+            try:
+                got = _material(c.xpub)
+            except ValueError as e:
+                raise WalletError(
+                    f"the co-signer entry for this device does not carry a "
+                    f"readable extended key ({e})") from None
+            if got not in want:
                 raise WalletError(
                     f"the co-signer entry for this device quotes an xpub this "
                     f"seed does not derive at {c.path} on {ms.network}. Take "
@@ -305,6 +321,12 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
     decoy = decoy or duress.decoy_mnemonic()
     pair = duress.wrap_pair(mnemonic, decoy, key, duress_key)
 
+    # A device provisioned for testnet must not hand out mainnet-flavoured
+    # keys. A coordinator reads the version bytes, returns the tpub it built
+    # the descriptor from, and register_multisig's string comparison then said
+    # "this seed does not derive that xpub" about a key that was correct all
+    # along.
+    pfx = "tpub" if COIN[network] == 1 else "xpub"
     accounts = []
     for st in MULTISIG_SCRIPT:
         # Derived at provisioning whether or not a quorum is ever registered.
@@ -313,13 +335,13 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
         # design that punishes doing multisig properly.
         path = multisig_account_path(st, 0, network)
         accounts.append(Account(script_type=st, path=path,
-                                xpub=root.derive(path).neutered().serialize("xpub"),
+                                xpub=root.derive(path).neutered().serialize(pfx),
                                 network=network))
     for st in script_types:
         path = account_path(st, 0, network)
         node = root.derive(path)
         accounts.append(Account(script_type=st, path=path,
-                                xpub=node.neutered().serialize("xpub"),
+                                xpub=node.neutered().serialize(pfx),
                                 network=network))
     accounts.append(Account(script_type="eth", path=f"m/44h/{ETH_COIN}h/0h",
                             xpub=root.derive(f"m/44h/{ETH_COIN}h/0h")
@@ -333,7 +355,7 @@ def provision(mnemonic: str, se: SecureElement, pin: str,
     decoy_accounts = [
         Account(script_type=a.script_type, path=a.path,
                 xpub=decoy_root.derive(a.path).neutered().serialize(
-                    "xpub" if a.network != "ethereum" else "xpub"),
+                    pfx if a.network != "ethereum" else "xpub"),
                 network=a.network)
         for a in accounts]
     return Provisioning(seed_pair=pair, accounts=accounts,
@@ -419,6 +441,19 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
                 "the unwrapped seed does not match this device's recorded "
                 "master fingerprint; refusing to sign with an unexpected key")
         fresh = [p._input_info(i, root) for i in range(len(p.tx.vin))]
+        # And the inputs it signs have to be the inputs it showed. Everything
+        # above ran against `watch`, an _AccountRoot that refuses any path
+        # outside a provisioned account on this network; `root` is the real
+        # master and derives ANYTHING. So the unwrap can find inputs the
+        # summary counted as foreign -- including one at the Ethereum account
+        # path -- and sign them under a digest the attestation does not cover.
+        # `bound != digest` above cannot see it: both sides of that comparison
+        # were computed before the seed opened.
+        if p.signing_digest(fresh) != digest:
+            raise WalletError(
+                "the unwrapped seed signs a different set of inputs than the "
+                "summary the owner approved and the attestation is bound to; "
+                "refusing to sign")
         n = p.sign(root, fresh)
         if n == 0:
             raise WalletError("no input could be signed after unlocking")
@@ -429,7 +464,17 @@ def sign_psbt(blob: bytes, prov: Provisioning, se: SecureElement,
                          bytes([psbtmod.IN_TAP_KEY_SIG])))
 
     def unwrap_seed(key: bytes) -> bytearray:
-        return duress.unwrap_any(prov.seed_pair, key)
+        try:
+            return duress.unwrap_any(prov.seed_pair, key)
+        except (duress.NoBlobOpened, seedstore.SeedStoreError) as e:
+            # Neither derives from ValueError, so both used to travel all the
+            # way up to app.main's catch-all and paint a Python class name at
+            # somebody holding a lancet. The owner needs to know it is not
+            # their words.
+            raise WalletError(
+                f"the seed store did not open with the key this PIN derives "
+                f"({e}). Nothing is wrong with your recovery words; the store "
+                f"on this card and the chip in this device disagree.") from None
 
     s = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
                       confirm=confirm, run_gate=run_gate,
@@ -641,7 +686,17 @@ def _sign_typed(op, digest: bytes, prov: Provisioning, se: SecureElement,
         return r.to_bytes(32, "big") + s_.to_bytes(32, "big") + bytes([y])
 
     def unwrap_seed(key: bytes) -> bytearray:
-        return duress.unwrap_any(prov.seed_pair, key)
+        try:
+            return duress.unwrap_any(prov.seed_pair, key)
+        except (duress.NoBlobOpened, seedstore.SeedStoreError) as e:
+            # Neither derives from ValueError, so both used to travel all the
+            # way up to app.main's catch-all and paint a Python class name at
+            # somebody holding a lancet. The owner needs to know it is not
+            # their words.
+            raise WalletError(
+                f"the seed store did not open with the key this PIN derives "
+                f"({e}). Nothing is wrong with your recovery words; the store "
+                f"on this card and the chip in this device disagree.") from None
 
     sg = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
                        confirm=confirm, run_gate=run_gate,
@@ -673,7 +728,6 @@ class SignedBeacon:
 def sign_beacon(registry: str, claimant: str, chain_id: int, epoch: int,
                 prov: Provisioning, se: SecureElement, pol: Policy,
                 fw_hash: bytes, cal_hash: bytes, confirm, run_gate, pin: str,
-                period_days: int = beacon.DEFAULT_PERIOD_DAYS,
                 requested_tier: Tier | None = None,
                 read_chamber=None) -> SignedBeacon:
     """Attest that a living human was here, in this period.
@@ -689,9 +743,10 @@ def sign_beacon(registry: str, claimant: str, chain_id: int, epoch: int,
             f"chain {chain_id} is not registered on this device, so the "
             f"confirmation screen could not name the network. Register it "
             f"before asking for a beacon on it.")
+    # The period is not a parameter. It is CellRegistry.EPOCH_SECONDS, which
+    # the digest does not commit to -- see beacon.Beacon.check.
     b = beacon.Beacon(registry=registry, claimant=claimant, chain_id=chain_id,
-                      chain_name=eth.CHAINS[chain_id][0], epoch=epoch,
-                      period_days=period_days)
+                      chain_name=eth.CHAINS[chain_id][0], epoch=epoch)
     try:
         digest = b.digest()
     except beacon.BadBeacon as e:
@@ -757,11 +812,27 @@ def sign_delegation(label: str, account_address: str, nonce: int,
     implementation is looked up by label for the same reason the account is:
     the authorisation commits to an address and to nothing whatever about what
     that address contains, so the only check available is one made in advance.
+
+    THE AUTHORITY COMES FROM THE REGISTRATION, NOT FROM THE PAYLOAD. An
+    EIP-7702 digest is `keccak(0x05 || rlp([chain_id, implementation, nonce]))`
+    and cannot commit to the address being delegated -- the authority is
+    whoever signs. So a caller that could name any `account_address` would be
+    naming a screen, not a fact: the owner would read an address they do not
+    recognise, approve it at blood tier, and delegate their OWN address to that
+    code. It is checked against the registered account for the same reason
+    eip712.py records `verifyingContract` rather than accepting it.
     """
     acct = eip712.account(label)
+    if account_address.lower() != acct.address.lower():
+        raise WalletError(
+            f"account {label!r} is registered at {acct.address}, and the "
+            f"request asked to delegate {account_address}. A 7702 signature "
+            f"does not commit to the address it delegates, so this device "
+            f"only delegates one it was told about in advance.")
     op = ops.Delegation(
-        account_address=account_address, implementation=acct.implementation,
-        implementation_label=acct.label, chain_id=acct.chain_id,
+        account_address=acct.address, implementation=acct.implementation,
+        implementation_label=acct.implementation_label,
+        chain_id=acct.chain_id,
         chain_name=eth.CHAINS[acct.chain_id][0], nonce=nonce)
     digest = eip712.delegation_digest(acct.chain_id, acct.implementation, nonce)
     return _sign_typed(op, digest, prov, se, pol, fw_hash, cal_hash,
@@ -825,7 +896,17 @@ def sign_eth(tx: eth.EthTransaction, prov: Provisioning, se: SecureElement,
         return r.to_bytes(32, "big") + s_.to_bytes(32, "big") + bytes([y])
 
     def unwrap_seed(key: bytes) -> bytearray:
-        return duress.unwrap_any(prov.seed_pair, key)
+        try:
+            return duress.unwrap_any(prov.seed_pair, key)
+        except (duress.NoBlobOpened, seedstore.SeedStoreError) as e:
+            # Neither derives from ValueError, so both used to travel all the
+            # way up to app.main's catch-all and paint a Python class name at
+            # somebody holding a lancet. The owner needs to know it is not
+            # their words.
+            raise WalletError(
+                f"the seed store did not open with the key this PIN derives "
+                f"({e}). Nothing is wrong with your recovery words; the store "
+                f"on this card and the chip in this device disagree.") from None
 
     s = signer.Signer(se=se, pol=pol, fw_hash=fw_hash, cal_hash=cal_hash,
                       confirm=confirm, run_gate=run_gate,

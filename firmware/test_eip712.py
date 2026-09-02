@@ -83,8 +83,8 @@ def published_vectors() -> bool:
 
 def account() -> SmartAccount:
     return SmartAccount(label="treasury", address=ACCOUNT, chain_id=1,
-                        implementation=IMPL, threshold=2,
-                        owners=(COW, BOB, IMPL))
+                        implementation=IMPL, implementation_label="Multisig v1",
+                        threshold=2, owners=(COW, BOB, IMPL))
 
 
 def struct_layout() -> bool:
@@ -442,7 +442,7 @@ def end_to_end() -> bool:
         "treasury", BOB, 10**18, 7, prov, se, pol_mod.Policy(), fw, cal,
         confirm, gate_ok, PIN)
     deleg = wallet.sign_delegation(
-        "treasury", COW, 3, prov, se, pol_mod.Policy(), fw, cal,
+        "treasury", ACCOUNT, 3, prov, se, pol_mod.Policy(), fw, cal,
         confirm, gate_ok, PIN)
 
     def refused(fn):
@@ -470,6 +470,17 @@ def end_to_end() -> bool:
         ("the delegation digest is the EIP-7702 one",
          deleg.digest == "0x" + eip712.delegation_digest(
              1, IMPL, 3).hex()),
+        # A 7702 digest commits to the implementation and the nonce and NOT to
+        # the address being delegated -- the authority is whoever signs. So an
+        # account address taken from the payload would be a screen, not a
+        # fact: the owner reads an address they do not recognise, approves it
+        # at blood tier, and delegates their own.
+        ("a delegation for an address the device was not told about is refused",
+         refused(lambda: wallet.sign_delegation(
+             "treasury", COW, 3, prov, se, pol_mod.Policy(), fw, cal,
+             confirm, gate_ok, PIN))),
+        ("the screen names the implementation, not the account",
+         any("Multisig v1" in ln for ln in deleg.display)),
         ("an unregistered account cannot be spent from",
          refused(lambda: wallet.sign_account_execute(
              "nope", BOB, 1, 0, prov, se, pol_mod.Policy(), fw, cal,

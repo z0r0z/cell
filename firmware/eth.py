@@ -154,24 +154,55 @@ def rlp_decode(data: bytes):
 
 
 def _rlp_decode_one(d: bytes):
+    """One RLP item, strictly.
+
+    Every length is checked against what is actually there, and both
+    non-canonical forms are refused. Python slicing truncates silently, so
+    `0x8203` -- a string declaring two bytes and carrying one -- used to decode
+    to a one-byte string with no complaint, and `0x8100` decoded a value whose
+    canonical spelling is `0x00`. A round-trip proof against a decoder that
+    accepts more than the encoder emits proves less than it looks like.
+    """
     if not d:
         raise BadEthTransaction("RLP input is empty")
+
+    def _need(n: int, what: str) -> None:
+        if len(d) < n:
+            raise BadEthTransaction(f"RLP {what} is truncated: needs {n} "
+                                    f"bytes, has {len(d)}")
+
+    def _length(ln: int, what: str) -> int:
+        _need(1 + ln, f"{what} length")
+        if d[1] == 0:
+            raise BadEthTransaction(f"non-canonical RLP {what} length")
+        n = int.from_bytes(d[1:1 + ln], "big")
+        if n < 56:
+            raise BadEthTransaction(
+                f"non-canonical RLP {what}: {n} bytes belongs in the short form")
+        return n
+
     p = d[0]
     if p < 0x80:
         return d[:1], d[1:]
     if p < 0xB8:
         n = p - 0x80
+        _need(1 + n, "string")
+        if n == 1 and d[1] < 0x80:
+            raise BadEthTransaction("non-canonical single-byte RLP string")
         return d[1:1 + n], d[1 + n:]
     if p < 0xC0:
         ln = p - 0xB7
-        n = int.from_bytes(d[1:1 + ln], "big")
+        n = _length(ln, "string")
+        _need(1 + ln + n, "string")
         return d[1 + ln:1 + ln + n], d[1 + ln + n:]
     if p < 0xF8:
         n = p - 0xC0
+        _need(1 + n, "list")
         body, rest = d[1:1 + n], d[1 + n:]
     else:
         ln = p - 0xF7
-        n = int.from_bytes(d[1:1 + ln], "big")
+        n = _length(ln, "list")
+        _need(1 + ln + n, "list")
         body, rest = d[1 + ln:1 + ln + n], d[1 + ln + n:]
     items = []
     while body:
@@ -204,6 +235,13 @@ class EthTransaction:
     data: bytes = b""
 
     def __post_init__(self):
+        # bool before the membership test. `True in CHAINS` matches chain 1,
+        # so EthTransaction(chain_id=True, ...) constructed and chain_name()
+        # answered "Ethereum". It failed closed later, at sighash(), with
+        # "RLP has no boolean type" -- a message about an encoder, for a
+        # request that was wrong about which network it was for.
+        if isinstance(self.chain_id, bool):
+            raise BadEthTransaction("chain id must be an integer, not a bool")
         if self.chain_id not in CHAINS:
             raise BadEthTransaction(
                 f"chain id {self.chain_id} is not one this device recognises. "
@@ -213,7 +251,7 @@ class EthTransaction:
         for name in ("nonce", "max_priority_fee_per_gas", "max_fee_per_gas",
                      "gas_limit", "value"):
             v = getattr(self, name)
-            if not isinstance(v, int) or v < 0:
+            if not isinstance(v, int) or isinstance(v, bool) or v < 0:
                 raise BadEthTransaction(f"{name} must be a non-negative integer")
         if self.max_priority_fee_per_gas > self.max_fee_per_gas:
             raise BadEthTransaction("priority fee exceeds the max fee per gas")

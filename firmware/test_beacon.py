@@ -29,6 +29,7 @@ import pathlib
 import sys
 from datetime import date
 
+import attest
 import beacon
 import ops
 import policy
@@ -77,8 +78,20 @@ def against_the_contract() -> bool:
          "0x" + b.digest().hex() == v["beaconDigest"]),
         ("the period length matches EPOCH_SECONDS",
          beacon.DEFAULT_PERIOD_DAYS * 86400 == v["beaconEpochSeconds"]),
+        # v["purpose"] is a purpose WORD, not a digest. Comparing a digest
+        # against it is true by construction and can never fail, which is how
+        # this check passed while the registry admitted a beacon as an
+        # allowlist entry. The allowlist digest is the sighash of the record
+        # the registry vectors carry for it.
         ("a beacon digest is not the allowlist digest",
-         "0x" + b.digest().hex() != v.get("purpose")),
+         b.digest() != attest.Attestation.unpack(
+             bytes.fromhex(v["record"][2:])).sighash),
+        # And the other direction, which is the one that was broken: the
+        # registry must not compute the beacon digest for any purpose word a
+        # caller can hand redeem(). CellRegistry.redeemPurpose tags it.
+        ("an allowlist purpose cannot be spelled as a beacon purpose",
+         beacon.redeem_purpose(beacon.purpose(v["beaconEpoch"]))
+         != beacon.purpose(v["beaconEpoch"])),
     ])
 
 

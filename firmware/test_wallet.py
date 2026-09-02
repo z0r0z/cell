@@ -32,6 +32,7 @@ import eth
 import ops
 import psbt as psbtmod
 import secp256k1 as ec
+import seedstore
 import signer
 import tx as txmod
 import wallet
@@ -155,6 +156,51 @@ def build_psbt(root: ExtendedKey, script_type: str, *,
     return p.serialize()
 
 
+
+
+def _psbt_with_stranger_input(root: ExtendedKey, other_account: str) -> bytes:
+    """Two inputs: one at a provisioned path, one at `other_account`.
+
+    The second is derived from the SAME seed, so the master derives a key for
+    it and the watch root does not. That is the whole gap: `summarize` counts
+    one signable input, the attestation binds a digest computed as if the
+    second were foreign, and the master signs both.
+    """
+    acct = root.derive(wallet.account_path("p2wpkh"))
+    stranger = root.derive(other_account)
+    fp = root.fingerprint()
+    nodes = [(acct.derive([0, 0]), bip32.parse_path(
+                  wallet.account_path("p2wpkh")) + [0, 0]),
+             (stranger.derive([0, 0]), bip32.parse_path(other_account) + [0, 0])]
+
+    parents, vin = [], []
+    for n, (node, _path) in enumerate(nodes):
+        parent = Transaction(2, [TxIn(bytes([0x11 + n]) * 32, 0)],
+                             [TxOut(200_000, addresses.p2wpkh_script(node.pubkey))], 0)
+        parents.append(parent)
+        vin.append(TxIn(parent.txid(), 0))
+
+    ch = acct.derive([1, 0])
+    unsigned = Transaction(
+        2, vin,
+        [TxOut(300_000, addresses.address_to_script(
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")),
+         TxOut(90_000, addresses.p2wpkh_script(ch.pubkey))], 0)
+    p = PSBT(unsigned)
+    p.globals[_kv(psbtmod.GLOBAL_UNSIGNED_TX)] = unsigned.serialize(witness=False)
+    for n, ((node, path), parent) in enumerate(zip(nodes, parents)):
+        m = p.inputs[n]
+        m[_kv(psbtmod.IN_NON_WITNESS_UTXO)] = parent.serialize()
+        m[_kv(psbtmod.IN_WITNESS_UTXO)] = (
+            (200_000).to_bytes(8, "little")
+            + ser_compact(len(parent.vout[0].script_pubkey))
+            + parent.vout[0].script_pubkey)
+        m[_kv(psbtmod.IN_BIP32_DERIVATION, node.pubkey)] = (
+            fp + b"".join(i.to_bytes(4, "little") for i in path))
+    cpath = bip32.parse_path(wallet.account_path("p2wpkh")) + [1, 0]
+    p.outputs[1][_kv(psbtmod.OUT_BIP32_DERIVATION, ch.pubkey)] = (
+        fp + b"".join(i.to_bytes(4, "little") for i in cpath))
+    return p.serialize()
 
 
 def to_v2(blob: bytes) -> bytes:
@@ -773,6 +819,18 @@ def main() -> int:
     refuses("refuses a PSBT holding none of our keys",
             lambda: run_psbt(foreign, se, prov), wallet.WalletError)
 
+    # Everything before the unwrap runs against a watch root that refuses any
+    # path outside a provisioned account. The unwrapped master derives
+    # ANYTHING. So an input at a path this device never provisioned -- an
+    # unprovisioned account, or the Ethereum account key -- was foreign to the
+    # summary, the screen and the attestation, and ours to the signer.
+    for label, other in (("an unprovisioned account", "m/84h/0h/9h"),
+                         ("the ethereum account key", "m/44h/60h/0h")):
+        refuses(f"refuses to sign an input at {label}",
+                lambda o=other: run_psbt(_psbt_with_stranger_input(root, o),
+                                         se, prov),
+                wallet.WalletError)
+
     # ---- FOOTGUN: malformed input -------------------------------------
     print("\n footgun: malformed and hostile encodings")
     good = build_psbt(root, "p2wpkh")
@@ -964,11 +1022,19 @@ def main() -> int:
             secondary=_flip(prov.seed_pair.secondary)),
         accounts=prov.accounts,
         master_fingerprint=prov.master_fingerprint)
+    # Named types, not a bare Exception. `refuses` passes on ANYTHING raised,
+    # so an AttributeError or a TypeError from a future refactor would have
+    # read PASS for "the tamper was detected". These now have to fail the way
+    # the device is supposed to fail: the seed store refusing to open, which
+    # wallet.py turns into a WalletError with an answer on it.
     refuses("a tampered seed blob is detected, not decrypted",
             lambda: run_psbt(good, SoftSE(pin=PIN), bad_prov),
-            Exception)
+            wallet.WalletError, duress_mod.NoBlobOpened,
+            seedstore.SeedStoreError)
     refuses("another device's chip cannot open our blob",
-            lambda: run_psbt(good, SoftSE(pin=PIN), prov), Exception)
+            lambda: run_psbt(good, SoftSE(pin=PIN), prov),
+            wallet.WalletError, duress_mod.NoBlobOpened,
+            seedstore.SeedStoreError)
 
     # ---- Ethereum -----------------------------------------------------
     print("\n ethereum")

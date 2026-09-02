@@ -40,6 +40,21 @@ def action_digest(reg: str, claimant: str, purpose: str) -> bytes:
     return bytes.fromhex(cast("keccak", enc)[2:])
 
 
+def redeem_purpose(purpose: str) -> str:
+    """CellRegistry.redeemPurpose, through `cast`, cross-checked against beacon.py.
+
+    An allowlist purpose is chosen by whoever calls redeem(), so it has to be
+    tagged or a caller can simply spell a beacon purpose and redeem a proof of
+    life as an allowlist entry.
+    """
+    enc = cast("abi-encode", "f(bytes32,bytes32)",
+               "0x" + beacon_mod.REDEEM_TAG.hex(), purpose)
+    out = cast("keccak", enc)
+    assert out == "0x" + beacon_mod.redeem_purpose(
+        bytes.fromhex(purpose[2:])).hex(), "redeemPurpose disagrees with cast"
+    return out
+
+
 def main() -> int:
     reg = registry_address()
     purpose = "0x" + hashlib.sha256(b"cell-allowlist-round-1").hexdigest()
@@ -51,8 +66,9 @@ def main() -> int:
     live = hashlib.sha256(b"gate-measurements").digest()
     sign = lambda m: attest.schnorr_sign(m, sk)
 
-    d_user = action_digest(reg, USER, purpose)
-    d_other = action_digest(reg, OTHER, purpose)
+    tagged = redeem_purpose(purpose)
+    d_user = action_digest(reg, USER, tagged)
+    d_other = action_digest(reg, OTHER, tagged)
 
     def rec(tier, counter, digest):
         a = attest.attest(tier, counter, digest, fw, cal, live, sign, pk)
@@ -99,6 +115,8 @@ def main() -> int:
         "registry":            reg,
         "user":                USER,
         "purpose":             purpose,
+        "redeemPurpose":       tagged,
+        "redeemTag":           "0x" + beacon_mod.REDEEM_TAG.hex(),
         "pubkey":              "0x" + pk.hex(),
         "fwHash":              "0x" + fw.hex(),
         "calHash":             "0x" + cal.hex(),

@@ -39,6 +39,7 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import date, timedelta
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "firmware"))
@@ -223,7 +224,12 @@ def main() -> int:
         print("the period, computed on both sides of the airgap:")
         ts = chain.timestamp()
         theirs = epoch_now()
-        ours = ts // (beacon_mod.DEFAULT_PERIOD_DAYS * 86400)
+        # beacon.epoch_of, not a reimplementation of the Solidity formula in
+        # Python. The point of this check is that the function the DEVICE uses
+        # agrees with the chain; comparing the chain against a fresh transcript
+        # of the chain's own arithmetic proves nothing about the device.
+        ours = beacon_mod.epoch_of(
+            date(1970, 1, 1) + timedelta(days=ts // 86400))
         passed &= ok("the chain's period is the one beacon.py computes",
                      theirs == ours, f"epoch {theirs}")
         start, end = beacon_mod.epoch_dates(theirs)
@@ -247,6 +253,14 @@ def main() -> int:
                          DEVICE_KEY, reg, "heartbeat(bytes,uint64)",
                          _allowlist_record(reg, chain_id, pub, counter),
                          str(theirs)))
+        # And the direction that was open: redeem() takes an arbitrary purpose
+        # word, so a caller could spell a beacon purpose and cash a
+        # fifteen-second proof of life as a blood-tier allowlist entry.
+        passed &= ok("and a beacon is refused as an allowlist entry",
+                     "WrongDigest" in chain.send_expect_revert(
+                         DEVICE_KEY, reg, "redeem(bytes,bytes32)",
+                         beacon_for(theirs),
+                         "0x" + beacon_mod.purpose(theirs).hex()))
         print()
 
         # ---- the switch --------------------------------------------------
@@ -315,7 +329,9 @@ def _allowlist_record(reg: str, chain_id: int, pub: bytes, counter) -> str:
 
     from hashes import keccak256
     import eip712
-    purpose = hashlib.sha256(b"cell-allowlist").digest()
+    # Tagged the way CellRegistry.redeemPurpose tags it, so this record is
+    # bound to the allowlist namespace and to nothing in the beacon one.
+    purpose = beacon_mod.redeem_purpose(hashlib.sha256(b"cell-allowlist").digest())
     digest = keccak256(eip712._word(chain_id)
                        + eip712._address_word(reg)
                        + eip712._address_word(DEVICE)

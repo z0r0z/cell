@@ -99,6 +99,16 @@ def _address_word(addr: str) -> bytes:
     return b"\x00" * 12 + _address_bytes(addr)
 
 
+def _is_zero_address(addr: str) -> bool:
+    """True for the zero address, however it was spelled.
+
+    `_address_bytes` accepts an address with or without the 0x, so a guard that
+    compares against the prefixed string alone lets the unprefixed spelling of
+    the same twenty zero bytes straight through.
+    """
+    return int(addr.removeprefix("0x"), 16) == 0
+
+
 def _address_bytes(addr: str) -> bytes:
     if not isinstance(addr, str):
         raise BadTypedData(f"address must be a string, got {type(addr).__name__}")
@@ -174,6 +184,11 @@ class SmartAccount:
     address: str                    # the account itself, EIP-55
     chain_id: int
     implementation: str             # the code the account runs, EIP-55
+    # What to call that code on the delegation screen. Empty until the owner
+    # records one, and ops.Delegation refuses to render without it: the
+    # account's own label is a name for the account, not for the code it is
+    # about to start running.
+    implementation_label: str = ""
     threshold: int = 1
     owners: tuple[str, ...] = ()
     domain_name: str = "Multisig"
@@ -185,12 +200,16 @@ class SmartAccount:
     delegated_eoa: bool = False
 
     def check(self) -> None:
-        if not self.label or len(self.label) > 16:
-            raise BadTypedData("an account label is 1 to 16 characters")
-        if any(c < " " or c == "\x7f" or not c.isprintable() for c in self.label):
-            raise BadTypedData(
-                f"account label {self.label!r} carries a character the display "
-                f"cannot render as one column")
+        for role, text in (("account", self.label),
+                           ("implementation", self.implementation_label)):
+            if role == "implementation" and not text:
+                continue                # optional; the delegation screen asks
+            if not text or len(text) > 16:
+                raise BadTypedData(f"an {role} label is 1 to 16 characters")
+            if any(c < " " or c == "\x7f" or not c.isprintable() for c in text):
+                raise BadTypedData(
+                    f"{role} label {text!r} carries a character the display "
+                    f"cannot render as one column")
         if self.chain_id <= 0:
             raise BadTypedData(
                 "chain id 0 is every chain at once. Register the one you mean.")
@@ -202,7 +221,7 @@ class SmartAccount:
         for role, addr in (("account", self.address),
                            ("implementation", self.implementation)):
             _address_bytes(addr)
-            if addr.lower() == ZERO_ADDRESS:
+            if _is_zero_address(addr):
                 raise BadTypedData(f"the {role} address is the zero address")
         if self.address.lower() == self.implementation.lower():
             raise BadTypedData(
@@ -229,6 +248,11 @@ class SmartAccount:
                 "refusing a call from the account to itself. That is how the "
                 "account's own configuration is changed, and it travels as "
                 "calldata this device cannot render.")
+        if _is_zero_address(target):
+            # eth.EthTransaction refuses this outright. A burn addressed
+            # through a smart account is the same irreversible mistake, and
+            # the owner has no way to read it off a screen of hex zeros.
+            raise BadTypedData("refusing to send to the zero address")
         return digest(self.separator(),
                       execute_struct_hash(target, value, b"", nonce))
 

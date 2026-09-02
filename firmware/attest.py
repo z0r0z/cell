@@ -251,7 +251,12 @@ def verify_blob(blob: bytes, expect_pub: bytes, expect_sighash: bytes,
 
 
 def verify(a: Attestation, expect_pub: bytes, expect_sighash: bytes,
-           min_counter: int = -1,
+           # 0, not -1, and it matches the chain. CellRegistry.register writes
+           # lastCounter = 0 and every redeem requires counter > lastCounter,
+           # so a counter-0 record is unusable on chain. Accepting one here
+           # meant a device whose monotonic counter starts at 0 passed every
+           # off-chain check and was rejected on its first submission.
+           min_counter: int = 0,
            allowed_fw: Optional[Iterable[bytes]] = None,
            require: Tier = Tier.BLOOD,
            allowed_cal: Optional[Iterable[bytes]] = None) -> Verdict:
@@ -298,7 +303,7 @@ def verify_quorum(attestations: dict[str, Attestation],
         if a is None:
             out[name] = Verdict(False, "no attestation provided")
             continue
-        out[name] = verify(a, pub, sighash, last.get(name, -1), allowed_fw,
+        out[name] = verify(a, pub, sighash, last.get(name, 0), allowed_fw,
                            require, allowed_cal)
     return all(v.ok for v in out.values()), out
 
