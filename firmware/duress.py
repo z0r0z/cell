@@ -184,7 +184,13 @@ def unwrap_any(pair: SeedPair, key: bytes) -> bytearray:
             found = seed
         else:
             # Two blobs under one key means the pair was built wrong. Refuse
-            # rather than pick, because picking would be silently arbitrary.
+            # rather than pick, because picking would be silently arbitrary --
+            # and wipe both decrypted buffers on the way out, because this is
+            # the one exit from this function that used to leave a plaintext
+            # seed in a bytearray nobody had a reference to any more.
+            for buf in (found, seed):
+                for i in range(len(buf)):
+                    buf[i] = 0
             raise NoBlobOpened("both blobs opened under one key")
     if found is None:
         raise NoBlobOpened("no seed blob opened")

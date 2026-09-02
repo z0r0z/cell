@@ -636,8 +636,14 @@ class PSBT:
                 f"and cannot tell your quorum from someone else's. Move the "
                 f"wallet to a segwit descriptor.")
 
-        info.witness_script = witness_script
-        if witness_script:
+        # Only where a witness script is actually consulted. BIP-174 lets a
+        # coordinator carry fields a particular signer does not need, so a
+        # stray PSBT_IN_WITNESS_SCRIPT on a p2wpkh input is legal noise --
+        # and demanding it be a bare m-of-n turned that noise into a refusal
+        # of the whole transaction.
+        if info.kind in ("p2wsh", "p2sh-p2wsh"):
+            info.witness_script = witness_script
+        if info.witness_script:
             info.quorum_needed, info.quorum_size = _parse_multisig(witness_script)
             if not info.quorum_needed:
                 raise BadPSBT(
@@ -675,6 +681,23 @@ class PSBT:
         # Which keys here are ours — rederived, not asserted.
         if root is not None:
             info.ours = self._our_keys(m, root, taproot=info.kind == "p2tr")
+            if info.kind == "p2tr" and info.ours:
+                # Decided HERE, not in sign(). A key of ours that tweaks to a
+                # different output than the one being spent is a script-path
+                # spend this device cannot render, and the host chooses the
+                # PSBT_IN_TAP_BIP32_DERIVATION entries entirely. Refusing it
+                # inside sign() meant refusing after CONFIRM, the PIN, the
+                # gate and the unwrap — after the owner had already bled for
+                # a transaction that was never going to be signed.
+                kept = [(kb, path) for kb, path in info.ours
+                        if addresses.p2tr_script(
+                            ec.taproot_tweak_pubkey(kb)[0]) == info.script_pubkey]
+                if not kept:
+                    raise BadPSBT(
+                        f"input {i}: our key tweaks to a different taproot "
+                        f"output than the one being spent; this device cannot "
+                        f"render a script-path spend")
+                info.ours = kept
         return info
 
     def _our_keys(self, m: KVMap, root: ExtendedKey,
@@ -928,6 +951,14 @@ class PSBT:
         declared = _get(self.inputs[i], IN_SIGHASH_TYPE)
         if declared is None:
             return txmod.SIGHASH_DEFAULT if info.kind == "p2tr" else txmod.SIGHASH_ALL
+        if len(declared) != 4:
+            # BIP-174 defines the value as a 32-bit little-endian integer.
+            # Reading any width lets a PSBT that Core rejects at decode be one
+            # this device signs, which is the same class of defect as the
+            # proprietary key below.
+            raise BadPSBT(
+                f"input {i}: PSBT_IN_SIGHASH_TYPE is {len(declared)} bytes; "
+                f"BIP-174 defines it as four")
         want = int.from_bytes(declared, "little")
         allowed = (txmod.SIGHASH_DEFAULT, txmod.SIGHASH_ALL) \
             if info.kind == "p2tr" else (txmod.SIGHASH_ALL,)

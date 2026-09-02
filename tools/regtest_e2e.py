@@ -313,9 +313,16 @@ def run_cases(core: "Core", datadir: Path) -> int:
             fund_txid = core("sendtoaddress", our_addr, "0.01", wallet_name="core")
             core("generatetoaddress", 1, addr)
             raw = core("getrawtransaction", fund_txid, 2)
-            vout = next(v["n"] for v in raw["vout"]
-                        if v["scriptPubKey"]["hex"] == spend_info["spk"].hex())
-            check("Core paid the address we derived", True)
+            # `next(..., None)` and then the check. With a bare `next()` the
+            # StopIteration escaped into the outer handler and was reported
+            # under a different label, so this line was a literal True that
+            # only ever ran once the thing it claims to check had happened.
+            vout = next((v["n"] for v in raw["vout"]
+                         if v["scriptPubKey"]["hex"] == spend_info["spk"].hex()),
+                        None)
+            check("Core paid the address we derived", vout is not None)
+            if vout is None:
+                raise Failed("Core funded an output we do not recognise")
 
             utxo = {"txid": fund_txid, "vout": vout, "amount": 1_000_000,
                     "parent_hex": core("getrawtransaction", fund_txid)}

@@ -302,6 +302,12 @@ class Signer:
         # mutation, the other stops it mattering.
         sighash = bytes(req.sighash)
         operation = req.operation
+        # And needs_seed, for the same reason and at the same moment. It is
+        # read at step 7, after CONFIRM and after the gate, and it decides
+        # whether the seed is unwrapped at all -- so a request that flipped it
+        # False -> True in between would open the seed for an operation this
+        # module promises never opens it for (beacon.py leans on exactly that).
+        needs_seed = bool(req.needs_seed)
 
         # 2. The DEVICE picks the tier. The operation never gets a say; the
         #    owner may only escalate.
@@ -376,7 +382,7 @@ class Signer:
                     "Refused: the optical chamber did not answer as enrolled. "
                     f"Restore from your recovery words on a new build. ({e})"
                 ) from None
-        if req.needs_seed:
+        if needs_seed:
             key = self.se.kdf(unwrap_context(pin, chamber))
             seed = self._unwrap_seed(key)
 

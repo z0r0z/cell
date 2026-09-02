@@ -148,11 +148,17 @@ def run() -> int:
     check("different transaction -> SAME wrapping key",
           log["unwrap_key"] == log3["unwrap_key"])
 
-    # ...and inert without the PIN or without this chip.
-    s6, log6 = make(se=SoftSE(pin="654321"))
+    # ...and inert without the PIN or without this chip. The SAME chip, so
+    # what changes is the PIN and only the PIN: a fresh SoftSE would carry a
+    # fresh device secret too, and the check could not tell which of the two
+    # contributed -- which is what the check below it already measures.
+    fixed = b"\x5c" * 32                       # one device secret, two PINs
+    s6, log6 = make(se=SoftSE(pin=PIN, duress_pin="654321", secret=fixed))
     s6.authorize_and_sign(SignRequest(spend, SIGHASH), "654321")
+    s6b, log6b = make(se=SoftSE(pin=PIN, duress_pin="654321", secret=fixed))
+    s6b.authorize_and_sign(SignRequest(spend, SIGHASH), PIN)
     check("different PIN -> different wrapping key",
-          log["unwrap_key"] != log6["unwrap_key"])
+          log6["unwrap_key"] != log6b["unwrap_key"])
 
     s7, log7 = make()                               # fresh SoftSE secret
     s7.authorize_and_sign(SignRequest(spend, SIGHASH), PIN)
@@ -520,6 +526,27 @@ def run() -> int:
     res_nb = s_nb.authorize_and_sign(beaconish, PIN)
     check("an operation that signs nothing still attests to what was shown",
           res_nb.attestation.sighash == SIGHASH)
+
+    # And the same swap on needs_seed itself. It is read at step 7, after the
+    # gate, and it decides whether the seed is unwrapped AT ALL -- so flipping
+    # it False -> True mid-flight would open the seed for the one operation
+    # this module promises never opens it (beacon.py rests on that promise).
+    flipper = _Swappable(spend, SIGHASH, needs_seed=False)
+    opened = {"n": 0}
+
+    def flip_at_gate(_tier):
+        flipper.needs_seed = True
+        return GATE_OK
+
+    def count_unwrap(_k):
+        opened["n"] += 1
+        return bytearray(32)
+
+    s_flip = Signer(SoftSE(pin=PIN), Policy(), FW, CAL, lambda lines: True,
+                    flip_at_gate, count_unwrap, lambda a, b: b"")
+    s_flip.authorize_and_sign(flipper, PIN)
+    check("a request cannot grow a need for the seed after the gate",
+          opened["n"] == 0)
 
     # And the ordinary case, unchanged: the attestation binds the digest.
     s_ok, log_ok = make()

@@ -24,9 +24,14 @@ whatever the camera happened to see. So the collector:
 
 A collector that quietly accepts a replacement chunk lets someone holding a
 second screen swap the middle of your transaction while the camera is running.
-The result is checked against a digest the sender computed over the whole
-payload, so a substituted chunk is a refusal rather than a different
-transaction.
+
+WHAT THE FRAMING DOES NOT DO. There is no digest inside the framing, so a
+sender who splits a payload and a receiver who reassembles it agree only that
+the pieces were consistent with each other. `digest()` exists for the two ends
+to compare BY EYE -- camera.emit prints it under the outgoing code -- and
+nothing in `feed` checks it. The real defence against a substituted payload is
+the confirmation screen: what the device signs is what it rendered, whatever
+route the bytes took to get there.
 """
 
 from __future__ import annotations
@@ -40,6 +45,14 @@ from dataclasses import dataclass, field
 # more, but a 240x240 display and a $8 webcam are the real constraints, and a
 # frame that will not scan costs more than an extra frame does.
 DEFAULT_CHUNK = 300
+
+# The largest transfer this device will collect. `total` comes off a QR code
+# in the camera's field of view, so it is attacker-chosen: without a ceiling,
+# one frame claiming `p1of99999999999999` pins that as the total and the next
+# call to `missing` tries to build a list with that many entries. On a Pi Zero
+# that is the scanner hanging or being killed, from a code somebody held up.
+# 4096 frames is a 1.2 MB payload, far past any PSBT this device renders.
+MAX_FRAMES = 4096
 
 _FRAME = re.compile(r"^p(\d+)of(\d+)\s*(.*)$", re.IGNORECASE | re.DOTALL)
 
@@ -80,16 +93,24 @@ class Collector:
         if not m:
             raise BadFrame(f"not a pNofM frame: {frame[:24]!r}")
         seq, total, data = int(m.group(1)), int(m.group(2)), m.group(3).strip()
-        if total < 1:
-            raise BadFrame("frame claims a total of zero")
+        # Every check on the frame happens BEFORE anything about it is kept.
+        # Pinning `total` first meant one malformed frame -- a total out of
+        # range, or an index outside it -- poisoned the collector for the rest
+        # of the scan: every legitimate frame that followed disagreed with the
+        # pinned total, and camera.scan() catches BadFrame and keeps going
+        # without resetting, so the transfer could never complete.
+        if not 1 <= total <= MAX_FRAMES:
+            raise BadFrame(
+                f"frame claims {total} parts; this device collects between 1 "
+                f"and {MAX_FRAMES}")
+        if not 1 <= seq <= total:
+            raise BadFrame(f"frame {seq} is outside 1..{total}")
         if self.total is None:
             self.total = total
         elif total != self.total:
             raise BadFrame(
                 f"frame says {total} parts, this transfer has {self.total}. "
                 f"Two different transfers are on screen; restart the scan.")
-        if not 1 <= seq <= total:
-            raise BadFrame(f"frame {seq} is outside 1..{total}")
         if seq in self.chunks and self.chunks[seq] != data:
             raise BadFrame(
                 f"frame {seq} arrived twice with different contents. Something "
