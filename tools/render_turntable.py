@@ -28,6 +28,14 @@ import tempfile
 import threading
 from pathlib import Path
 
+# The finish is PINNED, not inherited. viewer/model.js picks its accent from
+# DEFAULT_FINISH unless the page asks for one, so a committed render would
+# silently change identity the day somebody moves that default -- and these two
+# artefacts are the README's turntable and its link preview, which is where
+# most people meet the instrument. Ask for the one the drawing and the BOM
+# describe, and let the viewer default drift if it ever wants to.
+FINISH = "oxblood"
+
 ROOT = Path(__file__).resolve().parent.parent
 VIEWER = ROOT / "viewer"
 
@@ -381,7 +389,7 @@ def main() -> int:
              "--enable-unsafe-swiftshader", "--disable-dev-shm-usage",
              f"--window-size={args.size},{args.size}",
              f"--user-data-dir={profile}", "--virtual-time-budget=600000",
-             f"http://127.0.0.1:{port}/__turntable.html"],
+             f"http://127.0.0.1:{port}/__turntable.html?finish={FINISH}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         done.wait(args.timeout)
         proc.terminate()
