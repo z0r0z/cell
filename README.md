@@ -220,7 +220,7 @@ The seed itself is drawn from three sources XORed together: the kernel CSPRNG, t
 
 Worth reading before you trust it with anything. `BUILD.md` §16 carries the full threat model.
 
-**The PIN is what proves who.** The gate only proves that someone alive is present. The PIN is eight digits, required at both tiers, and the secure element's counter increments before it checks, so cutting power mid-guess costs an attempt instead of refunding one. Ten wrong and the device wipes. That is a firmware rule, not silicon. What the chip enforces is a counter that never decreases and stops permanently at 2,097,151, which is why the PIN is eight digits and not six.
+**The PIN is what proves who.** The gate only proves that someone alive is present. The PIN is eight digits. PIN-v2 derives each candidate through a random secret in the secure element, consuming a chip-counter use before comparison. A public PIN hash no longer suffices for raw verification commands. Firmware wipes after ten wrong entries; the separate hardware bound is the remaining Counter0 capacity, at most 2,097,151 uses shared with wrapping operations. The new provisioning policy rejects the old configuration. Physical validation remains required before release; see `VALIDATION.md`.
 
 **The attestation rests on firmware and the tamper seal.** It states that a device holding this key ran the gate; it does not prove the gate passed. This is the same assumption as a TPM quote or a Secure Enclave receipt. Someone who opens the case and extracts the key can sign records without bleeding, so treat it as raising the cost of faking a human. Co-signers register firmware hashes alongside keys, and `verify()` refuses builds it does not recognise.
 

@@ -398,7 +398,7 @@ class InputInfo:
     kind: str                       # p2pkh / p2sh / p2wpkh / p2wsh / p2sh-p2wpkh / p2tr
     script_code: bytes = b""        # what a v0 or legacy sighash covers
     witness_script: bytes = b""
-    amount_verified: bool = False   # by the parent transaction, or by BIP-341
+    amount_verified: bool = False   # by a txid-verified parent transaction
     ours: list[tuple[bytes, list[int]]] = field(default_factory=list)
     quorum_needed: int = 0
     quorum_size: int = 0
@@ -693,11 +693,11 @@ class PSBT:
                     f"device can tell your quorum from someone else's.")
         info.sigs_present = len(_get_all(m, IN_PARTIAL_SIG))
 
-        # Taproot's sighash covers every input's amount, so a witness_utxo is
-        # enough there. Everywhere else the parent transaction is mandatory.
-        if info.kind == "p2tr":
-            info.amount_verified = True
-        elif not verified:
+        # A Taproot signature commits to all input amounts, but an input
+        # merely labelled Taproot does not authenticate its witness_utxo.
+        # Keep the parent-verification fact separate; _check_input_amounts
+        # applies the transaction-wide rule before display or signing.
+        if info.kind != "p2tr" and not verified:
             raise BadPSBT(
                 f"input {i} supplies only a witness UTXO. A segwit v0 signature "
                 f"does not commit to the other inputs' amounts, so a host that "
@@ -860,9 +860,27 @@ class PSBT:
                 return True
         return False
 
+    def _check_input_amounts(self, infos: list[InputInfo]) -> None:
+        """Only all-Taproot transactions may use unauthenticated UTXOs.
+
+        A coordinator can omit a real v0 input's origin and label its UTXO
+        Taproot. Signing another v0 input would not commit to that claimed
+        amount. Repeating with the inputs reversed collects valid signatures
+        under two understated fee displays. Authenticate every parent in a
+        mixed transaction, including inputs this device will not sign.
+        """
+        if any(info.kind != "p2tr" for info in infos):
+            for info in infos:
+                if not info.amount_verified:
+                    raise BadPSBT(
+                        f"input {info.index}: include the full parent transaction "
+                        f"for every input when any input is not Taproot; "
+                        f"a witness UTXO alone cannot authenticate the fee")
+
     def summarize(self, root: ExtendedKey, network: str = "mainnet") -> Summary:
         """Everything the owner needs, computed from the seed and the bytes."""
         infos = [self._input_info(i, root) for i in range(len(self.tx.vin))]
+        self._check_input_amounts(infos)
         total_in = sum(i.amount for i in infos)
         total_out = sum(o.value for o in self.tx.vout)
         fee = total_in - total_out
@@ -1013,6 +1031,7 @@ class PSBT:
         per input. Hashing them in order gives a single stable value that
         changes if any input, output, amount or ordering changes.
         """
+        self._check_input_amounts(infos)
         h = hashlib.sha256(b"CELL/psbt/v1")
         for i, info in enumerate(infos):
             h.update(self.sighash(i, infos) if info.ours else b"\x00" * 32)
@@ -1028,8 +1047,11 @@ class PSBT:
         """
         if root.seckey is None:
             raise BadPSBT("cannot sign from a watch-only key")
-        if infos is None:
-            infos = [self._input_info(i, root) for i in range(len(self.tx.vin))]
+        fresh = [self._input_info(i, root) for i in range(len(self.tx.vin))]
+        self._check_input_amounts(fresh)
+        if infos is not None and infos != fresh:
+            raise BadPSBT("input analysis changed before signing")
+        infos = fresh
 
         added = 0
         for i, info in enumerate(infos):
@@ -1068,5 +1090,3 @@ class PSBT:
                         ec.der_encode(r, s) + bytes([ht])
                 added += 1
         return added
-
-

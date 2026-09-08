@@ -46,19 +46,18 @@ SLOT MAP. Written by tools/atecc_config.py, then locked.
              for the decoy
     Slot 6   PIN baseline        clear read, encrypted write under slot 4
              for the decoy
+    Slot 7   PIN derivation key  random, secret, metered, never writable
     Counter0 PIN attempts        monotonic, never decreases
     Counter1 operations          monotonic, for attestation anti-replay
 
 HOW THE PIN IS CHECKED, and why this way. The chip's CheckMac command compares
 a MAC the HOST computed against one the chip computes from a slot secret. That
 looks like the wrong instrument, because it means the host has to know the
-secret — but here that is exactly the mechanism. Slot 2 holds
-
-    HMAC-free, deliberately:  SHA-256("CELL/pin/v1" || serial || PIN)
-
-so a host that knows the PIN can compute it and a host that does not cannot.
-The serial number is in there so one precomputed table does not cover every
-CELL ever built; it is not a secret and does not need to be.
+secret — but here that is exactly the mechanism. Slots 2 and 4 hold PIN-v2
+verifiers: a domain-separated hash of the PIN input and an HMAC under slot
+7's random secret. Computing a candidate requires that metered HMAC, even
+when an attacker bypasses this driver and sends CheckMac directly. The
+public serial is domain separation, not a substitute for the random secret.
 
 A wrong PIN produces a different MAC, the chip says no, and — this is the part
 that matters — the chip ALSO withholds the authorisation that slot 0 requires
@@ -73,39 +72,21 @@ point slot 0's ReqAuth makes the derive fail and the device cannot open its
 own seed. The config and the driver contradicted each other and only one of
 them could ship.
 
-WHAT THE SILICON ENFORCES, AND WHAT IT DOES NOT. Worth being exact, because
-the difference is where somebody's money is.
+PIN-V2 CHARGES FOR DERIVATION. The chip consumes a Counter0 use to derive a
+candidate, before any comparison; the driver checks that delta. PIN slots
+refuse MAC and SHA-HMAC output via NoMac, preventing a generated response
+from authorizing CheckMac. The verifiers also cannot be computed from public
+PIN hashes offline. CheckMac Copy is disabled on every slot,
+and no destination permits DeriveKey or KDF writes. Startup checks the full
+slot policy, including unused destinations, and rejects the former policy.
 
-    Enforced by the chip:  the wrapping secrets never leave it.
-                           No derive without a fresh CheckMac against the PIN
-                           slot, so a PIN guess cannot be tested offline.
-                           Counter0 only ever increases; there is no reset
-                           command and this firmware does not have one either.
-                           The baseline cannot be moved without the PIN,
-                           because moving it is an encrypted write under the
-                           PIN key.
-                           At most 2**21 derives in the life of the part,
-                           which is what LimitedUse against Counter0 means.
+Ten failed entries still trigger a firmware wipe. The independent hardware
+bound is the remaining Counter0 capacity, at most 2,097,151 uses shared with
+wrapping operations, not ten guesses. This design relies on LimitedUse
+metering SHA-HMAC and on HMAC context export being forbidden. The software
+tests do not validate silicon: VALIDATION.md lists the required bench tests.
+This is an unreleased provisioning-format change; use a fresh chip.
 
-    NOT enforced by the chip:  the ten-attempt limit. There is no silicon
-                           retry counter on this part. `attempts_remaining()`
-                           is arithmetic this firmware does over a counter and
-                           a baseline, and firmware is what an attacker with
-                           the case open replaces.
-
-    What that leaves:      an attacker running their own firmware gets as many
-                           PIN guesses as Counter0 has left, which is 2**21 =
-                           2,097,151. That is why PIN_LENGTH is 8 and not 6.
-                           A six-digit PIN is 10**6 guesses and fits inside
-                           that budget with room to spare; an eight-digit PIN
-                           is 10**8 and does not, so the chip stops answering
-                           long before the keyspace is exhausted. The ten
-                           attempts protect an owner against someone who
-                           picks the device up. The counter ceiling is what
-                           protects them against someone who opens it.
-
-Both of those rest on the tamper seal in the end, exactly as BUILD.md 16 says
-of the attestation. This file does not claim more.
 """
 
 from __future__ import annotations
@@ -113,6 +94,7 @@ from __future__ import annotations
 import hashlib
 
 from se import MAX_PIN_ATTEMPTS, PinLockout, PinResult, SecureElement
+from atecc_pin_policy import SLOT_PIN_STRETCH, matches_pin_policy
 
 SLOT_WRAP = 0
 SLOT_ATTEST = 1
@@ -134,9 +116,8 @@ FOR_ROLE = {
 
 I2C_ADDRESS = 0x60
 
-# The counter is 21 bits. See the module docstring: this is the real ceiling on
-# how many PIN guesses any firmware can ever make against this chip, and it is
-# the reason the PIN is eight digits.
+# The counter is 21 bits. This bounds metered operations, not PIN guesses;
+# the PIN verification slots are a separate boundary (see module docstring).
 COUNTER_MAX = (1 << 21) - 1
 
 # cryptoauthlib's Python binding documents these by their C names but does not
@@ -175,15 +156,17 @@ class ConfigError(DeviceError):
     """
 
 
-def pin_key(pin: str, serial: bytes) -> bytes:
-    """The secret slot 2 (or slot 4) holds for this PIN, on this chip.
+def pin_input(pin: str, serial: bytes) -> bytes:
+    """Domain-separated input to the chip's metered PIN HMAC."""
+    return hashlib.sha256(b"CELL/pin/input/v2" + serial + pin.encode()).digest()
 
-    A pure function of the PIN and the chip's serial number, so the host can
-    recompute it at every unlock and nothing about it has to be stored. The
-    serial is public — it is there to stop one precomputed table covering
-    every CELL ever built, not to add secrecy.
-    """
-    return hashlib.sha256(b"CELL/pin/v1" + serial + pin.encode()).digest()
+
+def pin_key(pin: str, serial: bytes, chip_mac: bytes) -> bytes:
+    """Verifier for slots 2/4; requires slot 7's chip-secret contribution."""
+    if len(chip_mac) != 32:
+        raise DeviceError("PIN derivation requires a 32-byte chip HMAC")
+    return hashlib.sha256(b"CELL/pin/key/v2" + pin_input(pin, serial)
+                          + chip_mac).digest()
 
 
 def checkmac_response(slot_secret: bytes, challenge: bytes,
@@ -291,6 +274,12 @@ class ATECC608B(SecureElement):
         # adds no exposure that was not there. See _authorise().
         self._auth: tuple[PinResult, bytes] | None = None
         self.assert_locked(require_data_lock)
+        config = bytearray(128)
+        if cal.atcab_read_config_zone(config) != cal.Status.ATCA_SUCCESS:
+            raise ConfigError("could not read the PIN provisioning policy")
+        if not matches_pin_policy(config):
+            raise ConfigError("chip does not implement the PIN-v2 policy; "
+                              "configure a fresh chip with tools/atecc_config.py")
         self._serial = self._read_serial()
 
     # ---- configuration ----
@@ -367,13 +356,16 @@ class ATECC608B(SecureElement):
         every call — two probes and one that leaves the chip authorised — no
         matter which PIN was entered or whether either matched.
         """
+        self._auth = None
         if self.attempts_remaining() == 0:
             self.wipe()
             raise PinLockout("attempt counter exhausted; device wiped")
 
-        self._increment(COUNTER_PIN)                    # spend it first
-
-        key = pin_key(pin, self._serial)
+        before = self._counter(COUNTER_PIN)
+        contribution = self._hmac(SLOT_PIN_STRETCH, pin_input(pin, self._serial))
+        if self._counter(COUNTER_PIN) != before + 1:
+            raise ConfigError("PIN derivation did not consume one Counter0 use")
+        key = pin_key(pin, self._serial, contribution)
         is_normal = self._checkmac(SLOT_PIN, key)
         is_duress = self._checkmac(SLOT_PIN_DURESS, key)
         role = (PinResult.NORMAL if is_normal
@@ -443,12 +435,28 @@ class ATECC608B(SecureElement):
         only path that proves the owner still has them.
         """
         import os
+        for value in (pin, duress_pin):
+            if value is not None and (len(value) != 8 or not value.isascii()
+                                      or not value.isdigit()):
+                raise DeviceError("PINs must contain exactly eight ASCII digits")
         if duress_pin is not None and duress_pin == pin:
             raise DeviceError("the duress PIN must differ from the normal one")
-        self._write_slot(SLOT_PIN, pin_key(pin, self._serial))
+        # Provisioning may precede data lock, when SHA-HMAC is unavailable.
+        # Generate the random key once, write it, compute initial verifiers
+        # while it is in RAM, then discard it. Never persist it on the host.
+        import hmac
+        secret = bytearray(32)
+        if self._cal.atcab_random(secret) != self._cal.Status.ATCA_SUCCESS:
+            raise DeviceError("could not draw the PIN derivation secret")
+        self._write_slot(SLOT_PIN_STRETCH, secret)
+        def initial_key(value):
+            return pin_key(value, self._serial, hmac.new(
+                secret, pin_input(value, self._serial), hashlib.sha256).digest())
+        self._write_slot(SLOT_PIN, initial_key(pin))
         unreachable = os.urandom(32).hex()
         self._write_slot(SLOT_PIN_DURESS,
-                         pin_key(duress_pin or unreachable, self._serial))
+                         initial_key(duress_pin or unreachable))
+        secret[:] = bytes(32)
 
         # AND THE SLOTS NOTHING ELSE EVER WROTE. This was the only slot-secret
         # writer in the tree and it wrote two of the five: slots 0, 1 and 5
@@ -702,7 +710,7 @@ def _selftest() -> int:
     checks.append(("slot map is distinct",
                    len({SLOT_WRAP, SLOT_ATTEST, SLOT_PIN, SLOT_BASELINE,
                         SLOT_PIN_DURESS, SLOT_WRAP_DURESS,
-                        SLOT_BASELINE_DURESS}) == 7))
+                        SLOT_BASELINE_DURESS, SLOT_PIN_STRETCH}) == 8))
     checks.append(("I2C address matches BUILD.md", I2C_ADDRESS == 0x60))
 
     # Both roles must reach a different wrapping slot, or the duress PIN opens
@@ -732,9 +740,11 @@ def _selftest() -> int:
                    other_data_for(SLOT_PIN, sn)[7:11] == sn[4:8]
                    and other_data_for(SLOT_PIN, sn)[11:13] == sn[2:4]))
     checks.append(("the PIN key is device-bound",
-                   pin_key("12345678", sn) != pin_key("12345678", bytes(9))))
+                   pin_key("12345678", sn, bytes(32))
+                   != pin_key("12345678", bytes(9), bytes(32))))
     checks.append(("...and PIN-bound",
-                   pin_key("12345678", sn) != pin_key("87654321", sn)))
+                   pin_key("12345678", sn, bytes(32))
+                   != pin_key("87654321", sn, bytes(32))))
 
     # Eight digits is not a style choice — see the module docstring.
     checks.append(("an 8-digit keyspace outlives the counter",

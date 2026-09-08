@@ -59,6 +59,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "firmware"))
 
+from atecc_pin_policy import SLOT_PIN_STRETCH, matches_pin_policy
+
 CONFIG_LEN = 128
 
 # --------------------------------------------------------------------------
@@ -239,16 +241,16 @@ class SlotPolicy:
 
 def _secret_key(*, req_auth: int | None = None, limited_use: bool = False,
                 write_config: int = WRITE_NEVER,
-                write_key: int = 0) -> tuple[SlotConfig, KeyConfig]:
+                write_key: int = 0, no_mac: bool = False) -> tuple[SlotConfig, KeyConfig]:
     """A slot holding a secret used only as an HMAC key.
 
     IsSecret with EncryptRead clear means the contents never come back out by
-    any command. NoMac stays clear because these keys exist to be used by MAC,
-    CheckMac and SHA-HMAC -- setting it would lock the chip out of the one
-    thing every one of these slots is for.
+    clear reads. ReadKey=1 disables CheckMac Copy. PIN verifiers are derived
+    under slot 7's random, metered key, so raw verification commands cannot
+    test a PIN guess computed without that chip operation.
     """
-    return (SlotConfig(is_secret=True, encrypt_read=False, no_mac=False,
-                       limited_use=limited_use, read_key=0,
+    return (SlotConfig(is_secret=True, encrypt_read=False, no_mac=no_mac,
+                       limited_use=limited_use, read_key=1,
                        write_key=write_key, write_config=write_config),
             KeyConfig(key_type=KEYTYPE_SHA, lockable=True,
                       req_auth=req_auth is not None,
@@ -269,7 +271,7 @@ def _public_counter(write_key: int) -> tuple[SlotConfig, KeyConfig]:
     and a host that does not cannot -- which is the property the docstring in
     se_atecc.py claimed before anything enforced it.
     """
-    return (SlotConfig(is_secret=False, encrypt_read=False, read_key=0,
+    return (SlotConfig(is_secret=False, encrypt_read=False, read_key=1,
                        write_key=write_key, write_config=WRITE_ENCRYPT),
             KeyConfig(key_type=KEYTYPE_SHA, lockable=True))
 
@@ -282,7 +284,7 @@ SLOT_BASELINE = 3
 SLOT_PIN_DURESS = 4
 SLOT_WRAP_DURESS = 5
 SLOT_BASELINE_DURESS = 6
-FIRST_UNUSED = 7
+FIRST_UNUSED = 8
 
 COUNTER_PIN = 0
 COUNTER_OPS = 1
@@ -302,8 +304,9 @@ def _policy() -> list[SlotPolicy]:
     dwrap_sc, dwrap_kc = _secret_key(req_auth=SLOT_PIN_DURESS, limited_use=True,
                                      write_config=WRITE_ALWAYS)
     att_sc, att_kc = _secret_key()
-    pin_sc, pin_kc = _secret_key()
-    dpin_sc, dpin_kc = _secret_key()
+    pin_sc, pin_kc = _secret_key(no_mac=True)
+    dpin_sc, dpin_kc = _secret_key(no_mac=True)
+    stretch_sc, stretch_kc = _secret_key(limited_use=True)
     base_sc, base_kc = _public_counter(write_key=SLOT_PIN)
     dbase_sc, dbase_kc = _public_counter(write_key=SLOT_PIN_DURESS)
     unused_sc, unused_kc = _secret_key()
@@ -320,9 +323,9 @@ def _policy() -> list[SlotPolicy]:
                    "answer at the idle screen, with nothing unlocked.",
                    att_sc, att_kc),
         SlotPolicy(SLOT_PIN, "pin",
-                   "normal PIN key. Its secret is HMAC(PIN), so a host that "
-                   "knows the PIN can satisfy the CheckMac and one that does "
-                   "not cannot. This IS the PIN check.",
+                   "normal PIN verifier, derived through the random "
+                   "metered key in slot 7. Raw CheckMac cannot bypass "
+                   "the cost of computing a candidate verifier.",
                    pin_sc, pin_kc),
         SlotPolicy(SLOT_BASELINE, "baseline",
                    "attempt counter's value at the last correct normal PIN.",
@@ -342,6 +345,10 @@ def _policy() -> list[SlotPolicy]:
                    "budget exactly as the normal one does or the difference "
                    "is readable afterwards.",
                    dbase_sc, dbase_kc),
+        SlotPolicy(SLOT_PIN_STRETCH, "pin-stretch",
+                   "random PIN derivation key. Every candidate requires "
+                   "a Counter0-metered HMAC; reads, copies and later "
+                   "writes are disabled.", stretch_sc, stretch_kc),
     ]
     for s in range(FIRST_UNUSED, 16):
         out.append(SlotPolicy(s, "unused",
@@ -438,6 +445,9 @@ def invariants(cfg: bytes) -> list[tuple[str, bool]]:
     def want(label, cond):
         out.append((label, bool(cond)))
 
+    want("the full slot policy matches the PIN-v2 runtime contract",
+         matches_pin_policy(cfg))
+
     # The one that matters most.
     want("slot 0 cannot derive without a CheckMac against slot 2",
          kc[SLOT_WRAP].req_auth and kc[SLOT_WRAP].auth_key == SLOT_PIN)
@@ -452,8 +462,12 @@ def invariants(cfg: bytes) -> list[tuple[str, bool]]:
               SLOT_WRAP_DURESS):
         want(f"slot {s} is secret and never read out",
              sc[s].is_secret and not sc[s].encrypt_read)
-        want(f"slot {s} is usable as a MAC key",
-             not sc[s].no_mac and kc[s].key_type == KEYTYPE_SHA)
+        if s in (SLOT_PIN, SLOT_PIN_DURESS):
+            want(f"slot {s} refuses MAC output (CheckMac verification only)",
+                 sc[s].no_mac and kc[s].key_type == KEYTYPE_SHA)
+        else:
+            want(f"slot {s} is usable as a MAC key",
+                 not sc[s].no_mac and kc[s].key_type == KEYTYPE_SHA)
 
     # The rollback this part was bought to prevent.
     want("the normal baseline can only be written under the PIN key",
@@ -487,7 +501,7 @@ def invariants(cfg: bytes) -> list[tuple[str, bool]]:
          and sc[SLOT_WRAP] == sc[SLOT_WRAP_DURESS])
 
     # Nothing left as scratch space.
-    want("slots 7-15 are unusable",
+    want("slots 8-15 are unusable",
          all(sc[s].is_secret and sc[s].write_config == WRITE_NEVER
              for s in range(FIRST_UNUSED, 16)))
     return out
@@ -735,9 +749,10 @@ def _behaviour(cal, cfg: bytes) -> bool:
     def refuses(label, fn):
         try:
             status = fn()
-            rows.append((label, status != cal.Status.ATCA_SUCCESS))
+            rows.append((label, status == cal.Status.ATCA_EXECUTION_ERROR))
         except Exception:                                   # noqa: BLE001
-            rows.append((label, True))
+            # A missing API or transport exception is not a chip refusal.
+            rows.append((label, False))
 
     buf = bytearray(32)
     refuses("the wrapping secret cannot be read out",
@@ -749,6 +764,9 @@ def _behaviour(cal, cfg: bytes) -> bool:
     refuses("the PIN key cannot be read out",
             lambda: cal.atcab_read_zone(ATCA_ZONE_DATA, SLOT_PIN, 0, 0,
                                         buf, 32))
+    refuses("the PIN derivation secret cannot be read out",
+            lambda: cal.atcab_read_zone(ATCA_ZONE_DATA, SLOT_PIN_STRETCH,
+                                        0, 0, buf, 32))
 
     # The line BUILD.md 12 is about. With no CheckMac in this session, slot 0
     # must refuse to act as an HMAC key at all.
@@ -762,6 +780,51 @@ def _behaviour(cal, cfg: bytes) -> bool:
 
     _, data_locked = lock_state(cfg)
     if data_locked:
+        for slot in (SLOT_PIN, SLOT_PIN_DURESS):
+            for operation in ("MAC", "SHA-HMAC"):
+                try:
+                    status = (cal.atcab_mac(0, slot, bytes(32), bytearray(32))
+                              if operation == "MAC" else
+                              cal.atcab_sha_hmac(b"probe", 5, slot,
+                                  bytearray(32), SHA_MODE_TARGET_TEMPKEY))
+                    good = status == cal.Status.ATCA_EXECUTION_ERROR
+                except Exception:
+                    good = False
+                rows.append((f"slot {slot} refuses {operation} response export", good))
+        # This is deliberately a positive operation as well as a counter
+        # check: library/transport failure must never count as evidence of
+        # protection. Repeating checks that a fresh use costs again.
+        for trial in range(2):
+            before, after = cal.AtcaReference(0), cal.AtcaReference(0)
+            try:
+                good = cal.atcab_counter_read(0, before) == cal.Status.ATCA_SUCCESS
+                message = b"CELL/pin/probe/v2" + bytes([trial])
+                good &= cal.atcab_sha_hmac(message, len(message),
+                    SLOT_PIN_STRETCH, bytearray(32), SHA_MODE_TARGET_TEMPKEY
+                    ) == cal.Status.ATCA_SUCCESS
+                good &= cal.atcab_counter_read(0, after) == cal.Status.ATCA_SUCCESS
+                good &= after.value == before.value + 1
+            except Exception:
+                good = False
+            rows.append((f"PIN derivation {trial + 1} consumes one Counter0 use",
+                         good))
+        try:
+            started = cal.atcab_sha_base(4, SLOT_PIN_STRETCH, b"",
+                bytearray(32), cal.AtcaReference(32)) == cal.Status.ATCA_SUCCESS
+            context = bytearray(128)
+            status = cal.atcab_sha_read_context(context, cal.AtcaReference(128))
+            rows.append(("a live HMAC context cannot be exported",
+                         started and status == cal.Status.ATCA_EXECUTION_ERROR))
+            # End must invalidate the keyed state. A second End could turn
+            # one charged start into an unbounded candidate generator.
+            good = cal.atcab_sha_hmac(b"probe", 5, SLOT_PIN_STRETCH,
+                bytearray(32), SHA_MODE_TARGET_TEMPKEY) == cal.Status.ATCA_SUCCESS
+            status = cal.atcab_sha_base(5, 1, b"x", bytearray(32),
+                                        cal.AtcaReference(32))
+            rows.append(("a completed HMAC cannot be finalized again",
+                         good and status == cal.Status.ATCA_EXECUTION_ERROR))
+        except Exception:
+            rows.append(("HMAC state isolation probes completed", False))
         refuses("the baseline refuses a clear write",
                 lambda: cal.atcab_write_zone(ATCA_ZONE_DATA, SLOT_BASELINE,
                                              0, 0, bytes(32), 32))

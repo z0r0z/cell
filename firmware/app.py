@@ -62,12 +62,9 @@ from policy import Policy, Tier
 from se import PinLockout, SecureElement
 from wallet import Provisioning, WalletError
 
-# Eight, not six. The ATECC608B has no silicon retry counter — the ten-attempt
-# limit is firmware arithmetic over a monotonic counter, and firmware is what
-# an attacker with the case open replaces. What the chip DOES enforce is that
-# its counter stops at 2**21, so a keyspace larger than that is one the part
-# runs out before an attacker does. 10**6 fits inside 2,097,151; 10**8 does
-# not. See the module docstring in se_atecc.py.
+# Eight digits are the input format. PIN-v2 charges a chip-counter use for
+# each candidate derivation; the ten-attempt wipe remains firmware policy.
+# See se_atecc.py and VALIDATION.md for the hardware validation requirements.
 PIN_LENGTH = 8
 
 

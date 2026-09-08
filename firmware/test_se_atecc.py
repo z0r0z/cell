@@ -45,7 +45,8 @@ from se_atecc import (ATCA_ZONE_DATA, COUNTER_PIN, LOCK_ZONE_CONFIG,
                       SLOT_BASELINE, SLOT_BASELINE_DURESS, SLOT_PIN,
                       SLOT_PIN_DURESS, SLOT_WRAP, SLOT_WRAP_DURESS,
                       ATECC608B, ConfigError, DeviceError, checkmac_response,
-                      pin_key)
+                      pin_key, pin_input, SLOT_PIN_STRETCH, COUNTER_MAX)
+from atecc_pin_policy import EXPECTED_SLOTS
 
 PIN, DPIN = "12345678", "87654321"
 
@@ -89,10 +90,10 @@ class AtcaReference:
 # bits are supposed to buy, so the driver is tested against the chip it will
 # actually meet rather than against an unconfigured one.
 SECRET_SLOTS = {SLOT_WRAP, SLOT_ATTEST, SLOT_PIN, SLOT_PIN_DURESS,
-                SLOT_WRAP_DURESS}
+                SLOT_WRAP_DURESS, SLOT_PIN_STRETCH}
 REQ_AUTH = {SLOT_WRAP: SLOT_PIN, SLOT_WRAP_DURESS: SLOT_PIN_DURESS}
 ENCRYPTED_WRITE = {SLOT_BASELINE: SLOT_PIN, SLOT_BASELINE_DURESS: SLOT_PIN_DURESS}
-METERED = {SLOT_WRAP}
+METERED = {SLOT_WRAP, SLOT_WRAP_DURESS, SLOT_PIN_STRETCH}
 
 
 class FakeATECC:
@@ -134,6 +135,10 @@ class FakeATECC:
         # subsequent CheckMac, as the real part clears TempKey.
         self.authorised: int | None = None
         self.pin, self.duress_pin = pin, duress_pin
+        self.config = bytearray(128)
+        for i, (slot, key) in enumerate(EXPECTED_SLOTS):
+            self.config[20 + 2*i:22 + 2*i] = slot.to_bytes(2, "little")
+            self.config[96 + 2*i:98 + 2*i] = key.to_bytes(2, "little")
 
     def _hmac(self, slot, message):
         return hmac.new(self.slots[slot], bytes(message), hashlib.sha256).digest()
@@ -162,6 +167,10 @@ class FakeATECC:
 
     def atcab_read_serial_number(self, serial_number):
         serial_number[:] = self.serial
+        return _Status.ATCA_SUCCESS
+
+    def atcab_read_config_zone(self, config_data):
+        config_data[:] = self.config
         return _Status.ATCA_SUCCESS
 
     def atcab_counter_read(self, counter_id, counter_value):
@@ -198,6 +207,9 @@ class FakeATECC:
         if self.data_locked and slot in ENCRYPTED_WRITE:
             # WriteConfig = Encrypt. A clear write is exactly the rollback the
             # baseline slots exist to prevent.
+            return _Status.ATCA_EXECUTION_ERROR
+        if self.data_locked and slot in (SLOT_ATTEST, SLOT_PIN,
+                                         SLOT_PIN_DURESS, SLOT_PIN_STRETCH):
             return _Status.ATCA_EXECUTION_ERROR
         self.writes.append(slot)
         self.slots[slot] = bytes(data)
@@ -237,6 +249,8 @@ class FakeATECC:
             raise AssertionError(f"unexpected SHA target {target}")
         if data_size != len(bytes(data)):
             raise AssertionError("data_size does not match the data")
+        if self.config[20 + 2*key_slot] & 0x10:  # SlotConfig.NoMac
+            return _Status.ATCA_EXECUTION_ERROR
         if self.locked and key_slot in REQ_AUTH:
             # KeyConfig.ReqAuth. This is the line BUILD.md 12 is about, and
             # modelling it here is what makes the driver's CheckMac necessary
@@ -244,6 +258,8 @@ class FakeATECC:
             if self.authorised != REQ_AUTH[key_slot]:
                 return _Status.ATCA_EXECUTION_ERROR
         if self.locked and key_slot in METERED:
+            if self.counters[0] >= COUNTER_MAX:
+                return _Status.ATCA_EXECUTION_ERROR
             self.counters[0] += 1           # SlotConfig.LimitedUse, Counter0
         self.hmac_calls += 1
         # The real part computes this inside the chip under a key that never
@@ -251,6 +267,17 @@ class FakeATECC:
         # difference between the two and exactly why this is not a security
         # test.
         digest[:] = self._hmac(key_slot, data)
+        return _Status.ATCA_SUCCESS
+
+    def atcab_mac(self, mode, key_id, challenge, digest):
+        if mode != 0:
+            return _Status.ATCA_BAD_PARAM
+        if self.config[20 + 2*key_id] & 0x10:
+            return _Status.ATCA_EXECUTION_ERROR
+        # MAC mode 0 omits optional serial/OTP fields. The attacker supplies
+        # those same zeros in CheckMac's OtherData, as the command permits.
+        digest[:] = checkmac_response(self.slots[key_id], bytes(challenge),
+            bytes([0x08, 0, key_id, 0]) + bytes(9), self.serial)
         return _Status.ATCA_SUCCESS
 
     def atcab_random(self, random_number):
@@ -275,7 +302,8 @@ def api_conformance() -> list[tuple[str, bool]]:
     for name in ("atcab_init", "atcab_is_locked", "atcab_read_serial_number",
                  "atcab_counter_read", "atcab_counter_increment",
                  "atcab_read_zone", "atcab_write_zone", "atcab_write_enc",
-                 "atcab_checkmac", "atcab_sha_hmac", "atcab_random"):
+                 "atcab_checkmac", "atcab_sha_hmac", "atcab_random",
+                 "atcab_read_config_zone", "atcab_mac"):
         theirs = getattr(real, name, None)
         if theirs is None:
             out.append((f"cryptoauthlib has {name}", False))
@@ -413,6 +441,79 @@ def main() -> int:
               "atecc_config" in str(e))
 
     # ---- the PIN -------------------------------------------------------
+    print("\n PIN-v2 raw-command regressions")
+    from se_atecc import other_data_for
+    se, fake = device()
+    for slot, correct in ((SLOT_PIN, PIN), (SLOT_PIN_DURESS, DPIN)):
+        challenge = bytes(range(32))
+        other = other_data_for(slot, fake.serial)
+        public_key = hashlib.sha256(
+            b"CELL/pin/v1" + fake.serial + correct.encode()).digest()
+        response = checkmac_response(public_key, challenge, other, fake.serial)
+        check(f"slot {slot}: old public PIN key cannot authorize raw CheckMac",
+              fake.atcab_checkmac(0, slot, challenge, response, other)
+              == _Status.ATCA_CHECKMAC_VERIFY_FAILED)
+        # NoMac is essential even for a high-entropy key: a raw MAC response
+        # could itself satisfy CheckMac, without any guess at all.
+        leaked = bytearray(32)
+        check(f"slot {slot}: PIN-slot HMAC output is refused",
+              fake.atcab_sha_hmac(b"attacker", 8, slot, leaked,
+                                 SHA_MODE_TARGET_TEMPKEY)
+              == _Status.ATCA_EXECUTION_ERROR)
+        check(f"slot {slot}: reusable MAC response is refused",
+              fake.atcab_mac(0, slot, challenge, leaked)
+              == _Status.ATCA_EXECUTION_ERROR)
+        fake.config[20 + 2*slot] &= ~0x10
+        check(f"slot {slot}: removing NoMac reproduces response replay",
+              fake.atcab_mac(0, slot, challenge, leaked) == _Status.ATCA_SUCCESS
+              and fake.atcab_checkmac(0, slot, challenge, leaked,
+                  bytes([0x08, 0, slot, 0]) + bytes(9))
+              == _Status.ATCA_SUCCESS)
+        fake.config[20 + 2*slot] |= 0x10
+        before = fake.counters[0]
+        result = bytearray(32)
+        msg = pin_input(correct, fake.serial)
+        check(f"slot {slot}: raw candidate derivation is metered",
+              fake.atcab_sha_hmac(msg, 32, SLOT_PIN_STRETCH, result,
+                                  SHA_MODE_TARGET_TEMPKEY) == _Status.ATCA_SUCCESS
+              and fake.counters[0] == before + 1)
+        candidate = pin_key(correct, fake.serial, bytes(result))
+        check(f"slot {slot}: the metered candidate authorizes normally",
+              fake.atcab_checkmac(0, slot, challenge,
+                  checkmac_response(candidate, challenge, other, fake.serial),
+                  other) == _Status.ATCA_SUCCESS)
+    fake.counters[0] = COUNTER_MAX
+    check("raw PIN derivation stops at counter exhaustion",
+          fake.atcab_sha_hmac(bytes(32), 32, SLOT_PIN_STRETCH, bytearray(32),
+                              SHA_MODE_TARGET_TEMPKEY)
+          == _Status.ATCA_EXECUTION_ERROR)
+    se, fake = device()
+    for slot in (SLOT_PIN_STRETCH, SLOT_PIN, SLOT_PIN_DURESS):
+        check(f"slot {slot}: locked verifier/key cannot be replaced",
+              fake.atcab_write_zone(ATCA_ZONE_DATA, slot, 0, 0, bytes(32), 32)
+              == _Status.ATCA_EXECUTION_ERROR)
+    for offset, bit in ((34, 0x20), (34, 0x01), (35, 0x80), (111, 0x02)):
+        _, old = device()
+        old.config[offset] ^= bit
+        refuses(f"unsafe derivation policy byte {offset} rejected at startup",
+                lambda: ATECC608B(lib=old), ConfigError)
+    _, old = device()
+    old.config[20:22] = (0x00A0).to_bytes(2, "little")
+    refuses("old CheckMac-copy configuration is refused",
+            lambda: ATECC608B(lib=old), ConfigError)
+    se, fake = device()
+    original_hmac = fake.atcab_sha_hmac
+    def unmetered(*args):
+        count = fake.counters[0]
+        status = original_hmac(*args)
+        fake.counters[0] = count
+        return status
+    fake.atcab_sha_hmac = unmetered
+    refuses("driver rejects an HMAC that did not spend an attempt",
+            lambda: se.verify_pin(PIN), ConfigError)
+    check("unmetered output never reaches PIN comparison",
+          not fake.checkmac_calls)
+
     print("\n the attempt counter")
     se, fake = device()
     check("a fresh device has the full budget",
@@ -437,14 +538,14 @@ def main() -> int:
     # bill of materials to prevent -- passed it.
     se_o, fake_o = device()
     order: list[str] = []
-    _inc, _cm = fake_o.atcab_counter_increment, fake_o.atcab_checkmac
-    fake_o.atcab_counter_increment = (
-        lambda *a, _f=_inc: (order.append("count"), _f(*a))[1])
+    _derive, _cm = fake_o.atcab_sha_hmac, fake_o.atcab_checkmac
+    fake_o.atcab_sha_hmac = (
+        lambda *a, _f=_derive: (order.append("metered derive"), _f(*a))[1])
     fake_o.atcab_checkmac = (
         lambda *a, _f=_cm: (order.append("checkmac"), _f(*a))[1])
     se_o.verify_pin("00000000")
     check("...before the comparison ran, not after",
-          order[:1] == ["count"] and "checkmac" in order)
+          order[:1] == ["metered derive"] and "checkmac" in order)
 
     # The counter is spent first, so a power cut mid-attempt still costs one.
     # Modelled by dropping the driver and rebuilding it against the same chip.

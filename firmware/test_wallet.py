@@ -660,6 +660,57 @@ def main() -> int:
     check("taproot accepts a witness_utxo (BIP-341 covers every amount)",
           ok_tr.signatures == 1)
 
+    # The same unsigned transaction, shown twice with opposite origins
+    # omitted. Each real input is 1 BTC, but the omitted one claims to be a
+    # 1,000-sat Taproot UTXO. Both v0 signatures would still verify against
+    # the real inputs, spending 1 BTC in fees instead of the displayed 1,000
+    # sat. Exercise both PSBT encodings and every non-Taproot signer.
+    fake_spk = addresses.p2tr_script(ec.taproot_tweak_pubkey(root.pubkey[1:])[0])
+    for st in ("p2wpkh", "p2sh-p2wpkh", "p2pkh"):
+        honest = build_psbt(root, st, in_amounts=(100_000_000, 100_000_000),
+                            send=100_000, change=99_900_000)
+        for version, encode in ((0, lambda b: b), (2, to_v2)):
+            for hidden in (0, 1):
+                hostile = PSBT.parse(encode(honest))
+                stale = [hostile._input_info(i, root) for i in range(2)]
+                m = hostile.inputs[hidden]
+                # Preserve BIP-370 fields, but remove all authenticated
+                # descriptions and key origins of the concealed input.
+                for key in list(m):
+                    if key[0] in (psbtmod.IN_NON_WITNESS_UTXO,
+                                   psbtmod.IN_BIP32_DERIVATION,
+                                   psbtmod.IN_REDEEM_SCRIPT):
+                        del m[key]
+                m[_kv(psbtmod.IN_WITNESS_UTXO)] = (
+                    (1000).to_bytes(8, "little")
+                    + ser_compact(len(fake_spk)) + fake_spk)
+                label = f"v{version} {st} hidden input {hidden}"
+                confirmed = []
+                before = se.counter()
+                refuses(label + " refused before approval",
+                        lambda: run_psbt(hostile.serialize(), se, prov,
+                            confirm=lambda lines: confirmed.append(lines) or True),
+                        psbtmod.BadPSBT)
+                check(label + " did not confirm or attest",
+                      not confirmed and se.counter() == before)
+                refuses(label + " direct sign refused",
+                        lambda: hostile.sign(root), psbtmod.BadPSBT)
+                refuses(label + " cached analysis refused",
+                        lambda: hostile.sign(root, stale), psbtmod.BadPSBT)
+
+    for version, encode in ((0, lambda b: b), (2, to_v2)):
+        pure_tr = encode(build_psbt(root, "p2tr", include_parent=False,
+                                   in_amounts=(200_000, 200_000),
+                                   send=150_000, change=245_000))
+        res_tr = run_psbt(pure_tr, se, prov)
+        signed_tr = PSBT.parse(res_tr.psbt)
+        infos_tr = [signed_tr._input_info(i, root) for i in range(2)]
+        check(f"v{version} all-Taproot witness-only signatures verify",
+              res_tr.signatures == 2 and all(ec.schnorr_verify(
+                  signed_tr.sighash(i, infos_tr), infos_tr[i].script_pubkey[2:],
+                  signed_tr.inputs[i][_kv(psbtmod.IN_TAP_KEY_SIG)])
+                  for i in range(2)))
+
     # ---- FOOTGUN: change substitution ---------------------------------
     print("\n footgun: change substitution")
     stolen = PSBT.parse(build_psbt(root, "p2wpkh"))
